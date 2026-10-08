@@ -11,6 +11,7 @@ import { installTemplateManager } from "./sally-template-manager.js";
 import { installTasks } from "./sally-tasks.js";
 import { proposeCourseChanges, answerCourseQuestion } from "./sally-proposal.js";
 import { bindSelection } from "./sally-selection.js";
+import { installUserImport } from "./sally-user-import.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getFirestore, collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, query, setDoc, updateDoc, where, arrayUnion } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { deleteObject, getDownloadURL, getStorage, listAll, ref, uploadBytes } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -22,8 +23,8 @@ const app = getDefaultFirebaseApp();
 const auth = getAuth(app); const db = getFirestore(app); const storage = getStorage(app);
 const COLLECTION = "SallyBrownSessions";
 const el = (id) => document.getElementById(id);
-const state = { targetInventory: null, workflowBusy: false, courseView: "model", marking: false, selection: null, user: null, access: null, sessions: [], activeId: "", filter: "active", plan: [], planHash: "", inventory: null, attachments: [], automation: false, viewport: { width: 1440, height: 900 }, unsubscribe: [], eventOff: null };
-state.chatThread="model";state.chatDrafts={model:"",target:""};
+const state = { targetInventory: null, workflowBusy: false, courseView: "target", marking: false, selection: null, user: null, access: null, sessions: [], activeId: "", filter: "active", plan: [], planHash: "", inventory: null, attachments: [], automation: false, viewport: { width: 1440, height: 900 }, unsubscribe: [], eventOff: null };
+state.chatThread="unified";state.chatDrafts={unified:""};
 
 function canonicalRole(value = "") { return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s_-]+/g, ""); }
 async function findProfile(user) {
@@ -51,7 +52,8 @@ function toast(message) { const node = el("sallyToast"); node.textContent = mess
 function activeSession() { return state.sessions.find((item) => item.id === state.activeId) || null; }
 function safeText(value, max = 4000) { return sanitizeTextInput(String(value || "").slice(0, max)); }
 function nowIso() { return new Date().toISOString(); }
-function draftFromForm() { state.chatDrafts[state.chatThread]=el("sallyBrief").value;return { brief: el("sallyBrief").value, chatDrafts:{...state.chatDrafts},chatThread:state.chatThread, modelCourse: safeText(el("sallySourceCourse").value, 1000), sourceCourse: safeText(el("sallySourceCourse").value, 1000), targetCourse: safeText(el("sallyTargetCourse").value, 1000) }; }
+function bounded(promise,milliseconds,message){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),milliseconds);})]).finally(()=>clearTimeout(timer));}
+function draftFromForm() { state.chatDrafts.unified=el("sallyBrief").value;return { brief: el("sallyBrief").value, chatDrafts:{...state.chatDrafts},chatThread:"unified", modelCourse: el("sallyNoModel").checked?"":safeText(el("sallySourceCourse").value, 1000), sourceCourse:el("sallyNoModel").checked?"":safeText(el("sallySourceCourse").value, 1000), targetCourse: safeText(el("sallyTargetCourse").value, 1000),modelDisabled:el("sallyNoModel").checked }; }
 function entryThread(entry){return entry.thread||entry.courseView||(["plan","execution","checkpoint"].includes(entry.kind)?"target":"model");}
 async function selectChat(thread){
   if(state.conversations){await state.conversations.selectThread(thread);return;}
@@ -68,16 +70,11 @@ async function selectChat(thread){
   }catch(error){workflowMessage(error.message);toast(error.message);}finally{state.workflowBusy=false;}
 }
 function renderChatScope(){
-  for(const [view,id] of [["model","sallyChatModel"],["target","sallyChatTarget"]]){el(id).setAttribute("aria-selected",String(view===state.chatThread));el(id).tabIndex=view===state.chatThread?0:-1;}
-  el("sallyChatPanel").setAttribute("aria-labelledby",state.chatThread==="model"?"sallyChatModel":"sallyChatTarget");
-  el("sallyChatScope").textContent=state.chatThread==="model"?"Modelo · Solo lectura. No requiere curso destino.":"Destino · Consulta o prepara cambios con aprobación. El modelo nunca se modifica.";
-  el("sallySourceCourse").closest("label").hidden=state.chatThread!=="model";
-  el("sallyTargetCourse").closest("label").hidden=state.chatThread!=="target";
-  el("sallyBrief").placeholder=state.chatThread==="model"?"Define el contexto para investigar el curso modelo…":"Define el contexto y los objetivos del curso destino…";
+  const noModel=el("sallyNoModel").checked;el("sallySourceCourse").disabled=noModel;el("sallyOpenModelEndpoint").disabled=noModel;
   el("sallyBuildPlan").title="Enviar mensaje";el("sallyBuildPlan").setAttribute("aria-label","Enviar mensaje");
   renderConversation();
 }
-function operationLabel(type) { return ({ inspect_course: "Analizar curso", create_or_update_section: "Crear o actualizar secciones", create_or_update_resource: "Insertar contenido y HTML", upload_asset: "Adjuntar archivos e imágenes", create_quiz: "Crear cuestionario", reorder_item: "Ordenar elementos", verify_result: "Verificar resultado" })[type] || type; }
+function operationLabel(type) { return ({ inspect_course: "Analizar curso", create_or_update_course:"Crear o actualizar curso",create_or_update_section: "Crear o actualizar secciones", create_or_update_resource: "Insertar contenido y HTML",create_moodle_module:"Crear módulo Moodle",create_meta_link:"Configurar metacurso",browser_workflow:"Acción administrativa Moodle", upload_asset: "Adjuntar archivos e imágenes", create_quiz: "Crear cuestionario", reorder_item: "Ordenar elementos", verify_result: "Verificar resultado" })[type] || type; }
 
 async function invoke(command, payload = {}) {
   if (!state.remote) throw new Error("El navegador remoto aún no está conectado.");
@@ -119,20 +116,20 @@ async function createSession() {
 }
 function selectSession(id) {
   if(state.workflowBusy)return toast("Espera a que termine el análisis antes de cambiar de sesión.");
-  state.conversations?.stash();state.conversationId=legacyId("model");state.approvalBinding=null;state.selectedTemplate=null;
+  state.conversations?.stash();state.conversationId=legacyId("unified");state.approvalBinding=null;state.selectedTemplate=null;
   state.remote?.setSession(id);
   el("sallyBrowserImage").hidden=true;el("sallyEmptyBrowser").hidden=false;
   state.selection=null;state.marking=false;el("sallyMark").hidden=true;
   state.activeId = id; const session = activeSession();
   state.lastFrameAt=0;
   state.checkpointId=session?.checkpointId||"";
-  state.chatThread=session?.chatThread==="target"?"target":"model";
-  state.chatDrafts={model:"",target:"",...(session?.chatDrafts||{model:session?.brief||""})};
+  state.chatThread="unified";
+  state.chatDrafts={unified:session?.brief||"",...(session?.chatDrafts||{})};
   state.history=[];state.historyLoading=true;renderConversation();void restoreSessionContent(session);
   rememberSession(localStorage,state.user.uid,id);
   state.filter=session?.archived?"archived":"active";
   document.querySelectorAll("[data-session-filter]").forEach(button=>button.classList.toggle("is-active",button.dataset.sessionFilter===state.filter));
-  el("sallyBrief").value = state.chatDrafts[state.chatThread] || ""; el("sallySourceCourse").value = session?.modelCourse || session?.sourceCourse || ""; el("sallyTargetCourse").value = session?.targetCourse || "";
+  el("sallyBrief").value = state.chatDrafts.unified || ""; el("sallySourceCourse").value = session?.modelCourse || session?.sourceCourse || ""; el("sallyTargetCourse").value = session?.targetCourse || "";el("sallyNoModel").checked=Boolean(session?.modelDisabled);
   renderChatScope();
   el("sallyMoodleUrl").value = session?.moodleUrl || session?.sourceCourse || ""; state.plan = []; state.planHash = ""; state.inventory = null; state.targetInventory=null; state.attachments = [];
   renderSessions(); renderPlan(); renderInventory(); renderAttachments(); updateApprovalUi(session?.status || "draft"); closeDrawers();
@@ -142,7 +139,7 @@ async function saveSession(patch = {}) {
   // Conversation content stays in immutable private history, never in the project document.
   const project={},content={};
   for(const [key,value] of Object.entries(patch)){
-    if(["modelCourse","sourceCourse","targetCourse","moodleUrl"].includes(key))project[key]=value;
+    if(["modelCourse","sourceCourse","targetCourse","moodleUrl","modelDisabled"].includes(key))project[key]=value;
     else content[key]=value;
   }
   if(Object.keys(content).length)await recordConversation({kind:"state",patch:content,text:""});
@@ -157,7 +154,6 @@ async function sessionAction(id, action) {
 
 function workflowMessage(message) {
   el("sallyApprovalHint").textContent=message;
-  el("sallyWorkflowStatus").textContent=message;
 }
 async function recordConversation(entry){
   if(state.historyLoading)throw Error("Espera a que se carguen las conversaciones.");
@@ -208,7 +204,7 @@ async function restoreSessionContent(session){
       if(brief&&!state.history.some(e=>conversationOf(e)===legacyId(thread)&&e.kind==="state"))state.history.push({id:`inherited-draft-${thread}`,conversationId:legacyId(thread),thread,kind:"state",createdAt:session.createdAt||"",patch:{brief},text:""});
     }
     if(state.activeId===id){state.historyLoading=false;await state.conversations?.restore();}
-  }catch(error){if(state.activeId===id)toast("No se pudo cargar el historial: "+error.message);}
+  }catch(error){if(state.activeId===id){state.historyLoading=false;renderConversation();toast("No se pudo cargar el historial: "+error.message);}}
 }
 function renderTemplateList(){
   if(state.templateManager){state.templateManager.refresh();return;}
@@ -359,13 +355,14 @@ async function uploadFiles(files) {
 }
 function setBusy(busy) { el("sallyBrowserLoading").hidden = !busy; }
 function addEvidence(snapshot) { if (!snapshot?.image) return; const img = document.createElement("img"); img.src = snapshot.image; img.alt = snapshot.title || "Evidencia Moodle"; el("sallyEvidenceStrip").prepend(img); while (el("sallyEvidenceStrip").children.length > 8) el("sallyEvidenceStrip").lastElementChild.remove(); }
-function applySnapshot(snapshot) { if (!snapshot?.image || state.marking || (snapshot.capturedAt&&snapshot.capturedAt<=(state.lastFrameAt||0))) return; state.lastFrameAt=snapshot.capturedAt||0;state.viewport = snapshot.viewport || state.viewport; const image = el("sallyBrowserImage"); image.src = snapshot.image; image.hidden = false; el("sallyEmptyBrowser").hidden = true; el("sallyBrowserTitle").textContent = snapshot.title || snapshot.url; el("sallyMoodleUrl").value = snapshot.url || el("sallyMoodleUrl").value; el("sallyBrowserState").textContent = "Conectado"; if (["inspection","before-operation","after-operation"].includes(snapshot.reason)) addEvidence(snapshot); }
+function applySnapshot(snapshot) { if (!snapshot?.image || state.marking || (snapshot.capturedAt&&snapshot.capturedAt<=(state.lastFrameAt||0))) return; state.lastFrameAt=snapshot.capturedAt||0;state.viewport = snapshot.viewport || state.viewport; const image = el("sallyBrowserImage"); image.src = snapshot.image; image.hidden = false; el("sallyEmptyBrowser").hidden = true; if(snapshot.title||snapshot.url)el("sallyBrowserTitle").textContent = snapshot.title || snapshot.url; el("sallyMoodleUrl").value = snapshot.url || el("sallyMoodleUrl").value; el("sallyBrowserState").textContent = "Conectado"; if (["inspection","before-operation","after-operation"].includes(snapshot.reason)) addEvidence(snapshot); }
 async function openMoodle(url) {
   if(!state.automation){showDesktopRequired();throw new Error("El navegador remoto no está disponible. Recarga la página.");}
   setBusy(true);
   try {
+    const rect=el("sallyBrowserStage").getBoundingClientRect();
     const snapshot=await invoke("start",
-      {url,action:"open",modelUrl:el("sallySourceCourse").value,targetUrl:el("sallyTargetCourse").value,courseView:state.courseView});
+      {url,action:"open",modelUrl:el("sallySourceCourse").value,targetUrl:el("sallyTargetCourse").value,courseView:state.courseView,viewport:{width:Math.round(rect.width),height:Math.round(rect.height)}});
     applySnapshot(snapshot);
     await saveSession({moodleUrl:url});
   } finally {setBusy(false);}
@@ -454,13 +451,20 @@ function closeDrawers() { document.querySelectorAll(".sally-pane.is-open").forEa
 function bindUi() {
   state.conversations=installConversations({state,el,record:recordConversation,readJson:path=>readPrivateJson(storage,path),toast,render:()=>{renderChatScope();renderPlan();renderInventory();renderAttachments();renderContentLibrary();renderTemplateList();updateApprovalUi("draft");}});
   state.tasks=installTasks({state,el,record:recordConversation,saveContext:saveSession,templates:()=>state.templateManager?.items()||[],uploadFiles,toast});
+  installUserImport({state,el,toast});
+  document.querySelectorAll("[data-sally-prompt]").forEach(button=>button.addEventListener("click",()=>{el("sallyBrief").value=button.dataset.sallyPrompt;el("sallyBrief").focus();el("sallyQuickMenu").open=false;}));
+  el("sallyImportShortcut").addEventListener("click",()=>el("sallyOpenUserImport").click());
+  el("sallyImportShortcut").addEventListener("click",()=>{el("sallyQuickMenu").open=false;});
+  el("sallyToggleEndpoints").addEventListener("click",()=>{const panel=el("sallyEndpoints"),show=panel.hidden;panel.hidden=!show;el("sallyToggleEndpoints").setAttribute("aria-expanded",String(show));el("sallyToggleEndpoints").querySelector("span").textContent=show?"Ocultar modelo y destino":"Modelo y destino";});
+  el("sallyConversationMenu").querySelectorAll("button").forEach(button=>button.addEventListener("click",()=>{el("sallyConversationMenu").open=false;}));
+  document.addEventListener("click",event=>{for(const id of ["sallyConversationMenu","sallyQuickMenu"]){const menu=el(id);if(menu?.open&&!menu.contains(event.target))menu.open=false;}});
+  document.addEventListener("keydown",event=>{if(event.key==="Escape"){el("sallyConversationMenu").open=false;el("sallyQuickMenu").open=false;}});
   bindContentLibrary();
-  for(const [thread,id] of [["model","sallyChatModel"],["target","sallyChatTarget"]]){el(id).onclick=()=>selectChat(thread);el(id).onkeydown=event=>{if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){event.preventDefault();const next=event.key==="Home"?"model":event.key==="End"?"target":thread==="model"?"target":"model";selectChat(next);el(next==="model"?"sallyChatModel":"sallyChatTarget").focus();}};}
   el("sallyNewSession").addEventListener("click", () => void createSession()); el("sallySessionSearch").addEventListener("input", renderSessions);
   document.querySelectorAll("[data-session-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.sessionFilter; document.querySelectorAll("[data-session-filter]").forEach((b) => b.classList.toggle("is-active", b === button)); renderSessions(); }));
   el("sallySessionList").addEventListener("click", (event) => { const menuButton = event.target.closest("[data-menu-session]"); if (menuButton) { event.stopPropagation(); const menu = document.querySelector(`[data-session-menu="${menuButton.dataset.menuSession}"]`); document.querySelectorAll(".sally-session__menu").forEach((node) => { if (node !== menu) node.hidden = true; }); menu.hidden = !menu.hidden; return; } const action = event.target.closest("[data-session-action]"); const card = event.target.closest("[data-session-id]"); if (action && card) { event.stopPropagation(); void sessionAction(card.dataset.sessionId, action.dataset.sessionAction); return; } if (card) selectSession(card.dataset.sessionId); });
-  ["sallyBrief","sallySourceCourse","sallyTargetCourse"].forEach((id) => el(id).addEventListener("change", () => { const patch = draftFromForm(); state.planHash = ""; void saveSession({ ...patch, approvedPlanHash: "", status: "draft" }); updateApprovalUi("draft"); }));
-  el("sallyBuildPlan").addEventListener("click", buildPlan); el("sallyFiles").addEventListener("change", (event) => { void uploadFiles([...event.target.files]); event.target.value = ""; }); el("sallyApprove").addEventListener("click", () => void approvePlan()); el("sallyExecute").addEventListener("click", () => void executePlan()); el("sallyInspect").addEventListener("click", () => void inspectCourse());
+  ["sallySourceCourse","sallyTargetCourse","sallyNoModel"].forEach((id) => el(id).addEventListener("change", () => {renderChatScope();const patch = draftFromForm(); state.planHash = ""; void saveSession({ ...patch, approvedPlanHash: "", status: "draft" }); updateApprovalUi("draft"); }));
+  el("sallyBuildPlan").addEventListener("click",()=>void state.tasks.send().catch(error=>toast(error.message)));el("sallyBrief").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();void state.tasks.send().catch(error=>toast(error.message));}}); el("sallyFiles").addEventListener("change", (event) => { void uploadFiles([...event.target.files]); event.target.value = ""; }); el("sallyApprove").addEventListener("click", () => void approvePlan()); el("sallyExecute").addEventListener("click", () => void executePlan()); el("sallyInspect").addEventListener("click", () => void inspectCourse());
   el("sallyUrlForm").addEventListener("submit", (event) => { event.preventDefault(); void openMoodle(el("sallyMoodleUrl").value).catch(error=>{workflowMessage(error.message);toast(error.message);}); });
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", async () => { try { applySnapshot(await invoke("navigate", { action: button.dataset.nav })); } catch (error) { toast(error.message); } }));
   document.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", async () => { try { await invoke("control", { action: button.dataset.control }); el("sallyBrowserState").textContent = button.dataset.control === "resume" ? "Ejecutando" : button.dataset.control === "pause" ? "Pausado" : "Cancelado"; } catch (error) { toast(error.message); } }));
@@ -471,8 +475,21 @@ function bindUi() {
   bindSelection({ state, invoke, toast, save:saveSession, changed: () => {state.planHash="";updateApprovalUi("draft");} });
   el("sallyViewModel").addEventListener("click", () => void switchCourse("model").catch(error=>{workflowMessage(error.message);toast(error.message);}));
   el("sallyViewTarget").addEventListener("click", () => void switchCourse("target").catch(error=>{workflowMessage(error.message);toast(error.message);}));
+  el("sallyOpenModelEndpoint").addEventListener("click",()=>void switchCourse("model").catch(error=>toast(error.message)));
+  el("sallyOpenTargetEndpoint").addEventListener("click",()=>void switchCourse("target").catch(error=>toast(error.message)));
   document.querySelectorAll(".sally-app button[aria-label]").forEach(button => button.title ||= button.getAttribute("aria-label"));
   el("sallyBrowserStage").addEventListener("paste",event=>{if(image.hidden||state.marking)return;event.preventDefault();const text=event.clipboardData?.getData("text/plain");if(text)void invoke("input",{kind:"text",text}).then(applySnapshot).catch(error=>toast(error.message));});
+  let resizeTimer;
+  state.browserResizeObserver=new ResizeObserver(()=>{
+    clearTimeout(resizeTimer);
+    if(!state.remote||image.hidden||state.workflowBusy)return;
+    resizeTimer=setTimeout(()=>{
+      const rect=el("sallyBrowserStage").getBoundingClientRect(),viewport={width:Math.round(rect.width),height:Math.round(rect.height)};
+      if(Math.abs(viewport.width-state.viewport.width)<3&&Math.abs(viewport.height-state.viewport.height)<3)return;
+      void invoke("resize",{viewport}).then(snapshot=>{if(snapshot?.image)applySnapshot(snapshot);}).catch(()=>{});
+    },250);
+  });
+  state.browserResizeObserver.observe(el("sallyBrowserStage"));
   installResizers();
 }
 
@@ -481,17 +498,15 @@ function showDesktopRequired() {
   el("sallyEmptyBrowser").querySelector("h2").textContent="No se pudo conectar con el servidor";
   el("sallyEmptyBrowser").querySelector("p").textContent="Recarga la página para volver a conectar. No necesitas Electron ni preparar el inventario manualmente.";
   workflowMessage("El navegador remoto no está disponible. Recarga para volver a intentarlo.");
-  el("sallyDesktopGuide").hidden=false;
 }
 async function initialize(user, access) {
   state.user = user; state.access = access; bindUi();
   state.remote=createRemoteBrowser({getUser:()=>auth.currentUser,onEvent:event=>{
     if(event.type==="snapshot")applySnapshot(event.payload);
-    if(event.type==="command-error"){
-      const detail=event.payload;
-      const panel=el("sallyDiagnostic"),message=el("sallyDiagnosticMessage");
-      if(panel&&message){panel.hidden=false;message.textContent=`${detail.command} · HTTP ${detail.status}: ${detail.message}`;}
-    }
+  if(event.type==="command-error"){
+    const detail=event.payload;
+    toast(`${detail.command} · HTTP ${detail.status}: ${detail.message}`);
+  }
     if(event.type==="inventory"&&state.workflowBusy){
       const inventory=event.payload;
       if(!state.analysisCompletedViews?.has(inventory.courseView)){
@@ -499,7 +514,9 @@ async function initialize(user, access) {
         renderInventory();
       }
     }
-    if(event.type==="status"){el("sallyBrowserState").textContent=event.payload?.state||"Activo";if(event.payload?.message&&state.workflowBusy)workflowMessage(event.payload.message);}
+    if(event.type==="status"){el("sallyBrowserState").textContent=event.payload?.state||"Activo";if(event.payload?.message){state.tasks?.activity(event.payload.message);if(state.workflowBusy)workflowMessage(event.payload.message);}}
+    if(event.type==="realtime-state"){const mode=event.payload?.state;el("sallyBrowserLatency").textContent=mode==="connected"?`Tiempo real · ${event.payload.fps||10} FPS`:mode==="reconnecting"?"Reconectando…":"Modo HTTP";}
+    if(event.type==="latency")el("sallyBrowserLatency").textContent=`Tiempo real · ${Math.round(event.payload.milliseconds)} ms`;
     if(event.type==="disconnected"){el("sallyBrowserImage").hidden=true;el("sallyEmptyBrowser").hidden=false;}
     if(event.type==="error"||event.type==="connection-error")workflowMessage(event.payload?.message||"No se pudo conectar.");
   }});
@@ -510,11 +527,12 @@ async function initialize(user, access) {
   el("sallyRuntimeDot").classList.toggle("is-online", state.automation); el("sallyRuntimeLabel").textContent = state.automation ? "Navegador remoto · conectado" : "Servidor no disponible"; el("sallyDesktopOnlyNotice").hidden = state.automation;
   el("sallyBuildPlan").disabled=false;
   if(!state.automation)showDesktopRequired();
-  state.eventOff = ()=>{state.remote.dispose();state.templateManager?.dispose();state.tasks?.dispose();};
+  state.eventOff = ()=>{state.browserResizeObserver?.disconnect();state.remote.dispose();state.templateManager?.dispose();state.tasks?.dispose();};
   document.body.classList.remove("sally-locked"); el("sallyAccessGate").remove(); el("sallyApp").hidden = false; updateApprovalUi(activeSession()?.status||"draft");
 }
 
 let authResolved = false;
-onAuthStateChanged(auth, async (user) => { if (authResolved) { if (!user || user.uid !== state.user?.uid) { state.unsubscribe.forEach(off=>off()); state.eventOff?.(); redirectDenied(); } return; } authResolved = true; if (!user) return redirectDenied(); const access = await authorizePage(user).catch(() => null); if (!access) return redirectDenied(); await initialize(user, access).catch((error) => { console.error("[SallyBrown] Initialization failed", error); redirectDenied(); }); });
+function showAccessError(message){const gate=el("sallyAccessGate");const status=el("sallyAccessStatus");if(!gate)return;gate.classList.add("is-error");if(status)status.textContent=message;}
+onAuthStateChanged(auth, async (user) => { if (authResolved) { if (!user || user.uid !== state.user?.uid) { state.unsubscribe.forEach(off=>off()); state.eventOff?.(); redirectDenied(); } return; } authResolved = true; if (!user) return redirectDenied(); let access;try{access=await bounded(authorizePage(user),12000,"La verificación de acceso tardó demasiado. Recarga para intentarlo de nuevo.");}catch(error){showAccessError(error.message||"No se pudo verificar el acceso.");return;}if(!access)return redirectDenied(); await initialize(user, access).catch((error) => { console.error("[SallyBrown] Initialization failed", error);showAccessError(error.message||"No se pudo iniciar Sally. Recarga para volver a intentarlo."); }); });
 setTimeout(() => { if (!authResolved) redirectDenied(); }, 7000);
 window.addEventListener("pagehide", () => { state.unsubscribe.forEach((off) => off()); state.eventOff?.(); });

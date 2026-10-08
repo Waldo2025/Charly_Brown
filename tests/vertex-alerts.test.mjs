@@ -22,6 +22,7 @@ test('A failed request logs once; successful image fallback does not count as a 
     let handler, calls = 0;
     const logs = [];
     const ctx = vm.createContext({ Buffer, GEMINI_PROXY_PAYLOAD_LIMIT_BYTES: 100000,
+      GEMINI_PROVIDER_TIMEOUT_MS: 105000, PIGPEN_CONTENT_TIMEOUT_MS: 480000,
       vertexFailureDiagnostic: diagnostics.vertexFailureDiagnostic,
       console: { warn: value => logs.push(JSON.parse(value)) },
       geminiApp: { post: (_path, fn) => { handler = fn; } }, asyncRoute: x => x,

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { sourceFunctions } from "./helpers/snoopy-source.mjs";
 
 globalThis.window = {
   location: { origin: "https://charly-brown.firebaseapp.com" },
@@ -20,6 +22,22 @@ globalThis.caches = {
 };
 
 const { PodcasterPlaybackController } = await import("../public/podcaster/podcaster-playback-controller.js");
+
+test("local media proxy fallback keeps the storage path on Firebase Hosting", () => {
+  const source = sourceFunctions(new URL("../public/podcaster/podcaster.js", import.meta.url), ["resolveAlternateMediaProxyUrl"]);
+  const context = vm.createContext({
+    URL,
+    window: { location: { origin: "http://127.0.0.1:5010" } },
+    getRemoteApiBase: () => "https://charly-brown.web.app/api",
+    buildApiUrlFromBase: (base, path) => `${base}${path.slice(4)}`
+  });
+  vm.runInContext(source, context);
+  const path = "podcaster%2Fsessions%2Fs1%2Faudio%2Fvoice.wav";
+  assert.equal(
+    context.resolveAlternateMediaProxyUrl(`http://127.0.0.1:8787/api/assets/proxy-media?storagePath=${path}`),
+    `https://charly-brown.web.app/api/assets/proxy-media?storagePath=${path}`
+  );
+});
 
 test("persistent private scene videos resolve to a signed URL before fetching", async () => {
   const controller = new PodcasterPlaybackController();
@@ -85,6 +103,35 @@ test("local persistent hydration fetches the authenticated proxy instead of a St
     assert.match(result, /^blob:/);
     assert.equal(fetchedUrl, privateProxy);
     assert.equal(fetchedHeaders.Authorization, "Bearer local-test");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("a missing local proxy retries the Firebase API before marking audio absent", async () => {
+  const controller = new PodcasterPlaybackController();
+  const localUrl = "http://127.0.0.1:8787/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Faudio%2Fvoice.wav";
+  const remoteUrl = "https://charly-brown.web.app/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Faudio%2Fvoice.wav";
+  const requests = [];
+  let stale = false;
+  controller.state.config = { mediaLoadMode: "blob" };
+  controller.deps = {
+    preferAuthenticatedMediaProxy: true,
+    getAuthHeaders: async () => ({ Authorization: "Bearer test-token" }),
+    resolveAlternateMediaProxyUrl: () => remoteUrl,
+    markStaleProxyMediaUrl: () => { stale = true; }
+  };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push([String(url), options.headers?.Authorization]);
+    return String(url) === localUrl
+      ? new Response("missing locally", { status: 404 })
+      : new Response(new Blob(["audio-bytes"], { type: "audio/wav" }), { status: 200 });
+  };
+  try {
+    assert.match(await controller.getBlobUrl(localUrl, { persistent: true }), /^blob:/);
+    assert.deepEqual(requests, [[localUrl, "Bearer test-token"], [remoteUrl, "Bearer test-token"]]);
+    assert.equal(stale, false);
   } finally {
     globalThis.fetch = previousFetch;
   }

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Mesa de experimentación científica</title><desc id="desc">Taller luminoso con mesa despejada para un simulador educativo.</desc>
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#dff5f2"/><stop offset="1" stop-color="#f5e9d5"/></linearGradient><linearGradient id="wall" y2="1"><stop stop-color="#effbfb"/><stop offset="1" stop-color="#cbe6e5"/></linearGradient></defs>
+  <rect width="1600" height="900" fill="url(#bg)"/><rect width="1600" height="610" fill="url(#wall)"/>
+  <path d="M0 620h1600v280H0z" fill="#b77d5c"/><path d="M0 650h1600" stroke="#8f604b" stroke-width="10" opacity=".5"/>
+  <g opacity=".52" fill="none" stroke="#75b8b7" stroke-width="10"><rect x="130" y="115" width="280" height="240" rx="18"/><path d="M270 115v240M130 235h280"/><rect x="1210" y="135" width="210" height="180" rx="16"/></g>
+  <g fill="#4c9298" opacity=".6"><circle cx="1030" cy="180" r="28"/><circle cx="1088" cy="180" r="28"/><circle cx="1146" cy="180" r="28"/></g>
+  <path d="M260 680h1080l-80 150H340z" fill="#d49b6d" opacity=".9"/><path d="M355 820v80M1245 820v80" stroke="#704b3c" stroke-width="24"/>
+</svg>

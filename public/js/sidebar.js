@@ -483,6 +483,9 @@ async function initializeSidebarAuth() {
         try { role = await resolveUserRole(user); } catch (_) { role = null; }
       }
       applySidebarRoleVisibility(role);
+      import("./savings-client.js").then(({ mountSavingsHeader }) => mountSavingsHeader(user)).catch((error) => {
+        console.warn("[sidebar] Estado de ahorro no disponible:", error);
+      });
       await applySidebarApprovalVisibility(user, role);
       const analisisLink = document.getElementById("analisisEditorialLink");
       if (analisisLink && !analisisLink.dataset.roleVisibility) {
@@ -524,7 +527,6 @@ function initSidebar() {
   initializeSidebarGroups(sidebar);
   initializeSidebarResizer(sidebar);
 
-  // Sidebar colapsado por defecto
   sidebar.classList.remove("show");
   document.body.classList.add("sidebar-collapsed");
 

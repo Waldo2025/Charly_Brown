@@ -3,6 +3,10 @@ const { CloudTasksClient } = require("@google-cloud/tasks");
 const { PROJECT_ID, REGION } = require("./common.js");
 
 const QUEUES = Object.freeze({
+  charly: "charly-production",
+  science: "science-production",
+  pigpen: "pigpen-generation",
+  marcie: "marcie-production",
   montage: "podcaster-montage",
   veo: "podcaster-veo"
 });
@@ -24,6 +28,7 @@ function buildHttpTaskRequest({
   serviceAccountEmail,
   payload = {},
   scheduleDelaySeconds = 0,
+  maxScheduleDelaySeconds = 3600,
   dispatchDeadlineSeconds = 60
 } = {}) {
   if (!queue || !Object.values(QUEUES).includes(queue)) throw new Error("cloud_task_queue_invalid");
@@ -49,7 +54,7 @@ function buildHttpTaskRequest({
       }
     }
   };
-  const delay = Math.max(0, Math.min(3600, Number(scheduleDelaySeconds) || 0));
+  const delay = Math.max(0, Math.min(Math.min(28 * 86400, maxScheduleDelaySeconds), Number(scheduleDelaySeconds) || 0));
   if (delay > 0) {
     request.task.scheduleTime = { seconds: Math.floor(Date.now() / 1000) + Math.ceil(delay) };
   }

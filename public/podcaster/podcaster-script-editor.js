@@ -102,7 +102,7 @@ function buildReferencePreviewImageMarkup(reference = null, altText = "Imagen de
   const sourceAttribute = /^(?:data|blob):/i.test(source)
     ? `src="${escapeHtml(source)}"`
     : `data-reference-image-src="${escapeHtml(source)}"`;
-  return `<img ${sourceAttribute} alt="${escapeHtml(alt)}" loading="lazy" decoding="async">`;
+  return `<img ${sourceAttribute} alt="${escapeHtml(alt)}" loading="eager" decoding="async">`;
 }
 
 /**
@@ -644,14 +644,12 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
 }
 
 /**
- * Builds the inspector-specific script row editor card markup.
+ * Builds the inspector "Referencia visual" panel card for the selected row.
  */
-function buildInspectorScriptRowMarkup(session, row, index = -1) {
+function buildInspectorReferenceRowMarkup(session, row, index = -1) {
   const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
   const panelCopy = window.getPanelModeCopy(session);
   const isVideo = panelCopy.videoMode === true;
-  const sceneTextFields = normalizeSceneTextFields(row, isVideo ? { syncCaptionWithVoiceOver: true } : {});
-  const activeVisualProposal = window.resolveActiveVisualProposal(row);
   const rowId = String(row?.id || "").trim();
   const speaker = String(row?.speaker || "").trim() || "Host A";
   const rowReference = ((panelCopy.videoMode || panelCopy.videoPodcastMode) && rowId)
@@ -664,14 +662,8 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
     ? buildPodcastReferenceSectionsMarkup(session, speaker)
     : "";
   return `
-    <article class="script-row script-row-inspector" data-row-id="${escapeHtml(row.id)}">
-      <div class="script-row-head script-row-head-inspector">
-        <div class="row-head-left">
-          <span class="row-chip row-chip-scene">Escena ${safeIndex + 1}</span>
-          ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
-          ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
-        </div>
-        ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
+    <div class="inspector-reference-card" data-row-id="${escapeHtml(row.id)}">
+      ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
       ? `
             <div class="row-actions row-actions-inspector">
               <button class="row-icon-btn" type="button" data-action="attach-row-reference-image" data-row-id="${escapeHtml(row.id)}" title="Adjuntar imagen o video de referencia de la escena" aria-label="Adjuntar imagen o video de referencia de la escena">
@@ -683,7 +675,6 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
             </div>
           `
       : ""}
-      </div>
       ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
       ? `
           <div class="inspector-row-reference">
@@ -710,6 +701,28 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
         `
       : ""}
       ${podcastReferenceSections}
+    </div>
+  `;
+}
+
+/**
+ * Builds the inspector-specific script row editor card markup.
+ */
+function buildInspectorScriptRowMarkup(session, row, index = -1) {
+  const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
+  const panelCopy = window.getPanelModeCopy(session);
+  const isVideo = panelCopy.videoMode === true;
+  const sceneTextFields = normalizeSceneTextFields(row, isVideo ? { syncCaptionWithVoiceOver: true } : {});
+  const activeVisualProposal = window.resolveActiveVisualProposal(row);
+  return `
+    <article class="script-row script-row-inspector" data-row-id="${escapeHtml(row.id)}">
+      <div class="script-row-head script-row-head-inspector">
+        <div class="row-head-left">
+          <span class="row-chip row-chip-scene">Escena ${safeIndex + 1}</span>
+          ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
+          ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
+        </div>
+      </div>
       ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
       ? `
           <label class="row-field wide inspector-in-scene-text-field">
@@ -1162,6 +1175,7 @@ const podcasterScriptEditorApi = {
   updateSingleScriptRow,
   buildScriptRowEditorMarkup,
   buildInspectorScriptRowMarkup,
+  buildInspectorReferenceRowMarkup,
   buildReferencePreviewImageMarkup,
   buildBlankScriptRow,
   shouldHandleScriptFieldOnInput,

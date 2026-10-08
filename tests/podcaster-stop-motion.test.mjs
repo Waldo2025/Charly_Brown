@@ -119,13 +119,15 @@ test("preflight acepta secuencias completas y señala el frame exacto que falta"
 
 test("los nombres Unicode se serializan como headers ASCII y el backend los recupera", () => {
   const source = readFileSync(new URL("../public/podcaster/podcaster-media-replacement.js", import.meta.url), "utf8");
+  const uploader = readFileSync(new URL("../public/podcaster/podcaster-resumable-upload.js", import.meta.url), "utf8");
   const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
   const originalName = "niño 🎬 final.png";
   const encodedName = encodeURIComponent(originalName);
   const headers = new Headers({ "X-File-Name": encodedName });
 
   assert.equal(decodeURIComponent(headers.get("X-File-Name")), originalName);
-  assert.match(source, /"X-File-Name":\s*encodeHttpHeaderValue\(uploadFile\.name,\s*"scene-media"\)/);
+  assert.match(source, /uploadPodcasterAsset\(uploadFile,/);
+  assert.match(uploader, /"X-File-Name":\s*encodeURIComponent\(fileName\)/);
   assert.match(backend, /decodedFileName = decodeURIComponent\(encodedFileName\)/);
 });
 
@@ -134,7 +136,7 @@ test("las imágenes locales se limpian y redimensionan antes de subirlas", () =>
   assert.match(source, /import\s*\{\s*optimizeRasterImage\s*\}/);
   assert.match(source, /targetWidth:\s*1280/);
   assert.match(source, /forceReencode:\s*true/);
-  assert.match(source, /body:\s*uploadFile/);
+  assert.match(source, /uploadPodcasterAsset\(uploadFile,/);
 });
 
 test("el modal rehidrata una secuencia existente y sus controles de movimiento", () => {
@@ -145,6 +147,51 @@ test("el modal rehidrata una secuencia existente y sus controles de movimiento",
   assert.match(source, /function\s+hydrateMovementControls\s*\(/);
   assert.match(source, /visualEffectsMap\?\.\[key\]/);
   assert.match(source, /const restoredStopMotion = hydrateExistingStopMotion\(currentEditingRowId,\s*session\)/);
+  // La rehidratación debe aceptar todas las formas de sesión y conservar el ritmo.
+  assert.match(source, /podcastStudioUiState\?\.dialogueVideosByRowId\?\.\[key\]\?\.stopMotion/);
+  assert.match(source, /buildTimelineRuntimeEntries\(activeSession\)/);
+  assert.match(source, /normalizeStopMotion\?\.\(\s*resolvePersistedStopMotion\(key,\s*activeSession\)\s*\)/);
+  assert.match(source, /if\s*\(restoredStopMotion\)\s*\{[\s\S]{0,220}?setReplacementSectionTab\("format"\)/);
+  assert.match(source, /frameWeights:\s*normalizeStopMotionFrameWeightsForPersistence|const frameWeights = normalizeStopMotionFrameWeightsForPersistence\(\)/);
+});
+
+test("un fallo de subida descarta el recurso anterior y bloquea la confirmación", () => {
+  const source = readFileSync(new URL("../public/podcaster/podcaster-media-replacement.js", import.meta.url), "utf8");
+  // Las subidas van serializadas, así que las variables de "último archivo"
+  // pertenecen al intento que falló. Dejarlas llenas hacía aplicar la subida
+  // previa y el guardado terminaba en "ruta de almacenamiento válida" o
+  // "archivo no está disponible todavía", seguido de "Se seleccionó otro recurso".
+  const catchBlock = source.match(/Exception in FilePond upload process:[\s\S]{0,900}?if \(stopMotionFrameId\) \{/);
+  assert.ok(catchBlock, "el manejo de error de FilePond debe existir");
+  assert.equal((catchBlock[0].match(/uploaded(?:MediaUrl|StoragePath|MediaType) = null;/g) || []).length, 3);
+  assert.match(source, /El archivo no terminó de subirse\. Reintenta la subida antes de confirmar el reemplazo\./);
+  assert.match(source, /El archivo no quedó guardado en la nube\. Vuelve a subirlo y luego confirma el reemplazo\./);
+  assert.doesNotMatch(source, /if \(!mediaUrl \|\| !currentEditingRowId\) \{/);
+  // Cada frame de stop motion es un objeto nuevo: pasar la subida anterior como
+  // reemplazo hacía que el backend borrara el archivo de otro frame (404 al
+  // cargar la escena). El backend además sólo borra rutas de la propia sesión.
+  assert.match(source, /previousStoragePath: isStopMotionMode\(\) \? "" : String\(uploadedStoragePath \|\| ""\)\.trim\(\)/);
+  const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
+  assert.match(backend, /podcaster\/sessions\/\$\{sessionSlug\}\//);
+});
+
+test("un reemplazo manual adopta la revisión remota de la escena", () => {
+  const source = readFileSync(new URL("../public/podcaster/podcaster-media-replacement.js", import.meta.url), "utf8");
+  const podcaster = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+  // El archivo se subó y confirmó en este momento, así que la selección remota
+  // pasa a ser la base. Sin esto, una escena cuya copia local divergió de la nube
+  // queda rechazada para siempre con "Otra edición cambió esta escena…".
+  assert.match(source, /context\.manualReplacement = true;/);
+  assert.equal((podcaster.match(/manualReplacement === true/g) || []).length, 1);
+  assert.match(podcaster, /if \(adoptRemoteBase \|\| !Number\.isFinite\(cloudRowMs\)/);
+  // La generación asíncrona (Veo, voz) puede terminar tarde sobre una selección
+  // más nueva: conservaba el descarte estricto.
+  const generationCommit = podcaster.slice(
+    podcaster.indexOf("async function persistLatestDialogueVideoForRow"),
+    podcaster.indexOf("window.PodcasterSceneMedia =")
+  );
+  assert.ok(generationCommit.length > 0);
+  assert.doesNotMatch(generationCommit, /manualReplacement/);
 });
 
 test("sincroniza todos los frames con golpes musicales conservando el orden", () => {
@@ -211,32 +258,69 @@ test("las etiquetas Ken Burns traducen correctamente la dirección percibida", (
 test("video-player usa el mismo recorrido Ken Burns completo que el editor", () => {
   const player = readFileSync(new URL("../public/video-player.html", import.meta.url), "utf8");
   const home = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
+  const editor = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
   const playback = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
-  assert.match(player, /data-cache-href="podcaster\.css"/);
-  assert.match(player, /data-cache-src="podcaster\/podcaster-scene-media-render-spec\.js"/);
-  assert.match(player, /data-cache-src="podcaster\/podcaster-playback-controller\.js"/);
-  assert.match(home, /podcaster-playback-controller\.js\?v=2026-1\.0\.10\.559/);
-  assert.match(home, /podcaster-scene-media-render-spec\.js\?v=2026-1\.0\.10\.559/);
+  assert.match(player, /data-cache-href="podcaster\.css(\?[^"]*)?"/);
+  assert.match(player, /data-cache-src="podcaster\/podcaster-scene-media-render-spec\.js/);
+  assert.match(player, /data-cache-src="js\/home\.js\?rev=/);
+  assert.match(home, /podcaster-playback-controller\.js\?v=/);
+  assert.match(home, /podcaster-scene-media-render-spec\.js/);
   assert.match(playback, /"--kb-pan-start-y"/);
   assert.match(playback, /"--kb-pan-end-y"/);
   assert.match(playback, /entry\?\.video\?\.stopMotion/);
-  assert.match(home, /resolveStorageVideoUrl:\s*\(url,\s*path,\s*options = \{\}\)/);
-  assert.match(home, /const endpoint = treatAsImage \|\| hasImageExt \? "proxy-image" : "proxy-media"/);
-  assert.match(home, /cachedRuntimeVideoMapRef === videoMap/);
+  assert.match(home, /function\s+resolveStorageVideoUrl\s*\(/);
+  assert.match(home, /buildDirectFirebaseMediaReference\(/);
+  assert.match(editor, /treatAsImage \|\| hasImageExt \? "image" : "media"/);
 });
 
 test("el nodo visible recibe la geometría Ken Burns y el modal rehidrata una imagen individual", () => {
   const playback = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
   const replacement = readFileSync(new URL("../public/podcaster/podcaster-media-replacement.js", import.meta.url), "utf8");
   const html = readFileSync(new URL("../public/podcaster.html", import.meta.url), "utf8");
-  assert.match(playback, /requestImageStageSwap\(entry[\s\S]*?applyEntryVisualStateToSurface\(entry,\s*imageEl\)/);
-  assert.match(playback, /shouldRestartKenBurns[\s\S]*?imageEl\.style\.animation = "none"/);
+  assert.match(playback, /requestImageStageSwap\(entry[\s\S]*?applyEntryVisualStateToSurface\(entry,\s*(?:imageEl|targetImage)\)/);
+  assert.match(playback, /shouldRestartKenBurns[\s\S]*?(?:imageEl|targetImage)\.style\.animation = "none"/);
   assert.match(playback, /sceneMediaKenBurnsAnimationKey/);
   assert.match(replacement, /function\s+hydrateExistingSingleMedia\s*\(/);
   assert.match(replacement, /normalizeExistingSceneMedia\(rowId,\s*session\)/);
   assert.match(replacement, /const restoredSingleMedia = !restoredStopMotion && hydrateExistingSingleMedia/);
   assert.match(html, /id="sceneExistingMediaSelection"/);
   assert.match(html, /id="removeSceneExistingMediaBtn"/);
+});
+
+test("el reemplazo no descarta la selección cuando la edición local va adelantada a la nube", () => {
+  const editor = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+  const store = readFileSync(new URL("../public/podcaster/podcaster-session-store.js", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../public/podcaster.html", import.meta.url), "utf8");
+
+  // Transacción de la nube: la fila local más nueva es la base válida, porque el
+  // autoguardado va en retraso y su revisión propia no es un cambio remoto.
+  assert.match(editor, /preferNewerLocalMediaEntry\(cloudSession|const cloudBase = preferNewerLocalMediaEntry/);
+  assert.match(editor, /selectSceneMedia\(cloudBase,\s*rowId,\s*clip,\s*context\)/);
+  // Escritura local posterior: si la revisión se movió durante la hidratación,
+  // se reintenta con esa revisión en vez de dejar el video anterior en pantalla.
+  assert.match(editor, /selection\.reason !== "selection-changed"[\s\S]*?baseRevision: podcasterMediaState\.mediaRevision\(/);
+  // Conflicto real con la nube: si la selección remota es más antigua que el
+  // recurso recién creado, se reintenta dentro de la misma transacción usando su
+  // revisión como base (la caché local puede ir retrasada por el autoguardado).
+  assert.match(editor, /committed\.reason === "selection-changed"[\s\S]*?baseRevision: cloudClipRevision/);
+  // Refresh de la nube: fusiona por updatedAt con tombstones; reemplazar el mapa
+  // a ciegas borraba el stop motion recién subido.
+  assert.match(store, /replaceLocalSessionFromCloud[\s\S]*?reconcileSessionMedia\(previousLocal, cloudSession\)/);
+  // Vincular videos desde Storage no pisa una escena con fotos manuales.
+  assert.match(editor, /hasManualPhotos/);
+  // El escenario del editor usa el swap interno de imagen (doble slot) y el
+  // fotograma que corresponde al cursor, sin depender del módulo diferido.
+  const playback = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+  assert.match(playback, /if \(isImageStageClip\)[\s\S]{0,2000}?resolveStopMotionEntryAtMs\([\s\S]*?requestImageStageSwap\([\s\S]*?return;\s*\}/);
+  assert.doesNotMatch(playback, /window\.swapStageToImagePreview|window\.hideStageImagePreview/);
+  // Chip dividido: la gate lee el mapa normalizado y el chip sólo pinta
+  // divisiones. Meter miniaturas obligaba a hidratar N recursos privados en
+  // cada refresco del timeline (y un src crudo devuelve 403 en Storage).
+  const timelineUi = readFileSync(new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url), "utf8");
+  assert.match(timelineUi, /normalizeStopMotion\?\.\(dialogueMap\[rowId\]\?\.stopMotion \|\| null\)/);
+  assert.match(timelineUi, /class="podcast-stop-motion-segment"[\s\S]{0,240}?reordenar"><\/div>/);
+  assert.doesNotMatch(timelineUi, /class="podcast-stop-motion-segment"[\s\S]{0,240}?<img/);
+  assert.match(html, /podcaster\.js\?rev=/);
 });
 
 test("las miniaturas blob sólo se revocan después de retirarlas del DOM", () => {

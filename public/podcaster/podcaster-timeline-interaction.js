@@ -58,6 +58,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     normalizeGeminiDialogueTrack,
     buildGeminiDialogueTimelineTrack,
     syncOnScreenTextClipsWithGeminiTrack,
+    syncOnScreenTextClipsWithSceneTrack,
     syncTimelineGeminiSegmentDragPreview,
     buildUploadedPanelMusicSegments,
     getPanelMusicUploadedTracks,
@@ -85,7 +86,9 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     normalizeTimelineTracks,
     PODCAST_SESSION_MANUAL_SAVE_ONLY,
     persistSessions,
-    sessionStore
+    sessionStore,
+    getTimelineClipEffectiveDurationMs,
+    updateDialogueVideoStopMotionForRow
   } = deps;
 
   let timelinePointerMoveRafId = 0;
@@ -487,6 +490,115 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       segmentsSnapshot
     };
     document.body.classList.add("podcast-timeline-dragging");
+  }
+
+  function getStopMotionModel() {
+    return globalThis.PodcasterStopMotion || null;
+  }
+
+  function beginStopMotionSegmentDrag(event = null) {
+    if (!event) return false;
+    const control = event?.target?.closest?.("[data-stop-motion-segment][data-frame-index],[data-stop-motion-resize][data-frame-index]");
+    if (!control) return false;
+    if (event.shiftKey || event.metaKey || event.ctrlKey) return false;
+    const model = getStopMotionModel();
+    if (!model) return false;
+    const rowId = String(control.dataset.rowId || "").trim();
+    const frameIndex = Math.floor(Number(control.dataset.frameIndex || -1));
+    if (!rowId || !Number.isInteger(frameIndex) || frameIndex < 0) return false;
+    const strip = control.closest(".podcast-stop-motion-segments") || null;
+    const sceneDurationMs = Math.max(1, Math.round(Number(strip?.dataset?.sceneDurationMs || 0) || 0));
+    if (!sceneDurationMs) return false;
+    const session = getActiveSession();
+    const clip = (session?.dialogueVideoMap || {})[rowId] || null;
+    const stopMotionBase = model.normalizeStopMotion?.(clip?.stopMotion || null) || null;
+    if (!stopMotionBase || frameIndex >= stopMotionBase.frames.length) return false;
+    const isResize = control.hasAttribute?.("data-stop-motion-resize") || Boolean(control.closest?.("[data-stop-motion-resize]"));
+    const resizeHandle = isResize ? control.closest("[data-stop-motion-resize]") : null;
+    const resizeIndex = isResize ? Math.floor(Number(resizeHandle?.dataset?.frameIndex || frameIndex)) : frameIndex;
+    if (isResize && (!Number.isInteger(resizeIndex) || resizeIndex < 0 || resizeIndex >= stopMotionBase.frames.length - 1)) return false;
+    const minFrameMs = Math.max(
+      100,
+      Math.min(STUDIO_TIMELINE_MIN_CLIP_MS, Math.floor(sceneDurationMs / Math.max(1, stopMotionBase.frames.length)))
+    );
+    podcastVideoState.timelineDrag = {
+      mode: isResize ? "stop-motion-segment-resize" : "stop-motion-segment-move",
+      rowId,
+      frameIndex: isResize ? resizeIndex : frameIndex,
+      startClientX: Number(event.clientX || 0),
+      stopMotionBase,
+      previewStopMotion: stopMotionBase,
+      sceneDurationMs,
+      minFrameMs,
+      deltaMs: 0,
+      moved: false
+    };
+    document.body.classList.add("podcast-timeline-dragging");
+    return true;
+  }
+
+  function getStopMotionSegmentEl(rowId = "", frameIndex = -1) {
+    const timeline = els.podcastVideoTimeline;
+    if (!timeline || !rowId) return null;
+    return timeline.querySelector(`.podcast-stop-motion-segment[data-row-id="${CSS.escape(rowId)}"][data-frame-index="${Math.max(0, Math.floor(Number(frameIndex) || 0))}"]`);
+  }
+
+  function applyStopMotionSegmentsGeometry(rowId = "", stopMotion = null) {
+    const timeline = els.podcastVideoTimeline;
+    const model = getStopMotionModel();
+    if (!timeline || !rowId || !model) return;
+    const normalized = model.normalizeStopMotion?.(stopMotion || null) || null;
+    if (!normalized) return;
+    const strip = timeline.querySelector(`.podcast-stop-motion-segments[data-row-id="${CSS.escape(rowId)}"]`);
+    if (!strip) return;
+    const totalWeight = normalized.frameWeights.reduce((sum, weight) => sum + weight, 0) || 1;
+    let cumulativePct = 0;
+    normalized.frameWeights.forEach((weight, index) => {
+      const widthPct = Math.max(0, Math.min(100, (weight / totalWeight) * 100));
+      const segment = strip.querySelector(`[data-stop-motion-segment][data-frame-index="${index}"]`);
+      if (segment) {
+        segment.style.left = `${cumulativePct.toFixed(4)}%`;
+        segment.style.width = `${widthPct.toFixed(4)}%`;
+      }
+      const handle = strip.querySelector(`[data-stop-motion-resize][data-frame-index="${index}"]`);
+      if (handle) {
+        handle.style.left = `${(cumulativePct + widthPct).toFixed(4)}%`;
+      }
+      cumulativePct += widthPct;
+    });
+  }
+
+  function clampStopMotionDragDeltaMs(drag = null, deltaMs = 0) {
+    const weights = Array.isArray(drag?.stopMotionBase?.frameWeights) ? drag.stopMotionBase.frameWeights : [];
+    const count = weights.length;
+    if (!count) return 0;
+    const durationMs = Math.max(1, Number(drag?.sceneDurationMs || 1) || 1);
+    const index = Math.max(0, Math.min(count - 1, Math.floor(Number(drag?.frameIndex || 0) || 0)));
+    let beforeMs = 0;
+    for (let i = 0; i < index; i += 1) beforeMs += weights[i] * durationMs;
+    const centerMs = beforeMs + (weights[index] * durationMs) / 2;
+    return Math.max(-centerMs, Math.min(durationMs - centerMs, Number(deltaMs || 0) || 0));
+  }
+
+  function computeStopMotionSegmentDropIndex(drag = null) {
+    const weights = Array.isArray(drag?.stopMotionBase?.frameWeights) ? drag.stopMotionBase.frameWeights : [];
+    const count = weights.length;
+    if (!count) return null;
+    const durationMs = Math.max(1, Number(drag?.sceneDurationMs || 1) || 1);
+    const index = Math.max(0, Math.min(count - 1, Math.floor(Number(drag?.frameIndex || 0) || 0)));
+    const durations = weights.map((weight) => Math.max(1, weight * durationMs));
+    let beforeMs = 0;
+    for (let i = 0; i < index; i += 1) beforeMs += durations[i];
+    const draggedCenterMs = beforeMs + durations[index] / 2 + clampStopMotionDragDeltaMs(drag, Number(drag?.deltaMs || 0));
+    let runMs = 0;
+    let dropIndex = 0;
+    for (let i = 0; i < count; i += 1) {
+      if (i === index) continue;
+      const centerMs = runMs + durations[i] / 2;
+      if (draggedCenterMs > centerMs) dropIndex += 1;
+      runMs += durations[i];
+    }
+    return dropIndex;
   }
 
   function beginGeminiTrackReorderDrag(event = null) {
@@ -908,6 +1020,16 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       event.preventDefault();
       return;
     }
+    const stopMotionSegmentHit = event.target.closest("[data-stop-motion-segment][data-frame-index],[data-stop-motion-resize][data-frame-index]");
+    if (stopMotionSegmentHit) {
+      const rowId = String(stopMotionSegmentHit.dataset.rowId || "").trim();
+      if (rowId && beginStopMotionSegmentDrag(event)) {
+        selectTimelineSceneRow(rowId, { syncStage: false });
+        podcastVideoState.timelineLastInteractedRowId = rowId;
+        event.preventDefault();
+        return;
+      }
+    }
     const dragClip = event.target.closest("[data-action='timeline-drag-clip'][data-row-id]");
     if (
       dragClip
@@ -1239,6 +1361,42 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         return;
       }
     }
+    if (drag.mode === "stop-motion-segment-move" || drag.mode === "stop-motion-segment-resize") {
+      const model = getStopMotionModel();
+      if (!model || !drag.stopMotionBase) return;
+      const deltaPx = Number(event.clientX || 0) - Number(drag.startClientX || 0);
+      if (Math.abs(deltaPx) > 2) {
+        drag.moved = true;
+      }
+      if (!drag.moved) return;
+      const dragStepMs = resolveTimelineDragStepMs(event);
+      const deltaMsRaw = timelinePxToMs(deltaPx);
+      if (drag.mode === "stop-motion-segment-move") {
+        const snappedMs = snapTimelineMsWithStep(deltaMsRaw, dragStepMs);
+        const clampedMs = clampStopMotionDragDeltaMs(drag, snappedMs);
+        drag.deltaMs = clampedMs;
+        let translatePx = deltaPx;
+        if (Math.abs(deltaMsRaw) > 0.0001 && Math.abs(clampedMs) < Math.abs(deltaMsRaw)) {
+          translatePx = deltaPx * (clampedMs / deltaMsRaw);
+        }
+        const segmentEl = getStopMotionSegmentEl(drag.rowId, drag.frameIndex);
+        if (segmentEl) {
+          segmentEl.style.transform = `translateX(${Math.round(translatePx)}px)`;
+          segmentEl.classList.add("is-stop-motion-dragging");
+        }
+        return;
+      }
+      const nextStopMotion = model.resizeStopMotionSegment(
+        drag.stopMotionBase,
+        drag.frameIndex,
+        snapTimelineMsWithStep(deltaMsRaw, dragStepMs),
+        drag.sceneDurationMs,
+        drag.minFrameMs
+      ) || drag.stopMotionBase;
+      drag.previewStopMotion = nextStopMotion;
+      applyStopMotionSegmentsGeometry(drag.rowId, nextStopMotion);
+      return;
+    }
     if (drag.mode === "gemini-track-reorder") {
       const clientX = Number(event.clientX || 0);
       const clientY = Number(event.clientY || 0);
@@ -1447,6 +1605,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           endMs: patch.endMs,
           durationMs: patch.durationMs,
           anchorStartMs: patch.anchorStartMs,
+          relativeOffsetMs: patch.startMs - patch.anchorStartMs,
           manualStartMs: true
         };
       });
@@ -1731,9 +1890,9 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           startMs: nextStartMs,
           endMs: nextStartMs + durationMs,
           durationMs,
-          anchorStartMs: segment?.anchorStartMs === null || segment?.anchorStartMs === undefined
-            ? nextSceneStartMs
-            : Math.max(0, Number(segment.anchorStartMs || 0) + deltaMs)
+          manualStartMs: true,
+          relativeOffsetMs: nextStartMs - nextSceneStartMs,
+          anchorStartMs: nextSceneStartMs
         };
       });
       if (!found) return cfg;
@@ -1767,6 +1926,28 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       }));
       renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
       //     syncPodcastStudioInspector(getActiveSession());
+      return;
+    }
+    if (drag.mode === "stop-motion-segment-move" || drag.mode === "stop-motion-segment-resize") {
+      const model = getStopMotionModel();
+      const rowId = String(drag.rowId || "").trim();
+      if (!model || !rowId || !drag.stopMotionBase || drag.moved !== true) return;
+      if (typeof updateDialogueVideoStopMotionForRow !== "function") return;
+      if (drag.mode === "stop-motion-segment-move") {
+        const dropIndex = computeStopMotionSegmentDropIndex(drag);
+        if (dropIndex === null || dropIndex === drag.frameIndex) return;
+        const reordered = model.reorderStopMotionFrames(drag.stopMotionBase, drag.frameIndex, dropIndex);
+        if (!reordered) return;
+        updateDialogueVideoStopMotionForRow(rowId, reordered, { reason: "stop-motion-segment-reorder" });
+        return;
+      }
+      const preview = drag.previewStopMotion || drag.stopMotionBase;
+      const sameWeights = Array.isArray(preview.frameWeights)
+        && Array.isArray(drag.stopMotionBase.frameWeights)
+        && preview.frameWeights.length === drag.stopMotionBase.frameWeights.length
+        && preview.frameWeights.every((weight, index) => Math.abs(weight - drag.stopMotionBase.frameWeights[index]) < 0.00005);
+      if (sameWeights) return;
+      updateDialogueVideoStopMotionForRow(rowId, preview, { reason: "stop-motion-segment-resize" });
       return;
     }
     if (drag.mode !== "move") return;
@@ -1821,16 +2002,16 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     if (dragMode === "gemini-segment-move") {
       syncOnScreenTextClipsWithGeminiTrack({ render: false, autosave: false });
       scheduleSessionLocalPersist("timeline-gemini-audio");
+      sessionStore.markDirty(
+        String(getActiveSession()?.id || "").trim(),
+        "timeline-gemini-audio"
+      );
       if (PODCAST_SESSION_MANUAL_SAVE_ONLY !== true) {
         try {
           persistSessions();
         } catch (_) {
           // noop
         }
-        sessionStore.markDirty(
-          String(getActiveSession()?.id || "").trim(),
-          "timeline-gemini-audio"
-        );
       }
       return true;
     }

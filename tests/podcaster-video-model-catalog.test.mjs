@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  PODCASTER_VIDEO_MODEL_LOCAL,
   VERTEX_VEO_MODEL_FALLBACKS,
   collectAvailablePodcasterVideoModels,
   formatPodcasterVideoModelLabel,
+  isLocalVideoModel,
   normalizeVertexVeoModelId
 } from "../public/podcaster/podcaster-video-model-catalog.js";
 
@@ -30,4 +32,16 @@ test("preview aliases migrate to their Vertex IDs and labels expose stage", () =
   assert.equal(normalizeVertexVeoModelId("veo-3.1-lite-generate-preview"), "veo-3.1-lite-generate-001");
   assert.equal(formatPodcasterVideoModelLabel("veo-3.1-lite-generate-001"), "Veo 3.1 Lite · Preview");
   assert.equal(formatPodcasterVideoModelLabel("veo-3.1-generate-001"), "Veo 3.1 Standard · GA");
+});
+
+test("local Wan model survives normalization and advertises the free tier", () => {
+  assert.equal(isLocalVideoModel(PODCASTER_VIDEO_MODEL_LOCAL), true);
+  assert.equal(isLocalVideoModel("veo-3.1-generate-001"), false);
+  assert.equal(normalizeVertexVeoModelId("local-wan-2.2"), "local-wan-2.2");
+  assert.match(formatPodcasterVideoModelLabel("local-wan-2.2"), /gratis, sin costo/);
+});
+
+test("remote Vertex catalog never includes the local model", () => {
+  const models = collectAvailablePodcasterVideoModels([{ name: "veo-3.1-generate-001" }]);
+  assert.equal(models.includes(PODCASTER_VIDEO_MODEL_LOCAL), false);
 });

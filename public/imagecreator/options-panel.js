@@ -1,73 +1,95 @@
 import {
-  IMAGE_CREATOR_ASPECT_RATIOS,
-  IMAGE_CREATOR_COUNT_OPTIONS,
-  IMAGE_CREATOR_DOWNLOAD_FORMATS,
-  IMAGE_CREATOR_IMAGE_SIZES,
-  IMAGE_CREATOR_MODELS,
-  IMAGE_CREATOR_MODES,
   modelSupportsImageSize,
   normalizeImageCreatorOptions
 } from "./constants.js";
 
-function fillSelect(select, items, mapOption) {
-  if (!select) return;
-  select.innerHTML = items.map((item) => {
-    const option = mapOption(item);
-    return `<option value="${option.value}">${option.label}</option>`;
-  }).join("");
-}
+export function initializeOptionsPanel(elements, options = {}, onChange = null) {
+  elements.floatingModeButtons = Array.from(document.querySelectorAll("#icMjModeGroup [data-mode]"));
+  elements.floatingRatioButtons = Array.from(document.querySelectorAll("#icMjRatioGrid [data-ratio]"));
+  elements.floatingSizeButtons = Array.from(document.querySelectorAll("#icMjImageSizeGroup [data-size]"));
+  elements.floatingFormatButtons = Array.from(document.querySelectorAll("#icMjFormatGroup [data-format]"));
+  elements.floatingCountButtons = Array.from(document.querySelectorAll("#icMjCountGroup [data-count]"));
+  elements.floatingPersonButtons = Array.from(document.querySelectorAll("#icMjPersonGroup [data-person]"));
+  elements.floatingModelButtons = Array.from(document.querySelectorAll("#icMjModelGroup [data-model]"));
 
-export function initializeOptionsPanel(elements, options = {}) {
-  fillSelect(elements.modeSelect, IMAGE_CREATOR_MODES, (item) => ({ value: item.value, label: item.label }));
-  fillSelect(elements.modelSelect, IMAGE_CREATOR_MODELS, (item) => ({ value: item, label: item }));
-  fillSelect(elements.aspectRatioSelect, IMAGE_CREATOR_ASPECT_RATIOS, (item) => ({ value: item, label: item }));
-  if (elements.aspectRatioSelect) {
-    elements.aspectRatioSelect.insertAdjacentHTML("beforeend", '<option value="original" hidden>Conservar proporción original</option>');
-  }
-  fillSelect(elements.imageSizeSelect, IMAGE_CREATOR_IMAGE_SIZES, (item) => ({ value: item, label: item }));
-  fillSelect(elements.downloadFormatSelect, IMAGE_CREATOR_DOWNLOAD_FORMATS, (item) => ({ value: item, label: item.toUpperCase() }));
-  fillSelect(elements.countSelect, IMAGE_CREATOR_COUNT_OPTIONS, (item) => ({ value: String(item), label: `${item}` }));
+  const bindGroup = (buttons) => {
+    (buttons || []).forEach((button) => {
+      button.addEventListener("click", () => {
+        (buttons || []).forEach((b) => {
+          b.classList.remove("active");
+          b.setAttribute("aria-checked", "false");
+        });
+        button.classList.add("active");
+        button.setAttribute("aria-checked", "true");
+
+        if (typeof onChange === "function") {
+          const current = readOptionsFromPanel(elements);
+          onChange(current);
+        }
+      });
+    });
+  };
+
+  bindGroup(elements.floatingModeButtons);
+  bindGroup(elements.floatingRatioButtons);
+  bindGroup(elements.floatingSizeButtons);
+  bindGroup(elements.floatingFormatButtons);
+  bindGroup(elements.floatingCountButtons);
+  bindGroup(elements.floatingPersonButtons);
+  bindGroup(elements.floatingModelButtons);
+
   applyOptionsToPanel(elements, options);
 }
 
 export function readOptionsFromPanel(elements) {
+  const getActiveAttr = (buttons, attr) => {
+    const active = (buttons || []).find((b) => b.classList.contains("active"));
+    return active ? active.getAttribute(attr) : undefined;
+  };
+
   return normalizeImageCreatorOptions({
-    mode: elements.modeSelect?.value,
-    model: elements.modelSelect?.value,
-    aspectRatio: elements.aspectRatioSelect?.value === "original"
-      ? elements.aspectRatioSelect.dataset.selectedRatio
-      : elements.aspectRatioSelect?.value,
-    imageSize: elements.imageSizeSelect?.value,
-    downloadFormat: elements.downloadFormatSelect?.value,
-    count: Number(elements.countSelect?.value || 1)
+    mode: getActiveAttr(elements.floatingModeButtons, "data-mode"),
+    aspectRatio: getActiveAttr(elements.floatingRatioButtons, "data-ratio"),
+    imageSize: getActiveAttr(elements.floatingSizeButtons, "data-size"),
+    downloadFormat: getActiveAttr(elements.floatingFormatButtons, "data-format"),
+    count: Number(getActiveAttr(elements.floatingCountButtons, "data-count") || 1),
+    personGeneration: getActiveAttr(elements.floatingPersonButtons, "data-person"),
+    model: getActiveAttr(elements.floatingModelButtons, "data-model")
   });
 }
 
 export function applyOptionsToPanel(elements, options = {}) {
   const normalized = normalizeImageCreatorOptions(options);
-  if (elements.modeSelect) elements.modeSelect.value = normalized.mode;
-  if (elements.modelSelect) elements.modelSelect.value = normalized.model;
-  if (elements.aspectRatioSelect) elements.aspectRatioSelect.value = normalized.aspectRatio;
-  if (elements.imageSizeSelect) elements.imageSizeSelect.value = normalized.imageSize;
-  if (elements.downloadFormatSelect) elements.downloadFormatSelect.value = normalized.downloadFormat;
-  if (elements.countSelect) elements.countSelect.value = String(normalized.count);
-  syncOptionsPresentation(elements, normalized);
+
+  const syncButtons = (buttons, attr, targetVal) => {
+    (buttons || []).forEach((button) => {
+      const match = button.getAttribute(attr) === String(targetVal);
+      button.classList.toggle("active", match);
+      button.setAttribute("aria-checked", match ? "true" : "false");
+    });
+  };
+
+  syncButtons(elements.floatingModeButtons, "data-mode", normalized.mode);
+  syncButtons(elements.floatingRatioButtons, "data-ratio", normalized.aspectRatio);
+  syncButtons(elements.floatingSizeButtons, "data-size", normalized.imageSize);
+  syncButtons(elements.floatingFormatButtons, "data-format", normalized.downloadFormat);
+  syncButtons(elements.floatingCountButtons, "data-count", normalized.count);
+  syncButtons(elements.floatingPersonButtons, "data-person", normalized.personGeneration);
+  syncButtons(elements.floatingModelButtons, "data-model", normalized.model);
+
+  const imageSizeEnabled = modelSupportsImageSize(normalized.model);
+  (elements.floatingSizeButtons || []).forEach((b) => {
+    b.disabled = !imageSizeEnabled;
+    b.style.opacity = imageSizeEnabled ? "1" : "0.35";
+  });
+
+  return normalized;
 }
 
 export function syncOptionsPresentation(elements, options = {}) {
-  const normalized = normalizeImageCreatorOptions(options);
-  if (elements.aspectRatioSelect) {
-    const select = elements.aspectRatioSelect;
-    select.dataset.selectedRatio = normalized.aspectRatio;
-    select.disabled = normalized.mode === "edit";
-    select.value = select.disabled ? "original" : normalized.aspectRatio;
-  }
-  const imageSizeEnabled = modelSupportsImageSize(normalized.model);
-  if (elements.imageSizeSelect) elements.imageSizeSelect.disabled = !imageSizeEnabled;
-  if (elements.optionsHint) {
-    elements.optionsHint.textContent = imageSizeEnabled
-      ? "Gemini 3.1 Flash Image y Gemini 3 Pro Image aceptan 1K, 2K y 4K. Para impresión usa 4K."
-      : "Gemini 2.5 Flash Image usa tamaños fijos por aspect ratio; imageSize se ignora.";
-  }
-  return normalized;
+  return applyOptionsToPanel(elements, options);
 }
+
+export const initializeFloatingFormatPanel = initializeOptionsPanel;
+export const readFloatingFormatOptions = readOptionsFromPanel;
+export const syncFloatingFormatPanel = applyOptionsToPanel;

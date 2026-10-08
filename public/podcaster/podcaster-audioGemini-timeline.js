@@ -59,11 +59,13 @@ async function preloadAllDialogueAudios(session = null, options = {}) {
     const resolvePlayableAudioSrc = async (src = "") => {
       const cleanSrc = String(src || "").trim();
       if (!cleanSrc) return "";
-      if (!cleanSrc.startsWith("podcaster-local-media:")) return cleanSrc;
+      const needsAuthorizedBlob = cleanSrc.startsWith("podcaster-local-media:")
+        || /\/api\/assets\/proxy-media\?/i.test(cleanSrc);
+      if (!needsAuthorizedBlob) return cleanSrc;
       if (window?.playbackController?.getBlobUrl) {
-        return (await window.playbackController.getBlobUrl(cleanSrc)) || "";
+        return (await window.playbackController.getBlobUrl(cleanSrc, { persistent: true })) || "";
       }
-      return cleanSrc;
+      return "";
     };
 
     // Si ya tenemos una duración medida, no volvemos a cargar
@@ -145,7 +147,8 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const session = window.getActiveSession();
   const sessionId = String(session?.id || "").trim();
   if (!sessionId || !key) return null;
-  const selectionContext = window.PodcasterSceneMedia.capture(session, key, "audio");
+  const startingThreadId = String(session?.activeThreadId || "");
+  let selectionContext = null;
   const rows = window.getSessionRows(session);
   const row = rows.find((item) => String(item?.id || "").trim() === key);
   if (!row) return null;
@@ -154,6 +157,8 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   if (dialogueAudioGenerationPending.has(pendingKey)) return null;
 
   const speechConfig = window.resolveSpeechGenerationConfig(row, session);
+  const directionSource = row?.ttsDirectionConfig || session?.ttsDirectionDefaults || {};
+  const ttsDirection = window.normalizeTtsDirectionConfig?.(directionSource) || directionSource;
   const voiceName = speechConfig.voiceName;
   const dialogueText = window.buildTargetSpeechLine(row);
   const text = dialogueText;
@@ -161,10 +166,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const speechRateHint = computeDurationSpeedMultiplier(dialogueText, targetDurationSec);
   const regenerate = options.regenerate === true;
   const silent = options.silent === true;
-  const previousAudioClip = window.resolveDialogueAudioForRow?.(session, key) || null;
-  const previousAudioSourceKey = typeof window.playbackController?.resolveAudioSourceKey === "function"
-    ? window.playbackController.resolveAudioSourceKey(previousAudioClip)
-    : "";
+  let previousAudioClip = window.resolveDialogueAudioForRow?.(session, key) || null;
 
   dialogueAudioGenerationPending.add(pendingKey);
   if (!silent) window.setGenerationStatus(`Generando audio Gemini para escena ${window.resolveSceneNumberByRowId(key, session)}...`, "is-busy");
@@ -177,6 +179,22 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     }
   }
 
+  // Capturar la revisión después del pre-save. Este puede hidratar la sesión
+  // desde Firestore; usar la revisión anterior hace que el commit del job parezca
+  // una selección concurrente aunque nadie haya cambiado el audio.
+  const generationSession = window.getActiveSession();
+  if (generationSession?.id !== sessionId
+    || String(generationSession?.activeThreadId || "") !== startingThreadId) {
+    dialogueAudioGenerationPending.delete(pendingKey);
+    if (!silent) {
+      window.setGenerationStatus("La sesión o versión activa cambió. Vuelve a iniciar la generación.", "is-error");
+      window.addChatMessage("system", "No se generó el audio porque cambió la sesión o versión activa.");
+    }
+    return null;
+  }
+  selectionContext = window.PodcasterSceneMedia.capture(generationSession, key, "audio");
+  previousAudioClip = window.resolveDialogueAudioForRow?.(generationSession, key) || previousAudioClip;
+
   try {
     const body = {
       selectionContext,
@@ -187,14 +205,15 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       speakerName: window.resolveSpeakerDisplayName(row?.speaker, session),
       voiceName,
       speechLocale: speechConfig.speechLocale,
+      localeInstruction: speechConfig.localeInstruction,
       text,
       targetSpeechLine: text,
       targetDurationSec,
       speechRateHint,
       regenerate,
       disfluencyConfig: row?.disfluencyConfig || null,
-      ttsDirectionConfig: row?.ttsDirectionConfig || null,
-      ttsDirection: row?.ttsDirectionConfig || {}
+      ttsDirectionConfig: ttsDirection,
+      ttsDirection
     };
 
     let accepted = null;
@@ -232,8 +251,28 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
 
     const finalAudio = normalizeDialogueAudioRecord(resp.dialogueAudio);
     finalAudio.playbackRate = previousAudioClip?.playbackRate || row?.playbackRate || 1;
-    const application = await window.PodcasterSceneMedia.apply(selectionContext, finalAudio);
-    if (application.status !== "applied") throw new Error("El audio se creó, pero la selección cambió durante la generación.");
+    const serverApplication = String(resp?.result?.application?.status || "").toLowerCase();
+    let application = await window.PodcasterSceneMedia.apply(selectionContext, finalAudio);
+    if (application.status !== "applied") {
+      // The backend may have committed the generated clip successfully. A local
+      // session snapshot can lag behind that transaction; refresh once and accept
+      // only the exact operation produced by this request.
+      if (serverApplication === "applied" && window.PodcasterUI?.refreshSession) {
+        await window.PodcasterUI.refreshSession();
+        const currentSession = window.getActiveSession();
+        const currentClip = window.resolveDialogueAudioForRow?.(currentSession, key);
+        if (currentSession?.id === sessionId
+          && String(currentSession?.activeThreadId || "") === selectionContext.threadId
+          && String(currentClip?.selectionOperationId || "") === selectionContext.requestId) {
+          application = { status: "applied", clip: currentClip };
+        }
+      }
+      if (application.status !== "applied") {
+        const error = new Error("El audio se generó, pero una selección más reciente de esta escena impidió aplicarlo.");
+        error.code = "AUDIO_SELECTION_SUPERSEDED";
+        throw error;
+      }
+    }
     const activeNow = window.getActiveSession();
     if (activeNow?.id !== sessionId || String(activeNow?.activeThreadId || "") !== selectionContext.threadId) return application.clip;
     // La duración medida pertenece al blob anterior. Obliga al probe del chip
@@ -269,7 +308,9 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
 
     return finalAudio;
   } catch (error) {
-    console.error("[podcaster] audio generation error", error);
+    if (error?.code !== "AUDIO_SELECTION_SUPERSEDED") {
+      console.error("[podcaster] audio generation error", error);
+    }
     if (!silent) {
       const isAuthError = error.message === "AUTH_REQUIRED" || error.code === "AUTH_REQUIRED";
       const userMessage = isAuthError
@@ -451,12 +492,17 @@ export function removeDialogueAudioForRow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
   if (!key) return;
   const silent = options.silent === true;
+  const previousClip = window.getDialogueAudioMap(window.getActiveSession())?.[key] || null;
   window.upsertActiveSession((current) => {
     const nextMap = { ...window.getDialogueAudioMap(current) };
     delete nextMap[key];
     return {
       ...current,
-      dialogueAudioMap: nextMap
+      dialogueAudioMap: nextMap,
+      dialogueAudioDeletedAtMap: {
+        ...(current?.dialogueAudioDeletedAtMap || {}),
+        [key]: new Date().toISOString()
+      }
     };
   }, { render: false });
   if (typeof window.upsertPodcastVideoConfig === "function") {
@@ -466,8 +512,14 @@ export function removeDialogueAudioForRow(rowId = "", options = {}) {
       const nextSegments = Array.isArray(track.segments)
         ? track.segments.filter((segment) => String(segment?.rowId || "").trim() !== key)
         : [];
+      const nextTextClips = { ...(cfg?.timelineOnScreenTextClipsByRowId || {}) };
+      if (String(previousClip?.model || "") === "uploaded") {
+        if (previousClip.previousOnScreenTextClip) nextTextClips[key] = { ...previousClip.previousOnScreenTextClip };
+        else delete nextTextClips[key];
+      }
       return {
         ...cfg,
+        timelineOnScreenTextClipsByRowId: nextTextClips,
         geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
           ...track,
           enabled: nextSegments.length > 0,

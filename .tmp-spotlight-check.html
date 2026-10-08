@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="http://localhost:8137/vendor/fontawesome/all.min.css">
+<link rel="stylesheet" href="http://localhost:8137/podcaster.css?rev=spotcheck11">
+<style>body{background:#101827;margin:0}</style>
+</head>
+<body>
+<div id="podcastVideoShell" class="podcast-video-shell floating-panel-card snoopy-editor-workspace-shell" style="height:600px;display:flex;flex-direction:column;gap:14px;padding:14px;margin:12px">
+  <div class="floating-panel-head" style="position:sticky;top:0;z-index:120;min-height:52px;background:#1b2436;display:flex;align-items:center;gap:8px;padding:8px">
+    <div class="attach-all-reference-menu-wrap">
+      <button id="attachAllRowReferenceImagesBtn" class="row-icon-btn" type="button" data-action="attach-all-row-reference-images" aria-expanded="false"><i class="fas fa-paperclip"></i></button>
+      <div id="attachAllReferenceMenu" class="studio-reference-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-action="attach-all-reference-from-folder">Adjuntar imagen como referencia</button>
+        <button type="button" role="menuitem" data-action="apply-all-references-from-folder">Adjuntar imagenes a las Escenas</button>
+      </div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;gap:14px;min-height:0">
+    <div id="previewMontageArea" style="position:relative;z-index:60;flex:1;background:rgba(30,32,36,.9);border-radius:14px">preview + montaje (z-60)</div>
+    <aside id="podcastStudioInspector" class="podcast-studio-inspector" style="width:380px;background:#151d2e;padding:0 !important;position:relative">
+      <div class="studio-generate-toolbar-head">
+        <div class="studio-generate-toolbar">
+          <button id="t1" class="row-icon-btn" type="button"><i class="fas fa-film"></i></button>
+          <div class="studio-reference-menu-wrap">
+            <button id="refBtn" class="row-icon-btn" type="button" data-action="timeline-use-reference-image" aria-expanded="false"><i class="fas fa-image"></i></button>
+            <div id="studioReferenceMenu" class="studio-reference-menu" role="menu" hidden>
+              <button type="button" role="menuitem" data-action="studio-reference-use-current">Usar referencia en esta escena</button>
+              <button type="button" role="menuitem" data-action="studio-reference-use-all">Usar todas las referencias en todas las escenas</button>
+            </div>
+          </div>
+          <button id="t3" class="row-icon-btn" type="button"><i class="fas fa-microphone-alt"></i></button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>
+// Copia fiel de setMenuPortalOpen de podcaster-media-reference.js
+const menuPortalRegistry = new WeakMap();
+const MENU_PORTAL_THEME_VARIABLES = [
+  "--snoopy-canvas", "--snoopy-surface", "--snoopy-surface-subtle", "--snoopy-surface-elevated",
+  "--snoopy-control", "--snoopy-control-hover", "--snoopy-text", "--snoopy-text-muted",
+  "--snoopy-border", "--snoopy-border-strong", "--snoopy-accent", "--snoopy-accent-soft", "--snoopy-shadow",
+  "--pod-surface", "--pod-surface-2", "--pod-surface-3", "--pod-text", "--pod-muted",
+  "--pod-border", "--pod-border-strong", "--pod-accent", "--pod-accent-soft", "--pod-shadow", "--pod-shadow-lg"
+];
+function syncMenuPortalTheme(menu, button) {
+  const scopedStyles = window.getComputedStyle(button);
+  MENU_PORTAL_THEME_VARIABLES.forEach((name) => {
+    const value = String(scopedStyles.getPropertyValue(name) || "").trim();
+    if (value) menu.style.setProperty(name, value);
+  });
+}
+function clearMenuPortalTheme(menu) {
+  MENU_PORTAL_THEME_VARIABLES.forEach((name) => menu.style.removeProperty(name));
+}
+function placeMenuPortal(menu, button) {
+  const rect = button.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.right - menuRect.width;
+  left = Math.max(8, Math.min(left, window.innerWidth - menuRect.width - 8));
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight - 8) top = Math.max(8, rect.top - menuRect.height - 6);
+  menu.style.position = "fixed";
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+  menu.style.right = "auto";
+}
+function setMenuPortalOpen(menu, button, open) {
+  if (!menu || !button) return false;
+  if (open) {
+    if (!menuPortalRegistry.has(menu)) {
+      const reposition = () => { if (!menu.hidden) placeMenuPortal(menu, button); };
+      menuPortalRegistry.set(menu, { parent: menu.parentElement, nextSibling: menu.nextSibling, reposition });
+      document.body.appendChild(menu);
+      window.addEventListener("scroll", reposition, true);
+      window.addEventListener("resize", reposition);
+    }
+    menu.hidden = false;
+    syncMenuPortalTheme(menu, button);
+    placeMenuPortal(menu, button);
+    return true;
+  }
+  menu.hidden = true;
+  const entry = menuPortalRegistry.get(menu);
+  if (!entry) return true;
+  window.removeEventListener("scroll", entry.reposition, true);
+  window.removeEventListener("resize", entry.reposition);
+  menu.style.position = ""; menu.style.top = ""; menu.style.left = ""; menu.style.right = "";
+  clearMenuPortalTheme(menu);
+  if (entry.parent) entry.parent.insertBefore(menu, entry.nextSibling || null);
+  menuPortalRegistry.delete(menu);
+  return true;
+}
+
+function wire(menuId, btnSel, wrapSel) {
+  const menu = document.getElementById(menuId);
+  const button = document.querySelector(btnSel);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenuPortalOpen(menu, button, Boolean(menu.hidden));
+    button.setAttribute("aria-expanded", String(Boolean(menu.hidden)));
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(wrapSel)) return;
+    if (menu.contains(event.target)) return;
+    setMenuPortalOpen(menu, button, false);
+    button.setAttribute("aria-expanded", "false");
+  });
+}
+wire("studioReferenceMenu", "#refBtn", ".studio-reference-menu-wrap");
+wire("attachAllReferenceMenu", "#attachAllRowReferenceImagesBtn", ".attach-all-reference-menu-wrap");
+window.__menuTopCheck = (menuId) => {
+  const menu = document.getElementById(menuId);
+  const r = menu.getBoundingClientRect();
+  const topEl = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return {
+    portalized: menu.parentElement === document.body,
+    menuOnTop: menu.contains(topEl),
+    topEl: topEl ? (topEl.id || topEl.className) : null,
+    rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }
+  };
+};
+</script>
+</body>
+</html>

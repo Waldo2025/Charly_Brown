@@ -192,7 +192,7 @@ test("Libro nuevo se persiste solo después de aceptar los datos académicos", (
   const createBlock = main.slice(main.indexOf("async function createNewSession"), main.indexOf("async function openNewUnitModal"));
   assert.match(html, /id="cbUnitDataModalCancel"/);
   assert.match(createBlock, /openUnitDataModal\(\{[\s\S]*mode: "new-session"/);
-  assert.ok(createBlock.indexOf("saveSession(next)") > createBlock.indexOf("onSave: async"));
+  assert.ok(createBlock.indexOf("saveSession(next, { create: true })") > createBlock.indexOf("onSave: async"));
   assert.doesNotMatch(createBlock, /store\.setSession\(next\)[\s\S]*openUnitDataModal/);
   assert.match(createBlock, /createInitialUnitForNewBook\(saved\)/);
   const initializationBlock = main.slice(main.indexOf("async function createInitialUnitForNewBook"), main.indexOf("async function openNewUnitModal"));
@@ -220,11 +220,12 @@ test("la automatización exige y utiliza la unidad seleccionada", () => {
   assert.match(block, /find\(\(item\) => item\.id === session\.activeUnitId\)/);
   assert.match(block, /store\.useReading\(acceptedReading\)/);
   assert.doesNotMatch(block, /store\.createUnit\(/);
-  assert.deepEqual(AUTOMATED_RESOURCE_SELECTIONS, { fichas: true, anexos: true, recortables: true, videos: true });
-  assert.match(block, /resourceSelections: \{ \.\.\.AUTOMATED_RESOURCE_SELECTIONS \}/);
-  assert.match(block, /extractResourceBlocks\(result\.html\)/);
-  assert.match(block, /store\.acceptResources\(generatedResources\.map/);
-  assert.match(block, /activityId: acceptedActivity\?\.id/);
+  assert.deepEqual(AUTOMATED_RESOURCE_SELECTIONS, { fichas: false, anexos: false, recortables: false, videos: false });
+  assert.match(block, /startProduction\(session\.id, selectedUnit\.id\)/);
+  assert.match(block, /producción especializada con Gemini Image no está habilitada/i);
+  assert.doesNotMatch(block, /Flujo heredado/);
+  assert.doesNotMatch(block, /generateAutomatedActivity/);
+  assert.doesNotMatch(block, /store\.acceptResources/);
   assert.doesNotMatch(block, /resourceSelections: \{\}/);
   const generator = fs.readFileSync(path.join(dirname, "../public/charly-brown/unit-generator.js"), "utf8");
   for (const type of ["ficha", "anexo", "recortable", "video"]) {
@@ -307,7 +308,7 @@ test("el chat evita el límite de tiempo del proxy de Firebase Hosting", () => {
   const client = fs.readFileSync(path.join(dirname, "../public/charly-brown/gemini-client.js"), "utf8");
   assert.match(client, /buildGeminiApiUrl\("\/api\/charly-brown\/chat"\)/);
   assert.match(client, /buildGeminiApiUrl\("\/api\/gemini\/generate"\)/);
-  assert.match(client, /buildGeminiApiUrl\("\/api\/gemini\/models"\)/);
+  assert.match(client, /buildGeminiApiUrl\("\/api\/charly-brown\/models"\)/);
   assert.doesNotMatch(client, /buildApiUrlPreferRemote\("\/api\/charly-brown\/chat"\)/);
   assert.doesNotMatch(client, /buildApiUrlPreferRemote\("\/api\/gemini\//);
 });
@@ -381,6 +382,80 @@ test("aprobar una propuesta dirigida no reemplaza otros recursos", () => {
   const outcome = store.applyContentProposal({ ...proposal, baseRevision: revision });
   assert.equal(outcome.ok, true);
   assert.deepEqual(store.getState().session.accepted.activities.map((item) => item.title), ["Existente", "Nueva"]);
+});
+
+test("una nota del maestro creada desde texto se aprueba y se puede editar sin actividad aprobada", () => {
+  const store = createStore(createEmptySession({ id: "session" }));
+  const unit = store.createUnit({ unit: "4" });
+  const create = {
+    id: "source-note-create", targetUnitId: unit.id, baseRevision: store.getState().session.units[0].revision,
+    action: "create", contentType: "teacher-note", title: "Explorar el agua", subtopic: "El agua",
+    html: "<h3>Explorar el agua</h3><p>Invite al grupo a observar.</p>",
+    artifact: { noteMode: "source", sourceKind: "activity" }
+  };
+  store.addProposal(create);
+  assert.equal(store.applyContentProposal(create).ok, true);
+  const note = store.getState().session.accepted.teacherNotes[0];
+  assert.equal(note.mode, "source");
+  assert.equal(note.activityId, "");
+  assert.equal(note.subtopic, "El agua");
+  const update = {
+    ...create, id: "source-note-update", action: "update", targetContentId: note.id,
+    baseRevision: store.getState().session.units[0].revision,
+    html: "<h3>Explorar el agua</h3><p>Guíe una conversación.</p>"
+  };
+  store.addProposal(update);
+  assert.equal(store.applyContentProposal(update).ok, true);
+  assert.equal(store.getState().session.accepted.teacherNotes.length, 1);
+  assert.match(store.getState().session.accepted.teacherNotes[0].html, /Guíe una conversación/);
+});
+
+test("aprobar una actividad conserva el contrato que usarán los especialistas", () => {
+  const store = createStore(createEmptySession({ id: "session" }));
+  const unit = store.createUnit({ unit: "5" });
+  const specification = {
+    type: "annex", code: "Anexo 5a", mechanic: "comparar escenas", useInstruction: "Analiza el Anexo 5a.",
+    studentAction: "Compara y explica.", requiredElements: ["río limpio", "río contaminado"],
+    visualBrief: "Dos escenas editoriales comparables del mismo río.", expectedProduct: "Comparación oral argumentada.",
+    placement: { mode: "consult-alongside-activity", baseProvidedBy: "resource", zoneDescription: "Durante el segundo paso." }
+  };
+  const proposal = {
+    id: "planned-activity", targetUnitId: unit.id, baseRevision: store.getState().session.units[0].revision,
+    action: "create", contentType: "activity", title: "Compara el río", html: "<div class=\"activity\"></div>",
+    artifact: { resourceSpecifications: [specification] }
+  };
+  store.addProposal(proposal);
+  assert.equal(store.applyContentProposal(proposal).ok, true);
+  const accepted = store.getState().session.accepted.activities.find((activity) => activity.title === "Compara el río");
+  assert.deepEqual(accepted?.resourceSpecifications, [specification]);
+});
+
+test("el navegador no reescribe la unidad mientras los workers guardan checkpoints", () => {
+  const main = fs.readFileSync(path.join(dirname, "../public/charly-brown/main.js"), "utf8");
+  assert.match(main, /activeUnit\?\.automation\?\.status === "running"/);
+  assert.match(main, /unitAutomationRun\?\.persistentId/);
+  assert.match(main, /Autoguardado aplazado: la producción posee la unidad activa/);
+});
+
+test("una pestaña obsoleta no puede sobrescribir recursos creados por los especialistas", () => {
+  const storage = fs.readFileSync(path.join(dirname, "../public/charly-brown/sessions-store.js"), "utf8");
+  const main = fs.readFileSync(path.join(dirname, "../public/charly-brown/main.js"), "utf8");
+  assert.match(storage, /serverRev !== clientRev/);
+  assert.match(storage, /conflict\.code = "REVISION_CONFLICT"/);
+  assert.doesNotMatch(storage, /Math\.max\(serverRev, clientRev\) \+ 1/);
+  assert.match(main, /stale session write prevented/);
+  assert.match(main, /La sesión se actualizó con la versión más reciente del servidor/);
+});
+
+test("el guardado compacta alias, artefactos duplicados y SVG heredados", () => {
+  const storage = fs.readFileSync(path.join(dirname, "../public/charly-brown/sessions-store.js"), "utf8");
+  const state = fs.readFileSync(path.join(dirname, "../public/charly-brown/state.js"), "utf8");
+  assert.match(storage, /reading: null/);
+  assert.match(storage, /delete artifact\.assets/);
+  assert.match(storage, /delete artifact\.resourceSpecifications/);
+  assert.match(storage, /<svg\\b\[\\s\\S\]\*\?<\\\/svg>/);
+  assert.match(state, /raw\.reading \|\| raw\.accepted\?\.reading/);
+  assert.match(state, /raw\.sya \|\| raw\.accepted\?\.sya/);
 });
 
 test("migra la raíz heredada sin perder conversación", () => {
@@ -468,7 +543,8 @@ test("la automatización usa toda la secuencia y deja secciones y subtemas contr
   const acceptedPanel = fs.readFileSync(path.join(dirname, "../public/charly-brown/accepted-panel.js"), "utf8");
   assert.match(main, /getCompleteSyaGroupedByCategory/);
   assert.match(main, /buildAutomatedActivityQueue\(groups, \{ unit \}\)/);
-  assert.match(main, /generateAutomatedActivity/);
+  assert.match(main, /startProduction\(session\.id, selectedUnit\.id\)/);
+  assert.doesNotMatch(main, /function generateAutomatedActivity/);
   assert.match(sya, /export function getCompleteSyaGroupedByCategory/);
   assert.match(sya, /fields\.T \|\| fallbackFields\.T/);
   assert.match(acceptedPanel, /openByDefault = false/);
@@ -575,4 +651,42 @@ test("la automatización es una acción limpia con indicador circular en el icon
   assert.match(css, /\.cb-automation-button::after\s*\{[\s\S]*?width: 22px;[\s\S]*?border-radius: 50%;[\s\S]*?animation: cb-specifications-pointer 7s ease-out infinite;/);
   assert.match(css, /\.cb-automation-button:hover,[\s\S]*?background: var\(--cb-unit-accent\);/);
   assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.cb-automation-button::after/);
+});
+
+test("la automatización utiliza el nuevo modal de progreso con escenario de agentes y card compacta", () => {
+  const html = fs.readFileSync(path.join(dirname, "../public/charlyMCPeditor.html"), "utf8");
+  const accepted = fs.readFileSync(path.join(dirname, "../public/charly-brown/accepted-panel.js"), "utf8");
+  const prodClient = fs.readFileSync(path.join(dirname, "../public/charly-brown/production-client.js"), "utf8");
+  const main = fs.readFileSync(path.join(dirname, "../public/charly-brown/main.js"), "utf8");
+  const css = fs.readFileSync(path.join(dirname, "../public/charly-brown/charly-brown.css"), "utf8");
+
+  // 1. Modal en HTML
+  assert.match(html, /id="cbProductionProgressModal"/);
+  assert.match(html, /id="cbProductionProgress"/);
+
+  // 2. Card compacta en accepted-panel.js
+  assert.match(accepted, /class="cb-automation-spinner-panel cb-compact-automation-card"/);
+  assert.match(accepted, /id="cbOpenProductionModalBtn"/);
+  assert.match(accepted, /cb:open-production-modal/);
+
+  // 3. Portadas de agentes en STAGE_META
+  assert.match(prodClient, /agentePrimero\.png/);
+  assert.match(prodClient, /agenteSegundo\.png/);
+  assert.match(prodClient, /agenteTercero\.png/);
+  assert.match(prodClient, /agenteCuarto\.png/);
+  assert.match(prodClient, /agenteQuinto\.png/);
+  assert.match(prodClient, /agentesexto\.png/);
+  assert.match(prodClient, /cb-solo-agent-stage/);
+  assert.match(prodClient, /cb-solo-celebration-stage/);
+
+  // 4. Control del modal en main.js
+  assert.match(main, /function openProductionProgressModal\(\)/);
+  assert.match(main, /function closeProductionProgressModal\(\)/);
+  assert.match(main, /bindProductionProgressModalControls/);
+
+  // 5. Estilos en CSS
+  assert.match(css, /\.cb-compact-automation-card/);
+  assert.match(css, /\.cb-modal-panel--production/);
+  assert.match(css, /\.cb-solo-agent-stage/);
+  assert.match(css, /\.cb-solo-celebration-stage/);
 });

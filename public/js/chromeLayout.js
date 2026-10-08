@@ -25,6 +25,7 @@
     'mindmapcreator.html': { title: 'Mindmap Creator', header: 'simple' },
     'podcaster.html': { title: 'Snoopy Editor', header: 'simple' },
     'imagecreator.html': { title: 'Image Creator', header: 'simple' },
+    'schroedersoundlab.html': { title: 'Schroeder Sound Lab', header: 'simple' },
     'lecturasgame.html': { title: 'Lecturas Game', header: 'simple' },
     'moodlecourse.html': { title: 'Charly Brown Gestion de cursos Aprende', header: 'simple' },
     'voicetranscribe.html': { title: 'Charly Brown Session Recorder', header: 'simple' },
@@ -220,6 +221,7 @@
         <div class="header-user-area">
           <span id="headerUserEmail" class="header-user-email" title="Usuario autenticado"></span>
         </div>
+        <div id="cbHeaderActions" class="cb-header-actions" aria-label="Acciones del encabezado"></div>
       `;
     }
 
@@ -272,6 +274,7 @@
       <div class="header-user-area">
         <span id="headerUserEmail" class="header-user-email" title="Usuario autenticado"></span>
       </div>
+      <div id="cbHeaderActions" class="cb-header-actions" aria-label="Acciones del encabezado"></div>
     `;
   }
 
@@ -301,7 +304,8 @@
           { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Rooms' },
           { href: 'MindmapCreator.html', icon: 'fas fa-brain', label: 'Mindmap Creator' },
           { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
-          { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' }
+          { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' },
+          { href: 'schroederSoundLab.html', icon: 'fas fa-wave-square', label: 'Schroeder Sound Lab' }
         ]
       },
       {

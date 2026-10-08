@@ -3,19 +3,19 @@
  * Conectado con la API de Gemini / Vertex AI
  */
 
-import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
-import { showModal, closeActiveModal, showToast } from "./modals.js";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260923r4";
+import { showModal, closeActiveModal, showToast } from "./modals.js?v=20260923r1";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js?v=20260922r3";
+} from "../services/marcie-gemini-service.js?v=20260923r27";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js?v=20260922r3";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
+} from "../services/marcie-mode-service.js?v=20260923r27";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260924r4";
 
 function normalizeSourceText(value = "") {
   return String(value || "").trim().toLowerCase();
@@ -203,7 +203,7 @@ function bindStep(stepNumber, handler) {
   if (stepEl) {
     const card = stepEl.querySelector(".flex-1");
     if (card) {
-      card.style.cursor = "pointer";
+      card.classList.add("cursor-pointer");
       card.addEventListener("click", handler);
     }
   }
@@ -430,7 +430,7 @@ function handleAnalyzeStep({ getSession, onUpdateSession }) {
   });
 }
 
-// 3. Crear 4 propuestas editoriales por audiencia con Marcie
+// 3. Crear propuestas editoriales por audiencia con Marcie
 function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationState }) {
   const session = getSession();
   if (!session) return;
@@ -459,8 +459,8 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
             <span class="badge ${audBadgeClass} text-[10px] font-semibold px-2 py-0.5">${p.audienceLabel || p.audience}</span>
             ${hasArticle ? '<span class="badge badge-success text-[10px] px-2 py-0.5"><span class="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 inline-block"></span>Redactado</span>' : '<span class="badge badge-warning text-[10px] px-2 py-0.5"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5 inline-block"></span>Sin redactar</span>'}
           </div>
-          <div class="rounded-md border ${Number(p.verifiedSourceCount || 0) >= Number(p.targetSourceCount || 6) ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"} px-2.5 py-1.5 text-[10px] font-semibold">
-            Bibliografía verificada: ${Number(p.verifiedSourceCount || 0)}/${Number(p.targetSourceCount || 6)} fuentes
+          <div class="rounded-md border ${Number(p.verifiedSourceCount || 0) >= Number(p.targetSourceCount || 4) ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"} px-2.5 py-1.5 text-[10px] font-semibold">
+            Bibliografía verificada: ${Number(p.verifiedSourceCount || 0)}/${Number(p.targetSourceCount || 4)} fuentes
           </div>
           ${proposalSources.length ? `<details data-proposal-sources class="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px]"><summary class="cursor-pointer font-semibold text-slate-700">Ver bibliografía de esta propuesta</summary><ol class="mt-2 space-y-1.5">${proposalSources.map((source) => `<li><a class="text-teal-700 hover:underline" href="${escapeHtml(toSafeSourceUrl(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(getSourceCitationText(source, "apa"))}</a></li>`).join("")}</ol></details>` : ""}
           <h4 class="font-bold text-slate-900 text-sm leading-snug">${escapeHtml(p.title)}</h4>
@@ -728,9 +728,9 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
         const previousDossier = session.researchByAudience?.[aud] || {};
         const mergedSources = sanitizeTrustedSources([...(previousDossier.sources || []), ...(article.sources || []), ...(dossier.sources || [])]);
         const mergedReferences = [...(previousDossier.attributedReferences || []), ...(dossier.attributedReferences || [])].filter((reference, index, all) => all.findIndex((item) => `${item.sourceId}:${item.type}:${item.text}` === `${reference.sourceId}:${reference.type}:${reference.text}`) === index);
-        session.researchByAudience = { ...(session.researchByAudience || {}), [aud]: { ...dossier, sources: mergedSources, attributedReferences: mergedReferences, verifiedSourceCount: mergedSources.length, targetSourceCount: 6, verificationStatus: mergedSources.length >= 6 ? "verified" : "incomplete" } };
+        session.researchByAudience = { ...(session.researchByAudience || {}), [aud]: { ...dossier, sources: mergedSources, attributedReferences: mergedReferences, verifiedSourceCount: mergedSources.length, targetSourceCount: 4, verificationStatus: mergedSources.length >= 4 ? "verified" : "incomplete" } };
         const proposal = (session.proposals || []).find((item) => item.audience === aud);
-        if (proposal) Object.assign(proposal, { sourceIds: mergedSources.map((source) => source.id), verifiedSourceCount: mergedSources.length, targetSourceCount: 6, researchStatus: mergedSources.length >= 6 ? "verified" : "incomplete" });
+        if (proposal) Object.assign(proposal, { sourceIds: mergedSources.map((source) => source.id), verifiedSourceCount: mergedSources.length, targetSourceCount: 4, researchStatus: mergedSources.length >= 4 ? "verified" : "incomplete" });
         article.sources = mergedSources;
         article.researchSources = article.sources;
         article.researchDossier = session.researchByAudience[aud];
@@ -799,9 +799,11 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
         session,
         topic: session.topic || session.title,
         signals: session.trends?.[0]?.signals || [],
-        onResearchProgress: async ({ proposal, index, total }) => {
-          loadingContainer.textContent = `Verificando bibliografía ${index + 1}/${total}: ${proposal.audienceLabel || proposal.audience}...`;
-          await saveMarcieSession(session);
+        onResearchProgress: async ({ proposal, dossier, index, total }) => {
+          loadingContainer.textContent = dossier
+            ? `Bibliografía verificada ${index + 1}/${total}: ${proposal.audienceLabel || proposal.audience}.`
+            : `Verificando bibliografía ${index + 1}/${total}: ${proposal.audienceLabel || proposal.audience}...`;
+          if (dossier) await saveMarcieSession(session);
         }
       });
 
@@ -892,7 +894,7 @@ function handleReviewStep({ getSession, onUpdateSession }) {
           <section class="w-full md:w-1/3 rounded-xl border border-slate-200 bg-white shadow-sm p-5 flex flex-col gap-3">
             <p class="text-[11px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Resumen editorial</p>
             <div class="flex items-start gap-3">
-              <div class="text-4xl font-black text-slate-900 leading-none" id="audit-score">${hasExistingAudit ? (session.audit.readabilityScore || 92) : "--"}</div>
+              <div class="text-4xl font-black text-slate-900 leading-none" id="audit-score">${hasExistingAudit ? (session.audit.reviewStatus === "pending" ? "--" : (session.audit.readabilityScore || 92)) : "--"}</div>
               <div>
                 <p class="text-sm font-semibold text-slate-800">Puntaje Editorial</p>
                 <p class="text-[11px] text-slate-500 mt-0.5">Evaluación de tono, claridad y estructura.</p>
@@ -935,7 +937,7 @@ function handleReviewStep({ getSession, onUpdateSession }) {
     const allIssues = Array.isArray(reviewResult?.issues) ? reviewResult.issues : [];
     const unresolvedIssues = getUnresolvedIssues(allIssues);
 
-    document.getElementById("audit-score").textContent = reviewResult.readabilityScore || (allIssues.length === 0 || unresolvedIssues.length === 0 ? 98 : 92);
+    document.getElementById("audit-score").textContent = reviewResult.reviewStatus === "pending" ? "--" : (reviewResult.readabilityScore || (allIssues.length === 0 || unresolvedIssues.length === 0 ? 98 : 92));
 
     if (allIssues.length === 0) {
       document.getElementById("audit-summary").textContent = "No se encontraron problemas. ¡El artículo está excelente!";
@@ -1032,6 +1034,10 @@ Regenera el texto editorial manteniendo estructura, enfoque, tono y fuentes, pri
   };
 
   const approveArticle = async () => {
+    if (session.audit?.reviewStatus === "pending") {
+      showToast("La revisión automática sigue pendiente. Vuelve a analizar el artículo antes de aprobarlo.", "error");
+      return;
+    }
     const unresolved = getUnresolvedIssues(session.audit?.issues || []);
     if (unresolved.length) {
       showToast(`Quedan ${unresolved.length} hallazgos por resolver antes de aprobar.`, "error");

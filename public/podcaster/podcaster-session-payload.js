@@ -71,6 +71,31 @@ function normalizeDialogueVideoMapForCloud(raw = {}) {
   );
 }
 
+function makePodcastVideoConfigFirestoreSafe(raw = {}) {
+  const config = raw && typeof raw === "object" ? raw : {};
+  const track = config.freeVoiceTrack && typeof config.freeVoiceTrack === "object"
+    ? config.freeVoiceTrack
+    : null;
+  if (!track || !Array.isArray(track.clips)) return config;
+  return {
+    ...config,
+    freeVoiceTrack: {
+      ...track,
+      // Firestore rejects arrays nested directly inside arrays. Store phrase
+      // boundaries as records in the cloud; normalizeFreeVoiceTrack accepts
+      // both this representation and the legacy [start, end] tuple format.
+      clips: track.clips.map((clip) => ({
+        ...clip,
+        phraseRanges: Array.isArray(clip?.phraseRanges)
+          ? clip.phraseRanges.map((range) => Array.isArray(range)
+            ? { startMs: Number(range[0]) || 0, endMs: Number(range[1]) || 0 }
+            : range)
+          : []
+      }))
+    }
+  };
+}
+
 export function buildCloudSessionPayload(source = null, panelMusicState = {}, chatState = [], deps = {}) {
   if (!source || typeof source !== "object") return null;
 
@@ -87,6 +112,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     getSpeakerScenarioVariantsMap,
     getGlobalScenarioDeck,
     normalizeDisfluencyConfig,
+    normalizeTtsDirectionConfig,
     DEFAULT_DISFLUENCY_CONFIG,
     resolvePanelMusicTrackKind,
     getPanelMusicUploadedTracks,
@@ -229,6 +255,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     speakerScenarioVariantsMap: getSpeakerScenarioVariantsMap?.(source) || {},
     globalScenarioDeck: getGlobalScenarioDeck?.(source) || null,
     disfluencyDefaults: normalizeDisfluencyConfig?.(source?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG) || {},
+    ttsDirectionDefaults: normalizeTtsDirectionConfig?.(source?.ttsDirectionDefaults || {}) || {},
     panelMusicConfig: {
       preset: String(panelMusicConfig.preset || "ambient"),
       volume: normalizePercent(panelMusicConfig.volume, 22),
@@ -241,6 +268,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicConfig.stabilize === true,
       limiterEnabled: panelMusicConfig.limiterEnabled === true,
+      duckingWhenFreeVoiceEnabled: panelMusicConfig.duckingWhenFreeVoiceEnabled !== false,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind?.(panelMusicConfig.selectedTrackKind) || "preset",
       loopEnabled: panelMusicConfig.loopEnabled !== false,
@@ -306,6 +334,8 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             downloadUrl: String(track?.downloadUrl || "").trim(),
             storagePath: String(track?.storagePath || "").trim(),
             localMediaCacheKey: String(track?.localMediaCacheKey || "").trim(),
+            model: String(track?.model || "").trim(),
+            prompt: String(track?.prompt || "").trim(),
             updatedAt: String(track?.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
             mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(track?.mutedLoopIndexes || []) || [],
             montageVolume: Math.max(0, Math.min(100, Number(track?.montageVolume ?? 100))),
@@ -396,7 +426,9 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
       : {},
     dialogueAudioMap: getDialogueAudioMap?.(source) || {},
     dialogueAudioDeletedAtMap: source.dialogueAudioDeletedAtMap || {},
-    podcastVideoConfig: normalizePodcastVideoConfig?.(source?.podcastVideoConfig || {}) || {},
+    podcastVideoConfig: makePodcastVideoConfigFirestoreSafe(
+      normalizePodcastVideoConfig?.(source?.podcastVideoConfig || {}) || {}
+    ),
     creativeVideoConfig: normalizeCreativeVideoConfig?.(source?.creativeVideoConfig || {}) || {},
     visualEffectsMap: source?.visualEffectsMap || {},
     stylizedTextMap: source?.stylizedTextMap || {}

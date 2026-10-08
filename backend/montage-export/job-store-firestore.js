@@ -99,6 +99,50 @@ function sanitizePersistedRenderedSegments(renderedSegments = []) {
   };
 }
 
+function sanitizePersistedStopMotion(stopMotion = null) {
+  const source = stopMotion && typeof stopMotion === "object" ? stopMotion : null;
+  if (!source || !Array.isArray(source.frames)) {
+    return {
+      sanitizedStopMotion: source,
+      redacted: false
+    };
+  }
+  let redacted = false;
+  const frames = source.frames.map((frame) => {
+    const sourceFrame = frame && typeof frame === "object" ? frame : null;
+    if (!sourceFrame) return frame;
+    const nextFrame = { ...sourceFrame };
+    if (typeof nextFrame.dataUrl === "string" && nextFrame.dataUrl.trim().startsWith("data:")) {
+      delete nextFrame.dataUrl;
+      redacted = true;
+    }
+    if (typeof nextFrame.localDataUrl === "string" && nextFrame.localDataUrl.trim().startsWith("data:")) {
+      delete nextFrame.localDataUrl;
+      redacted = true;
+    }
+    return nextFrame;
+  });
+  const isMusicBeat = String(source.timingMode || "").trim().toLowerCase() === "music-beat";
+  const sanitizedStopMotion = {
+    version: Math.max(1, Math.round(Number(source.version || 1) || 1)),
+    timingMode: isMusicBeat ? "music-beat" : "fit-scene",
+    ...(Array.isArray(source.frameWeights)
+      ? { frameWeights: source.frameWeights.map(Number).filter(Number.isFinite) }
+      : {}),
+    ...(isMusicBeat ? {
+      beatPositions: Array.isArray(source.beatPositions)
+        ? source.beatPositions.map(Number).filter(Number.isFinite)
+        : [],
+      beatAnalysisVersion: Math.max(1, Math.round(Number(source.beatAnalysisVersion || 1) || 1))
+    } : {}),
+    frames
+  };
+  return {
+    sanitizedStopMotion,
+    redacted
+  };
+}
+
 function sanitizePersistedMediaRecord(record = null) {
   const source = record && typeof record === "object" ? record : null;
   if (!source) {
@@ -116,6 +160,11 @@ function sanitizePersistedMediaRecord(record = null) {
   if (typeof nextRecord.localDataUrl === "string" && nextRecord.localDataUrl.trim().startsWith("data:")) {
     delete nextRecord.localDataUrl;
     redacted = true;
+  }
+  if (nextRecord.stopMotion && typeof nextRecord.stopMotion === "object") {
+    const sanitizedStopMotionResult = sanitizePersistedStopMotion(nextRecord.stopMotion);
+    nextRecord.stopMotion = sanitizedStopMotionResult.sanitizedStopMotion;
+    if (sanitizedStopMotionResult.redacted) redacted = true;
   }
   return {
     sanitizedRecord: nextRecord,
@@ -153,7 +202,10 @@ function summarizePersistedMontageEntry(entry = null) {
         mimeType: String(source.video.mimeType || "").trim(),
         type: String(source.video.type || source.video.mediaKind || "").trim(),
         mediaKind: String(source.video.mediaKind || source.video.type || "").trim(),
-        localMediaCacheKey: String(source.video.localMediaCacheKey || "").trim()
+        localMediaCacheKey: String(source.video.localMediaCacheKey || "").trim(),
+        ...(source.video.stopMotion && typeof source.video.stopMotion === "object"
+          ? { stopMotion: sanitizePersistedStopMotion(source.video.stopMotion).sanitizedStopMotion }
+          : {})
       })
       : null,
     audio: source.audio && typeof source.audio === "object"

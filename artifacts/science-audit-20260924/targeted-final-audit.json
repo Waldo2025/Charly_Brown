@@ -1,0 +1,865 @@
+{
+  "startedAt": "2026-09-25T14:31:33.211Z",
+  "coverage": {
+    "profiles": 2,
+    "viewports": [
+      {
+        "name": "desktop",
+        "width": 1280,
+        "height": 900
+      },
+      {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "assets": [
+      "none",
+      "ready",
+      "missing"
+    ],
+    "surfaces": [
+      "preview",
+      "export-module-bundle"
+    ],
+    "exportNote": "Source runtime compiled in-memory with esbuild plus export stylesheet. Final editor ZIP packaging and deployment are separate integration checks."
+  },
+  "checks": [
+    {
+      "case": "preview/mobile/none/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 673.09375,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 344,
+        "height": 229
+      }
+    },
+    {
+      "case": "preview/desktop/none/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1201.21875,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/none/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 694,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 366,
+        "height": 229
+      }
+    },
+    {
+      "case": "export/desktop/none/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/none/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 693.875,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 366,
+        "height": 308
+      }
+    },
+    {
+      "case": "export/desktop/none/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "preview/mobile/none/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 672.96875,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 344,
+        "height": 308
+      }
+    },
+    {
+      "case": "preview/desktop/none/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1201.21875,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/ready/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 694,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 366,
+        "height": 229
+      }
+    },
+    {
+      "case": "export/desktop/ready/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/ready/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 693.875,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 366,
+        "height": 308
+      }
+    },
+    {
+      "case": "export/desktop/ready/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "preview/mobile/ready/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 673.09375,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 344,
+        "height": 229
+      }
+    },
+    {
+      "case": "preview/desktop/ready/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1201.21875,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/missing/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 694,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 366,
+        "height": 229
+      }
+    },
+    {
+      "case": "export/desktop/missing/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "preview/mobile/ready/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 672.96875,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 344,
+        "height": 308
+      }
+    },
+    {
+      "case": "preview/desktop/ready/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1201.21875,
+        "height": 150
+      }
+    },
+    {
+      "case": "export/mobile/missing/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 366,
+        "height": 340
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 12,
+        "y": 693.875,
+        "width": 366,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 366,
+        "height": 308
+      }
+    },
+    {
+      "case": "export/desktop/missing/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 925,
+        "height": 520
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 20.46875,
+        "y": 559.8125,
+        "width": 96.34375,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1239.0625,
+        "height": 150
+      }
+    },
+    {
+      "case": "preview/mobile/missing/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 673.09375,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 344,
+        "height": 229
+      }
+    },
+    {
+      "case": "preview/desktop/missing/physics:proyectiles",
+      "model": "projectile",
+      "initialMeasurement": {
+        "value": 40.816326530612244,
+        "range": 40.816326530612244,
+        "flightTime": 2.8861501272920305,
+        "maxHeight": 10.204081632653057,
+        "initialVelocity": 20,
+        "angle": 45,
+        "gravity": 9.8,
+        "unit": "m",
+        "label": "Alcance ideal · vuelo 2.89 s · altura máxima 10.2 m",
+        "formula": "R = v₀² · sen(2θ) / g; t = 2v₀·sen(θ)/g; hₘáx = v₀²·sen²(θ)/(2g)"
+      },
+      "value": 40.816326530612244,
+      "changedControls": 6,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 3,
+        "width": 1201.21875,
+        "height": 150
+      }
+    },
+    {
+      "case": "preview/mobile/missing/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 344,
+        "height": 194
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 23,
+        "y": 802.96875,
+        "width": 344,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 344,
+        "height": 308
+      }
+    },
+    {
+      "case": "preview/desktop/missing/biology:adn",
+      "model": "genetics-expression",
+      "initialMeasurement": {
+        "value": 48,
+        "geneticAccuracy": 48,
+        "basePairBalance": 50,
+        "replicationSpeed": 3,
+        "unit": "%",
+        "label": "Pares de bases correctos",
+        "formula": "exactitud = 100 − (|A−T| + |C−G|)/2 − mutaciones"
+      },
+      "value": 48,
+      "changedControls": 8,
+      "diagram": false,
+      "viewport": {
+        "width": 887,
+        "height": 499
+      },
+      "overflow": false,
+      "actionBounds": {
+        "x": 39.390625,
+        "y": 547.265625,
+        "width": 100.046875,
+        "height": 40
+      },
+      "controls": {
+        "count": 4,
+        "width": 1201.21875,
+        "height": 150
+      }
+    }
+  ],
+  "failures": [],
+  "pageErrors": [],
+  "screenshots": [
+    {
+      "case": "preview/desktop/none/physics:proyectiles",
+      "file": "screenshots/desktop-physics-proyectiles.png",
+      "controlsFile": "screenshots/desktop-physics-proyectiles-controls.png"
+    },
+    {
+      "case": "preview/mobile/none/physics:proyectiles",
+      "file": "screenshots/mobile-physics-proyectiles.png",
+      "controlsFile": "screenshots/mobile-physics-proyectiles-controls.png"
+    },
+    {
+      "case": "preview/desktop/none/biology:adn",
+      "file": "screenshots/desktop-biology-adn.png",
+      "controlsFile": "screenshots/desktop-biology-adn-controls.png"
+    },
+    {
+      "case": "preview/mobile/none/biology:adn",
+      "file": "screenshots/mobile-biology-adn.png",
+      "controlsFile": "screenshots/mobile-biology-adn-controls.png"
+    }
+  ],
+  "sourceHashes": {
+    "science-simulator-runtime.mjs": "5337c647a7aa572b672ab9abd30a5d257c600eae3119e7c57851254b8c493e84",
+    "science-model-math.mjs": "00cfdbecf5a978687becd6bbb4065f90e5ef1ab1f5340faac22c6f47d2f57866",
+    "science-model-physics.mjs": "d1ea4b1e5a7e03548d641341ac962ac36786e2f1e904e2be4d9bc5433ee1dfb8",
+    "science-model-biology.mjs": "add05e1e357ab9af32a1d1d7f3a8ffc3cf350697e283a6206e8eb6780de6535a"
+  },
+  "completedAt": "2026-09-25T14:31:37.286Z"
+}

@@ -1,11 +1,11 @@
-import { experience } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
+import { experience } from "./escape-room-experience.mjs?v=20260924-coordinate-grid-v12";
 import { experienceEditorFields, updateExperienceEditor } from "./escape-room-experience-authoring.mjs?v=20260912-text-pieces-v11";
 import {
   normalizeAcceptedAnswers,
   normalizePairList,
   normalizeSequenceItems,
   normalizeTextList
-} from "./escape-room-creator-model.mjs?v=20260912-jigsaw-v63";
+} from "./escape-room-creator-model.mjs?v=20260925-signed-answers-v64";
 import { getGameMessages, normalizeGameLocale } from "./escape-room-game-i18n.mjs?v=20260904-briefing-editorial-v13";
 
 export const EDITORIAL_WORKBOOK_VERSION = 7;

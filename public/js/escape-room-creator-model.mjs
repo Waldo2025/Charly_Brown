@@ -1,4 +1,4 @@
-import { experience } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
+import { experience } from "./escape-room-experience.mjs?v=20260924-coordinate-grid-v12";
 import { normalizeGameLocale } from "./escape-room-game-i18n.mjs";
 
 const DEFAULT_TEXT_SUBTYPE = "palabra";
@@ -100,19 +100,31 @@ export function resolveFinalPasscode(project = {}) {
   return { code: buildFallbackFinalPasscode(project), isFallback: true, source: "fallback" };
 }
 
-export function normalizeAcceptedAnswers(value) {
+export function normalizeAcceptedAnswers(value, subtype = "") {
   if (Array.isArray(value)) {
-    return [...new Set(value.flatMap((entry) => normalizeAcceptedAnswers(entry)).filter(Boolean))];
+    return [...new Set(value.flatMap((entry) => normalizeAcceptedAnswers(entry, subtype)).filter(Boolean))];
   }
 
   const raw = String(value ?? "").trim();
   if (!raw) return [];
 
+  const normSubtype = subtype ? normalizeTextSubtype(subtype) : "";
+
   return [...new Set(raw
     .split(/[\r\n|;]+/)
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .map((entry) => normalizeBaseText(entry))
+    .map((entry) => {
+      if (normSubtype === "numero" || (!normSubtype && /^[-+]?\s*\d+(?:[.,]\d+)?$/.test(entry))) {
+        const cleanEntry = entry.replace(/\s+/g, "").replace(/,/g, ".");
+        const num = Number(cleanEntry);
+        return Number.isFinite(num) ? String(num) : normalizeBaseText(entry);
+      }
+      if (normSubtype === "codigo_corto" || (!normSubtype && /[-+/*=<>%^]/.test(entry) && !/\s/.test(entry))) {
+        return entry.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "");
+      }
+      return normalizeBaseText(entry);
+    })
     .filter(Boolean))];
 }
 
@@ -132,7 +144,7 @@ export function normalizeAcceptedAnswersForSubtype(value, subtype = DEFAULT_TEXT
   const compatibleAnswers = normalizedSubtype === "palabra"
     ? rawAnswers.filter(isSingleWordAnswer)
     : rawAnswers;
-  return [...new Set(compatibleAnswers.flatMap((answer) => normalizeAcceptedAnswers(answer)))];
+  return [...new Set(compatibleAnswers.flatMap((answer) => normalizeAcceptedAnswers(answer, normalizedSubtype)))];
 }
 
 export function resolveTextSubtypeForAnswer(subtype = DEFAULT_TEXT_SUBTYPE, correctAnswer = "") {
@@ -613,26 +625,33 @@ export function normalizeEscapeRoomProject(data = {}) {
 }
 
 export function getMissionAcceptedAnswers(mission = {}) {
-  const accepted = normalizeAcceptedAnswers(mission.respuestas_aceptadas || []);
-  const source = accepted.length ? accepted : normalizeAcceptedAnswers(mission.respuesta_correcta || "");
+  const subtype = mission?.subtipo_respuesta || "frase_corta";
+  const accepted = normalizeAcceptedAnswers(mission.respuestas_aceptadas || [], subtype);
+  const source = accepted.length ? accepted : normalizeAcceptedAnswers(mission.respuesta_correcta || "", subtype);
   return [...new Set(source.map((answer) => normalizePlayerAnswer(answer, mission)).filter(Boolean))];
 }
 
 export function getQuestionAcceptedAnswers(question = {}) {
-  const accepted = normalizeAcceptedAnswers(question.respuestas_aceptadas || []);
-  const source = accepted.length ? accepted : normalizeAcceptedAnswers(question.respuesta_correcta || "");
+  const subtype = question?.subtipo_respuesta || "frase_corta";
+  const accepted = normalizeAcceptedAnswers(question.respuestas_aceptadas || [], subtype);
+  const source = accepted.length ? accepted : normalizeAcceptedAnswers(question.respuesta_correcta || "", subtype);
   return [...new Set(source.map((answer) => normalizePlayerAnswer(answer, question)).filter(Boolean))];
 }
 
 export function normalizePlayerAnswer(value, item = {}) {
-  const subtype = normalizeTextSubtype(item.subtipo_respuesta);
+  const subtype = typeof item === "string" ? normalizeTextSubtype(item) : normalizeTextSubtype(item?.subtipo_respuesta);
   const raw = String(value ?? "").trim();
 
   if (subtype === "numero") {
-    const digits = raw.replace(/[^\d.-]+/g, "");
-    if (!digits) return "";
-    const number = Number(digits);
+    const clean = raw.replace(/\s+/g, "").replace(/,/g, ".");
+    const match = clean.match(/^[-+]?\d+(?:\.\d+)?/);
+    if (!match) return "";
+    const number = Number(match[0]);
     return Number.isFinite(number) ? String(number) : "";
+  }
+
+  if (subtype === "codigo_corto") {
+    return raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "");
   }
 
   const base = normalizeBaseText(raw);

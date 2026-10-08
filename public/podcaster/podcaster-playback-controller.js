@@ -1,4 +1,6 @@
 import { resolveGeminiAudioTimelineDurationMs } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
+import { isAssetApiStoragePath, normalizeAssetStoragePath } from "./podcaster-authorized-asset-resolver.js?v=2026-10-05.gs-path-normalize-1";
+import { normalizeFreeVoiceTrack } from "./podcaster-free-voice-track.js?v=2026-10-05.gemini-inspector-1";
 import {
   createPodcasterFinalLimiterNode,
   normalizePodcasterFinalLimiterSettings
@@ -100,6 +102,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.dialogueAudioActivePrepareAtMs = 0;
     this.lastTickMs = 0;
     this.cachedTickEntries = null;
+    this.cachedTickSessionRef = null;
     this.cachedTickEntriesTime = 0;
     this.clockId = null;
     this.audioCtx = null;
@@ -296,6 +299,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?storagePath=${encodeURIComponent(cleanPath)}`);
     }
     if (!cleanUrl) return "";
+    const derivedGsPath = this.toFirebaseStorageGsUrl(cleanUrl);
+    if (derivedGsPath) {
+      return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?storagePath=${encodeURIComponent(derivedGsPath)}`);
+    }
     return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?url=${encodeURIComponent(cleanUrl)}`);
   }
   normalizeProxyMediaComparableUrl(url = "") {
@@ -460,7 +467,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       mediaOffsetXPct: state.mediaOffsetXPct,
       mediaOffsetYPct: state.mediaOffsetYPct,
       mediaMotionPreset: state.mediaMotionPreset,
-      visualEffects: session?.visualEffectsMap?.[entry?.rowId] || null,
+      visualEffects: this.resolveSceneVisualEffects(entry?.rowId, session),
       mediaKind: this.isImageStageEntry(entry) ? "image" : "video",
       durationSec: Math.max(0.2, Number(entry?.effectiveDurationMs || entry?.durationMs || 12000) / 1000)
     });
@@ -550,6 +557,19 @@ export class PodcasterPlaybackController extends EventEmitter {
         requestAnimationFrame(refresh);
       });
     }
+  }
+  resolveSceneVisualEffects(rowId = "", session = null) {
+    const source = session || this.state.session || this.deps?.getActiveSession?.() || {};
+    const key = String(rowId || "").trim();
+    return source?.visualEffectsMap?.[key]
+      || source?.session?.visualEffectsMap?.[key]
+      || source?.payload?.visualEffectsMap?.[key]
+      || source?.script?.visualEffectsMap?.[key]
+      || source?.config?.visualEffectsMap?.[key]
+      || source?.podcastStudioUiState?.visualEffectsMap?.[key]
+      || source?.podcastVideoConfig?.visualEffectsMap?.[key]
+      || source?.session?.podcastVideoConfig?.visualEffectsMap?.[key]
+      || {};
   }
   resetEntryVisualStateOnSurface(surfaceEl = null) {
     if (!surfaceEl) return;
@@ -693,12 +713,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     const now = performance.now();
     let entries;
     const targetMs = Math.max(0, Number(currentMs || 0));
-    if (this.cachedTickEntries && (now - this.cachedTickEntriesTime) < 16) {
+    const stablePlaybackCache = this.state.isPlaying === true
+      && this.cachedTickEntries
+      && this.cachedTickSessionRef === this.state.session;
+    if (stablePlaybackCache || (this.cachedTickEntries && (now - this.cachedTickEntriesTime) < 16)) {
       entries = this.cachedTickEntries;
     } else {
       entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
       this.cachedTickEntries = entries;
       this.cachedTickEntriesTime = now;
+      this.cachedTickSessionRef = this.state.session;
+      this.state.runtimeEntries = entries;
     }
     return (
       resolveTimelineEntryAtMs(entries, targetMs, {
@@ -725,7 +750,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const currentTimeSec = Number(videoEl.currentTime || 0) || 0;
     const driftSec = Math.abs(currentTimeSec - Number(targetTimeSec));
     if (driftSec < STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC) return false;
-    if (options.force === true || this.state.forceStageMediaSync === true || this.state.isPlaying !== true || options.isHoldActive === true) {
+    if (options.force === true || this.state.forceStageMediaSync === true || !this.isStageVideoPlaybackActive() || options.isHoldActive === true) {
       return true;
     }
     // During normal playback the visible surface must never be pulled
@@ -744,6 +769,19 @@ export class PodcasterPlaybackController extends EventEmitter {
         || STAGE_VIDEO_RESYNC_TOLERANCE_DEFAULT_SEC
     );
     return driftSec > toleranceSec;
+  }
+  // Local export drives tick() itself and schedules its own audio. Let the
+  // video decoder run continuously without starting the transport's clock.
+  isStageVideoPlaybackActive() {
+    return this.state.isPlaying === true || this.externalVideoPlayback === true;
+  }
+  setExternalVideoPlayback(enabled = false) {
+    this.externalVideoPlayback = enabled === true;
+    if (!this.externalVideoPlayback && !this.state.isPlaying) {
+      this.getStageVideoElements().forEach((video) => {
+        try { video.pause(); } catch (_) { }
+      });
+    }
   }
   clampVideoTimeToLastFrame(videoEl = null, requestedSec = 0) {
     const requested = Math.max(0, Number(requestedSec || 0));
@@ -893,6 +931,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
       }
       if (this.requiresAuthorizedAssetResolution(finalUrl)) return null;
+      // En modo streaming el proxy se guarda en blobCache como si ya estuviera
+      // resuelto; si la API de assets no puede firmar esa ruta, ese valor
+      // fantasma llegaba al <img> y devolvía 400.
+      if (!this.isAssetApiSignableProxyUrl(finalUrl)) return null;
       this.blobCache.set(url, finalUrl);
       const cacheKey = this.resolvePersistentMediaCacheKey(url);
       if (cacheKey && cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
@@ -917,7 +959,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!clean || !/\/api\/assets\/proxy-(?:media|image)/i.test(clean)) return false;
     try {
       const parsed = new URL(clean, window.location.origin);
-      const storagePath = String(parsed.searchParams.get("storagePath") || "").replace(/^\/+/, "");
+      // Las escenas guardadas antes de la normalización traen `gs://bucket/podcaster/...`
+      // en el query; sin quitar el bucket no se detectaban y se pedían sin auth (403).
+      const storagePath = normalizeAssetStoragePath(parsed.searchParams.get("storagePath") || "");
       return storagePath.startsWith("podcaster/sessions/");
     } catch (_) {
       return false;
@@ -958,6 +1002,12 @@ export class PodcasterPlaybackController extends EventEmitter {
           storagePath: String(record?.storagePath || "").trim()
         };
     if (!normalized.url) throw new Error("signed_asset_url_missing");
+    if (/^\/api\/assets\/proxy-(?:media|image)/i.test(normalized.url)) {
+      // A local backend can answer with its own same-origin proxy path instead
+      // of a signed Storage URL. Resolve it against the configured API base so
+      // it never falls back to the static dev server origin.
+      normalized.url = this.buildMediaProxyUrl(normalized.url) || normalized.url;
+    }
     this.authorizedAssetMetadataBySource.set(clean, {
       ...normalized,
       resolverSource: clean
@@ -1564,7 +1614,11 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
           return isCurrentRequest() ? finalUrl : "";
           } catch (e) {
-            console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
+            const isMissingAsset = Number(e?.status || e?.statusCode || e?.response?.status || 0) === 404
+              || /podcaster_session_not_found|asset_not_found/i.test(String(e?.message || e?.error || ""));
+            if (!isMissingAsset) {
+              console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
+            }
             throw e;
           } finally {
           if (this.fetchPromises.get(fetchPromiseKey) === p) this.fetchPromises.delete(fetchPromiseKey);
@@ -1715,6 +1769,20 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (!finalUrl) throw error;
           resp = await fetchResolvedAsset(finalUrl);
         }
+        let alternateProxyUnavailable = false;
+        if (resp.status === 404 && isProxyMediaUrl && this.deps?.resolveAlternateMediaProxyUrl) {
+          const alternateUrl = String(this.deps.resolveAlternateMediaProxyUrl(url) || "").trim();
+          if (alternateUrl && alternateUrl !== finalUrl) {
+            try {
+              resp = await fetchResolvedAsset(alternateUrl);
+              finalUrl = alternateUrl;
+            } catch (_) {
+              // A local miss plus an unreachable remote API is inconclusive.
+              // Leave the asset retryable instead of caching a permanent 404.
+              alternateProxyUnavailable = true;
+            }
+          }
+        }
         if (!resp.ok && resp.status !== 404 && authorizedProxyUrl) {
           // 403/expiry, throttling and temporary 5xx all get exactly one URL
           // renewal + retry. A confirmed 404 is permanent and must not retry.
@@ -1726,8 +1794,9 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Fallback local si falla o da 404 estando en localhost
         if (!resp.ok) {
-          const fetchError = new Error(`Fetch failed with status ${resp.status}`);
-          fetchError.status = Number(resp.status || 0);
+          const effectiveStatus = alternateProxyUnavailable ? 503 : Number(resp.status || 0);
+          const fetchError = new Error(`Fetch failed with status ${effectiveStatus}`);
+          fetchError.status = effectiveStatus;
           throw fetchError;
         }
 
@@ -1903,6 +1972,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.els = els;
     this.deps = deps;
     this.state.isInitialized = true;
+    window.PodcasterVideoPlayerControllerState = this.state;
+    window.PodcasterVideoPlayerSession = () => this.state.session || this.deps?.getActiveSession?.();
 
     // Asegurar compatibilidad de CORS para elementos existentes
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
@@ -1965,10 +2036,26 @@ export class PodcasterPlaybackController extends EventEmitter {
       try { audioEl.remove?.(); } catch (_) { }
     });
     this.dialoguePlayers = {};
+    (this._freeVoiceElements || new Set(Object.values(this.freeVoicePlayers || {}))).forEach((audioEl) => {
+      try { audioEl.pause(); audioEl.remove(); } catch (_) { }
+    });
+    this._freeVoiceElements = null;
+    this._freeVoiceCreateInflight = null;
+    this._freeVoicePlayersBySource = null;
+    this.freeVoicePlayers = {};
     this.audioCache = {};
     this.dialogueAudioSourceKeys = {};
     this.dialoguePreparationPromises.clear();
     this.stopBackgroundMusic();
+    // video-player can retain dialogue/background HTMLAudioElements created
+    // during prewarming. Stop the page-owned elements as well as the
+    // controller's dedicated background element, otherwise one prewarmed
+    // music source can continue after the transport reaches Stop.
+    if (document.getElementById('videoPlayerPage')) {
+      document.querySelectorAll('audio').forEach((audio) => {
+        try { audio.pause(); audio.currentTime = 0; } catch (_) { }
+      });
+    }
     if (this.backgroundAudio) {
       try { this.backgroundAudio.removeAttribute("src"); } catch (_) { this.backgroundAudio.src = ""; }
       try { this.backgroundAudio.load(); } catch (_) { }
@@ -2011,6 +2098,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.playbackRangePreparationSignature = "";
     this.playbackRangePreparationAtMs = 0;
     this.cachedTickEntries = null;
+    this.cachedTickSessionRef = null;
     this.cachedTickEntriesTime = 0;
     this.videoPrewarmKey = "";
     this.videoPrewarmPromise = null;
@@ -2407,8 +2495,13 @@ export class PodcasterPlaybackController extends EventEmitter {
             }
             const sourceUrl = parsed.searchParams.get("url");
             if (sourceUrl) {
-              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(sourceUrl)}`));
-              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-image?url=${encodeURIComponent(sourceUrl)}`));
+              // La API de assets sólo firma `storagePath`; con `url=` responde 400,
+              // así que se deriva la ruta del objeto de la propia URL de Storage.
+              const sourceStoragePath = this.toFirebaseStorageGsUrl(sourceUrl);
+              if (sourceStoragePath) {
+                variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(sourceStoragePath)}`));
+                variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(sourceStoragePath)}`));
+              }
             }
           }
         }
@@ -2999,7 +3092,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         trimInMs: 0
       }));
     }
-    segments = this.normalizeRuntimeDialogueSegments(segments, entries);
+    const excludedRowIds = new Set((Array.isArray(config?.geminiDialogueTrack?.excludedRowIds) ? config.geminiDialogueTrack.excludedRowIds : [])
+      .map((rowId) => String(rowId || "").trim()).filter(Boolean));
+    segments = this.normalizeRuntimeDialogueSegments(segments, entries)
+      .filter((segment) => !excludedRowIds.has(String(segment?.rowId || "").trim()));
     const toleranceMs = this.getTimelineLookupToleranceMs();
     const segment = segments
       .filter((candidate) => {
@@ -3636,6 +3732,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         try { audio.pause(); } catch (_) { }
       }
     });
+    (this._freeVoiceElements || Object.values(this.freeVoicePlayers || {}))
+      .forEach((audio) => { try { audio.pause(); } catch (_) { } });
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
       if (v) try { v.pause(); } catch (_) { }
     });
@@ -3700,6 +3798,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     this.stopBackgroundMusic();
+    if (document.getElementById('videoPlayerPage')) {
+      document.querySelectorAll('audio').forEach((audio) => {
+        try { audio.pause(); audio.currentTime = 0; } catch (_) { }
+      });
+    }
     this.applySceneMediaScale(null);
     this.syncStageMediaMotionPlaybackState(false);
     if (this.deps?.stopPanelMusic) { try { this.deps.stopPanelMusic(); } catch (_) { } }
@@ -3716,6 +3819,11 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
       } catch (_) { }
     });
+
+    // stop() no pausaba la voz libre: sólo pause() lo hacía, así que un elemento
+    // creado fuera del registry seguía sonando después de Detener.
+    (this._freeVoiceElements || Object.values(this.freeVoicePlayers || {}))
+      .forEach((audio) => { try { audio.pause(); } catch (_) { } });
 
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach(v => {
       if (v) try {
@@ -4017,6 +4125,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     const playheadRevision = this.playheadRevision;
     this.state.currentMs = ms;
     this.sceneMotionSyncRevision = Number(this.sceneMotionSyncRevision || 0) + 1;
+    const seekEntry = this.getEntryAtMs(ms);
+    if (seekEntry?.rowId) {
+      this.state.activeRowId = seekEntry.rowId;
+      if (this.deps?.podcastVideoState) {
+        this.deps.podcastVideoState.activeRowId = seekEntry.rowId;
+      }
+    }
 
     // All voices seek to the new timeline position, including those whose video
     // is elsewhere. syncAudio selects them by their own interval below.
@@ -4041,6 +4156,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const session = this.state.session || this.deps?.getActiveSession?.();
     this.cachedTickEntries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     this.cachedTickEntriesTime = performance.now();
+    this.cachedTickSessionRef = session;
     if (options.prepare === true) {
       await this.preparePlaybackRange({
         atMs: ms,
@@ -4100,6 +4216,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.deps.syncPodcastTimelinePlayhead(this.state.session, {
         currentMs: ms,
         totalMs: this.state.totalDurationMs,
+        entries: this.cachedTickEntries,
         lightweight: lightweight,
         suppressAutoScroll: options.suppressAutoScroll === true
       });
@@ -4338,11 +4455,152 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   // --- Audio ---
+  async syncFreeVoiceAudio(currentMs, speed, config = {}, isCurrent = () => true) {
+    const track = normalizeFreeVoiceTrack(config?.freeVoiceTrack);
+    const players = this.freeVoicePlayers ||= {};
+    const trackedElements = this._freeVoiceElements ||= new Set();
+    const inflightCreates = this._freeVoiceCreateInflight ||= new Map();
+    const playersBySource = this._freeVoicePlayersBySource ||= new Map();
+    const activeClips = (track.enabled ? track.clips : []).filter((clip) => (
+      currentMs >= clip.startMs && currentMs < clip.startMs + clip.trimOutMs - clip.trimInMs
+    ));
+    const activeIds = new Set(activeClips.map((clip) => clip.id));
+    const activePlayers = new Set([...activeIds].map((id) => players[id]).filter(Boolean));
+    Object.entries(players).forEach(([id, player]) => {
+      if (activeIds.has(id) || activePlayers.has(player)) return;
+      player.pause();
+      if (!track.enabled || !track.clips.some((clip) => clip.id === id)) {
+        if (!track.enabled) {
+          try { player.removeAttribute("src"); player.load?.(); } catch (_) { }
+          Object.entries(players).forEach(([alias, element]) => { if (element === player) delete players[alias]; });
+        } else {
+          delete players[id];
+        }
+        player.remove?.();
+        trackedElements.delete(player);
+        if (playersBySource.get(player.__freeVoicePlayerKey) === player) playersBySource.delete(player.__freeVoicePlayerKey);
+      }
+    });
+    const effectiveTrackPct = this._freeVoiceTrackVolumePct != null
+      ? this._freeVoiceTrackVolumePct
+      : track.volumePct;
+    let hasVoice = false;
+    for (const clip of activeClips) {
+      hasVoice ||= effectiveTrackPct > 0;
+      if (typeof Audio !== "function") continue;
+      const sourceKey = clip.storagePath || clip.downloadUrl;
+      const overlappingSourceClips = activeClips.filter((candidate) => (candidate.storagePath || candidate.downloadUrl) === sourceKey).length > 1;
+      const playerKey = overlappingSourceClips ? `${sourceKey}#${clip.id}` : sourceKey;
+      let player = players[clip.id];
+      if (overlappingSourceClips && player?.__freeVoicePlayerKey !== playerKey) {
+        if (player && !activePlayers.has(player)) {
+          player.pause();
+          player.remove?.();
+          trackedElements.delete(player);
+          if (playersBySource.get(player.__freeVoicePlayerKey) === player) playersBySource.delete(player.__freeVoicePlayerKey);
+        }
+        player = null;
+      }
+      if (!player && !overlappingSourceClips) player = playersBySource.get(playerKey);
+      if (player && player.dataset.sourceKey !== sourceKey) {
+        player.pause();
+        player.remove?.();
+        trackedElements.delete(player);
+        if (playersBySource.get(player.__freeVoicePlayerKey) === player) playersBySource.delete(player.__freeVoicePlayerKey);
+        delete players[clip.id];
+        player = null;
+      }
+      if (player) players[clip.id] = player;
+      if (!player) {
+        // Los cortes de una misma grabación comparten un único elemento de audio.
+        // Así dividir con C no crea ni precarga una copia por cada fragmento.
+        const pendingCreate = inflightCreates.get(playerKey);
+        if (pendingCreate) {
+          player = await pendingCreate.catch(() => null);
+          if (!player || !isCurrent()) continue;
+        } else {
+          const createPromise = (async () => {
+            const source = await this.resolveDialoguePlaybackAudioSource({ ...clip, durationSec: clip.sourceDurationMs / 1000 });
+            const liveSession = this.deps?.getActiveSession?.() || this.state.session;
+            const liveTrack = normalizeFreeVoiceTrack(this.deps?.getPodcastVideoConfig?.(liveSession)?.freeVoiceTrack);
+            const stillPresent = liveTrack.clips.some((item) => item.id === clip.id);
+            if (!source || !isCurrent() || !liveTrack.enabled || !stillPresent) return null;
+            const element = new Audio(source);
+            window.SnoopyAudioOutput?.register(element);
+            element.crossOrigin = "anonymous";
+            element.playsInline = true;
+            element.preload = "auto";
+            element.dataset.sourceKey = sourceKey;
+            element.__freeVoicePlayerKey = playerKey;
+            const container = this.getOrCreateDialogueAudioContainer?.();
+            if (container) container.appendChild(element);
+            trackedElements.add(element);
+            players[clip.id] = element;
+            playersBySource.set(playerKey, element);
+            return element;
+          })();
+          inflightCreates.set(playerKey, createPromise);
+          try {
+            player = await createPromise;
+          } finally {
+            if (inflightCreates.get(playerKey) === createPromise) inflightCreates.delete(playerKey);
+          }
+          if (!player) continue;
+        }
+      }
+      players[clip.id] = player;
+      const masterPct = Math.max(0, Math.min(100, Number(config?.masterVolume ?? 100) || 100));
+      const effectiveVolume = Math.max(0, Math.min(1, (effectiveTrackPct / 100) * (masterPct / 100)));
+      player.volume = effectiveVolume;
+      player.muted = effectiveVolume <= 0.0001;
+      player.playbackRate = Math.max(0.5, Math.min(10, Number(speed) || 1));
+      const targetSec = (clip.trimInMs + currentMs - clip.startMs) / 1000;
+      if (Math.abs((Number(player.currentTime) || 0) - targetSec) > (player.paused ? 0.15 : 0.35)) player.currentTime = targetSec;
+      if (this.state.isPlaying && !this.state.isBuffering && player.paused && !player.__freeVoicePlayPending) {
+        player.__freeVoicePlayPending = true;
+        try { await player.play(); } finally { player.__freeVoicePlayPending = false; }
+        if (!isCurrent() || !this.state.isPlaying || this.state.isBuffering) player.pause();
+      }
+    }
+    return hasVoice;
+  }
+
+  syncFreeVoiceVolume(volumePct = null) {
+    try {
+      const session = this.deps?.getActiveSession?.() || this.state.session;
+      const config = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+      const track = normalizeFreeVoiceTrack(config?.freeVoiceTrack);
+      const effectivePct = Number.isFinite(Number(volumePct))
+        ? Math.max(0, Math.min(100, Math.round(Number(volumePct))))
+        : track.volumePct;
+      this._freeVoiceTrackVolumePct = effectivePct;
+
+      if (session?.podcastVideoConfig?.freeVoiceTrack) {
+        session.podcastVideoConfig.freeVoiceTrack.volumePct = effectivePct;
+      }
+      if (this.state.session?.podcastVideoConfig?.freeVoiceTrack) {
+        this.state.session.podcastVideoConfig.freeVoiceTrack.volumePct = effectivePct;
+      }
+      if (this.state.config?.freeVoiceTrack) {
+        this.state.config.freeVoiceTrack.volumePct = effectivePct;
+      }
+
+      const masterPct = Math.max(0, Math.min(100, Number(config?.masterVolume ?? 100) || 100));
+      const targetVolume = Math.max(0, Math.min(1, (effectivePct / 100) * (masterPct / 100)));
+      Object.values(this.freeVoicePlayers || {}).forEach((player) => {
+        if (player) {
+          player.volume = targetVolume;
+          player.muted = targetVolume <= 0.0001;
+        }
+      });
+    } catch (_) { }
+  }
+
   async syncAudio(currentMs, speed, options = {}) {
     const canStartWhileBuffering = options.allowDuringBufferRecovery === true;
     const canStartPlayback = () => this.state.isPlaying === true
       && (this.state.isBuffering !== true || canStartWhileBuffering);
-    const session = this.state.session || this.deps?.getActiveSession?.();
+    const session = this.deps?.getActiveSession?.() || this.state.session;
     const syncMediaGeneration = this.mediaCacheGeneration;
     const syncPreparationGeneration = this.sessionMediaPreparationGeneration;
     const syncSessionId = String(session?.id || "").trim();
@@ -4354,14 +4612,18 @@ export class PodcasterPlaybackController extends EventEmitter {
       && syncPreparationGeneration === this.sessionMediaPreparationGeneration
       && syncAbortSignal?.aborted !== true
       && (requestedPlayheadRevision === null || requestedPlayheadRevision === this.playheadRevision)
-      && (!syncSessionId || syncSessionId === String(this.state.session?.id || "").trim());
+      && (!syncSessionId || syncSessionId === String(this.state.session?.id || session?.id || "").trim());
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
-    const config = this.deps?.getPodcastVideoConfig?.(session) || {};
+    const config = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
     const audioTrack = config.geminiDialogueTrack || { segments: [], enabled: true };
     this.state.audioTrack = audioTrack;
+    const hasFreeVoice = (config?.freeVoiceTrack?.clips?.length || Object.keys(this.freeVoicePlayers || {}).length)
+      ? await this.syncFreeVoiceAudio(currentMs, speed, config, isCurrentAudioSync)
+      : false;
+    const duckFreeVoiceEnabled = config?.audioMasterDuckFreeVoiceEnabled !== false;
     if (audioTrack.enabled === false) {
       for (const audio of Object.values(this.dialoguePlayers)) audio.pause();
-      if (!options.skipBackgroundMusic) await this.syncBackgroundMusic(currentMs, speed, false, options);
+      if (!options.skipBackgroundMusic) await this.syncBackgroundMusic(currentMs, speed, hasFreeVoice && duckFreeVoiceEnabled, options);
       return;
     }
 
@@ -4380,7 +4642,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         };
       });
     }
-    segments = this.normalizeRuntimeDialogueSegments(segments, entries);
+    const excludedRowIds = new Set((Array.isArray(audioTrack.excludedRowIds) ? audioTrack.excludedRowIds : [])
+      .map((rowId) => String(rowId || "").trim()).filter(Boolean));
+    segments = this.normalizeRuntimeDialogueSegments(segments, entries)
+      .filter((segment) => !excludedRowIds.has(String(segment?.rowId || "").trim()));
     const currentTimelineRowIds = this.collectDialogueRowIds(session, entries, segments);
 
 
@@ -4459,7 +4724,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     });
 
-    let hasVoice = activeDialogueVoiceRowIds.size > 0;
+    let hasVoice = activeDialogueVoiceRowIds.size > 0 || (hasFreeVoice && duckFreeVoiceEnabled);
 
     for (const segment of activeSegments) {
       const rowId = segment.rowId;
@@ -5035,6 +5300,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (this.backgroundAudio) {
       try {
         this.backgroundAudio.pause();
+        this.backgroundAudio.currentTime = 0;
       } catch (_) { }
     }
     this.backgroundSegmentGapStartMs = 0;
@@ -5064,6 +5330,27 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   // --- Video ---
+  // Un avance de fotograma dentro de la MISMA secuencia stop motion no es un
+  // cambio de escena: la voz sigue sonando y el fondo ya está compuesto. Si se
+  // trata como transición, el reloj y el audio se congelan en cada corte.
+  isStopMotionFrameAdvance(entry = null, currentMs = this.state.currentMs) {
+    if (!this.isImageStageEntry(entry)) return false;
+    const stopMotion = this.resolveEntryStopMotion(entry);
+    if (!stopMotion || !Array.isArray(stopMotion.frames) || stopMotion.frames.length < 2) return false;
+    const sources = new Set(
+      this.collectEntryStopMotionSources(entry)
+        .map((source) => this.normalizeTimelineSourceKey?.(String(source || "").trim()) || String(source || "").trim())
+        .filter(Boolean)
+    );
+    if (!sources.size) return false;
+    return [this.els?.podcastActiveSpeakerImage, this.els?.podcastActiveSpeakerImageAlt]
+      .filter(Boolean)
+      .some((imageEl) => imageEl.hidden !== true
+        && String(imageEl.style?.visibility || "").trim() !== "hidden"
+        && sources.has(this.normalizeTimelineSourceKey?.(String(imageEl.dataset?.src || "").trim())
+          || String(imageEl.dataset?.src || "").trim()));
+  }
+
   isStageEntryPresented(entry = null, currentMs = this.state.currentMs) {
     if (!entry || !this.hasStageVisualSurface(entry) || this.isColorSceneEntry(entry)) return true;
     if (this.isImageStageEntry(entry)) {
@@ -5150,7 +5437,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       let shouldCoordinateTransition = this.state.isPlaying === true
         && this.state.isBuffering !== true
         && !this.isStageEntryPresented(entry, currentMs)
-        && !this.isStageEntryPrepared(entry, currentMs);
+        && !this.isStageEntryPrepared(entry, currentMs)
+        && !this.isStopMotionFrameAdvance(entry, currentMs);
       let transitionToken = 0;
       const transitionRevision = requestedPlayheadRevision ?? this.playheadRevision;
       const transitionSessionId = String(this.state.session?.id || "").trim();
@@ -5185,8 +5473,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
 
       let stageReady = await this.syncStageSwitching(entry, transitionMs, {
-        awaitImageReady: shouldCoordinateTransition,
-        requirePlaybackStart: this.state.isPlaying === true && !shouldCoordinateTransition
+        awaitImageReady: shouldCoordinateTransition || this.externalVideoPlayback === true,
+        requirePlaybackStart: this.isStageVideoPlaybackActive() && !shouldCoordinateTransition
       });
       // A slot can be fully precomposed yet fail to start (decoder eviction,
       // autoplay rejection, transient browser pressure). Freeze at the cut and
@@ -5357,7 +5645,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       const ready = await this.setStageVideoSourceForElement(inactiveEl, nextSrc, {
         keepHidden: true,
         persistent: true,
-        forcePersistent: true,
         rowId: String(nextEntry?.rowId || "").trim(),
         entryKey: nextEntryKey
       });
@@ -5415,6 +5702,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         v.style.filter = "";
         v.style.transition = "";
         v.hidden = true;
+        v.style.zIndex = "1";
         try { v.pause(); } catch (_) { }
       }
     });
@@ -5424,6 +5712,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     [this.els?.podcastActiveSpeakerImage, this.els?.podcastActiveSpeakerImageAlt].forEach((imageEl) => {
       if (!imageEl) return;
       imageEl.style.opacity = 0;
+      imageEl.style.zIndex = "1";
       this.resetEntryVisualStateOnSurface(imageEl);
       imageEl.style.visibility = "hidden";
       imageEl.style.transform = "";
@@ -5467,6 +5756,49 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
   }
 
+  // `/api/assets` sólo firma rutas bajo `podcaster/` (normalizeStoragePath en
+  // functions/src/assets.js). Un proxy con cualquier otra ruta —o con `url=`,
+  // parámetro que ya no se lee— responde 400 invalid_storage_path, así que no
+  // puede usarse como src ni guardarse en la caché de medios.
+  isAssetApiSignableProxyUrl(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean || !/\/api\/assets\/proxy-(?:media|image)\?/i.test(clean)) return true;
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      if (parsed.searchParams.get("url")) return false;
+      return isAssetApiStoragePath(normalizeAssetStoragePath(parsed.searchParams.get("storagePath") || ""));
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // `/api/assets` sólo firma rutas bajo `podcaster/` (normalizeStoragePath en
+  // functions/src/assets.js). Las imágenes de la galería del creador
+  // (`images/<uid>/image-creator/...`) llegan como URL lógica de proxy porque ése
+  // es el handle estable que comparten editor, nube y reproductor; si se pide tal
+  // cual al navegador, responde 400 invalid_storage_path. Se convierte a la URL
+  // del SDK de Storage, que sí entrega el objeto al dueño (storage.rules).
+  async resolveNonAssetApiProxySource(src = "") {
+    const clean = String(src || "").trim();
+    if (!clean || !/\/api\/assets\/proxy-(?:media|image)\?/i.test(clean)) return "";
+    if (typeof this.deps?.resolveFirebaseStorageUrl !== "function") return "";
+    let storagePath = "";
+    try {
+      storagePath = normalizeAssetStoragePath(
+        new URL(clean, window.location.origin).searchParams.get("storagePath") || ""
+      );
+    } catch (_) {
+      return "";
+    }
+    if (!storagePath || isAssetApiStoragePath(storagePath)) return "";
+    const gsUrl = this.toFirebaseStorageGsUrl("", storagePath);
+    if (!gsUrl) return "";
+    const directUrl = String(await this.deps.resolveFirebaseStorageUrl(gsUrl) || "").trim();
+    // El SDK devuelve la entrada `gs://` cuando falla; usarla como src dejaría la
+    // escena sin imagen y taparía el error real.
+    return /^https?:/i.test(directUrl) ? directUrl : "";
+  }
+
   async resolveStageImageSource(src = "", options = {}) {
     const cleanSrc = String(src || "").trim();
     if (!cleanSrc) throw new Error("missing_image_source");
@@ -5475,6 +5807,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     // source. Prefer it so image transitions never fall back to the network.
     const cachedSource = options.forceRefresh === true ? "" : this.getBlobUrlSync(cleanSrc);
     if (cachedSource) return String(cachedSource).trim();
+
+    const gallerySource = await this.resolveNonAssetApiProxySource(cleanSrc);
+    if (gallerySource) return gallerySource;
 
     let resolvedSrc = cleanSrc;
     if (resolvedSrc.startsWith("gs://") && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
@@ -5485,13 +5820,27 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (isDirectFirebaseUrl
       && !resolvedSrc.includes("/api/assets/proxy-")) {
       let storagePath = "";
+      let hasDownloadToken = false;
       try {
-        const encodedObjectPath = String(new URL(resolvedSrc).pathname || "").split("/o/")[1] || "";
+        const parsedUrl = new URL(resolvedSrc);
+        const encodedObjectPath = String(parsedUrl.pathname || "").split("/o/")[1] || "";
         storagePath = encodedObjectPath ? decodeURIComponent(encodedObjectPath) : "";
+        hasDownloadToken = Boolean(parsedUrl.searchParams.get("token"));
       } catch (_) { }
-      if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
+      // Sólo `podcaster/` puede firmarse por la API de assets. Para el resto
+      // (galería `images/<uid>/…`, material público) una URL con token ya es
+      // válida y sin token sólo la entrega el SDK de Storage.
+      const needsStorageSdk = Boolean(storagePath) && !isAssetApiStoragePath(storagePath);
+      if (needsStorageSdk && hasDownloadToken) return resolvedSrc;
+      if ((needsStorageSdk || this.deps?.preferDirectFirebaseStorage === true)
+        && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
         const gsUrl = this.toFirebaseStorageGsUrl(resolvedSrc, storagePath);
-        resolvedSrc = gsUrl ? String(await this.deps.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
+        const directUrl = gsUrl ? String(await this.deps.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
+        resolvedSrc = /^https?:/i.test(directUrl) ? directUrl : "";
+      } else if (needsStorageSdk) {
+        // Sin SDK disponible la URL directa carga o 403, pero un proxy de
+        // /api/assets sería 400 garantizado.
+        resolvedSrc = cleanSrc;
       } else {
         resolvedSrc = this.toFirebaseStorageProxyUrl(resolvedSrc, storagePath, { kind: "image" });
       }
@@ -5561,7 +5910,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!imageEl || !cleanSrc) throw new Error("missing_stage_image");
     if (!isCurrentSource()) throw new DOMException("Aborted", "AbortError");
     try { imageEl.crossOrigin = "anonymous"; } catch (_) { }
-    imageEl.decoding = "async";
+    imageEl.decoding = String(options?.decoding || "async");
     try { imageEl.loading = "eager"; } catch (_) { }
     try { imageEl.fetchPriority = "high"; } catch (_) { }
     const currentSrc = String(imageEl.getAttribute("src") || "").trim();
@@ -5591,6 +5940,44 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
     if (!isCurrentSource()) throw new DOMException("Aborted", "AbortError");
     return cleanSrc;
+  }
+
+  // Decodifica una imagen fuera de pantalla para que asignarla al escenario
+  // pinte en el mismo cuadro (corte directo, sin fondo negro entre fotogramas).
+  decodeStageImageSource(src = "") {
+    const cleanSrc = String(src || "").trim();
+    if (!cleanSrc) return Promise.resolve(false);
+    if (typeof Image !== "function") return Promise.resolve(true);
+    if (!this.decodedStageImages || this.decodedStageImages.generation !== this.mediaCacheGeneration) {
+      this.decodedStageImages = { generation: this.mediaCacheGeneration, settled: new Set(), pending: new Map() };
+    }
+    const bucket = this.decodedStageImages;
+    if (bucket.settled.has(cleanSrc)) return Promise.resolve(true);
+    if (bucket.pending.has(cleanSrc)) return bucket.pending.get(cleanSrc);
+    const mediaCacheGeneration = this.mediaCacheGeneration;
+    const request = Promise.resolve()
+      .then(() => {
+        const probe = new Image();
+        try { probe.crossOrigin = "anonymous"; } catch (_) { }
+        try { probe.decoding = "sync"; } catch (_) { }
+        probe.src = cleanSrc;
+        if (typeof probe.decode === "function") return probe.decode();
+        return new Promise((resolve, reject) => {
+          probe.addEventListener("load", resolve, { once: true });
+          probe.addEventListener("error", reject, { once: true });
+        });
+      })
+      .then(() => {
+        if (mediaCacheGeneration !== this.mediaCacheGeneration) return false;
+        bucket.settled.add(cleanSrc);
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        if (bucket.pending.get(cleanSrc) === request) bucket.pending.delete(cleanSrc);
+      });
+    bucket.pending.set(cleanSrc, request);
+    return request;
   }
 
   preloadUpcomingStylizedText(currentEntry, upcomingEntries = []) {
@@ -5713,9 +6100,19 @@ export class PodcasterPlaybackController extends EventEmitter {
       && imageEl.complete
       && Number(imageEl.naturalWidth || 0) > 0
       && Number(imageEl.naturalHeight || 0) > 0;
-    const targetImage = isReadyForSource(activeImage)
+    const preserveVisibleFrame = Boolean(entry?.stopMotionFrame);
+    // Corte directo entre fotogramas de una secuencia stop motion: como ningún
+    // slot tiene todavía la imagen, se decodifica fuera de pantalla y se asigna
+    // al elemento visible. El fotograma actual nunca se oculta, así que no
+    // aparece el fondo negro entre imagen e imagen.
+    const directFrameCut = preserveVisibleFrame
+      && !isReadyForSource(activeImage)
+      && !isReadyForSource(inactiveImage);
+    const targetImage = directFrameCut
       ? activeImage
-      : (isReadyForSource(inactiveImage) ? inactiveImage : inactiveImage);
+      : (isReadyForSource(activeImage)
+        ? activeImage
+        : (isReadyForSource(inactiveImage) ? inactiveImage : inactiveImage));
     const targetSlot = targetImage === alternate ? 1 : 0;
 
     const revealImage = () => {
@@ -5723,6 +6120,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.hideAllVideos();
       [primary, alternate].filter(Boolean).forEach((candidate) => {
         const isTarget = candidate === targetImage;
+        candidate.style.zIndex = isTarget ? "2" : "1";
         candidate.style.opacity = isTarget ? "1" : "0";
         candidate.style.visibility = isTarget ? "visible" : "hidden";
         candidate.hidden = !isTarget;
@@ -5730,7 +6128,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.setActiveStageVideoSlot(targetSlot);
 
       const session = this.state.session || this.deps?.getActiveSession?.();
-      const effects = session?.visualEffectsMap?.[entry.rowId];
+      const effects = this.resolveSceneVisualEffects(entry.rowId, session);
       const kenBurnsAnimationKey = JSON.stringify({
         rowId: String(entry?.rowId || ""),
         durationMs: Number(entry?.effectiveDurationMs || entry?.durationMs || 0) || 0,
@@ -5765,6 +6163,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       const shouldAnimate = this.state.isPlaying === true && this.state.isBuffering !== true;
       targetImage.style.animationPlayState = shouldAnimate ? 'running' : 'paused';
       this.syncStageMediaMotionPlaybackState(shouldAnimate);
+      window.PodcasterImageWarp?.syncCurrentSceneImageWarp?.(entry.rowId, session, this.state);
+      window.PodcasterSceneImageLayers?.sync?.(entry.rowId, session, this.state);
     };
 
     if (isReadyForSource(targetImage)) {
@@ -5774,9 +6174,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     // Keep the currently presented surface untouched while the alternate image
     // downloads and decodes.
-    targetImage.hidden = false;
-    targetImage.style.visibility = "hidden";
-    targetImage.style.opacity = "0";
+    if (!directFrameCut) {
+      targetImage.hidden = false;
+      targetImage.style.visibility = "hidden";
+      targetImage.style.opacity = "0";
+    }
 
     if (this.stageMachine.imageLoadingSrc === cleanSrc
       && this.stageMachine.imageLoadingTarget === targetImage
@@ -5785,7 +6187,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (!isCurrentImageSwap()) return false;
         revealImage();
         return true;
-      }).catch(() => false);
+      }).catch(() => preserveVisibleFrame);
     }
 
     this.stageMachine.imageLoadingSrc = cleanSrc;
@@ -5797,11 +6199,17 @@ export class PodcasterPlaybackController extends EventEmitter {
         // final reveal guard alone is too late because src mutation can start
         // decoding/network work and race with the new session.
         if (!isCurrentImageSwap()) throw new DOMException("Aborted", "AbortError");
-        return this.ensureStageImageReady(targetImage, resolvedSrc, {
-          sourceKey: cleanSrc,
-          sourceGeneration
-        });
-      });
+        if (!directFrameCut) return { resolvedSrc, decoding: "async" };
+        // El fotograma se decodifica en un elemento aparte: al asignarlo
+        // después al elemento visible, el navegador pinta el cambio en el
+        // mismo cuadro en lugar de mostrar el hueco.
+        return this.decodeStageImageSource(resolvedSrc).then(() => ({ resolvedSrc, decoding: "sync" }));
+      })
+      .then(({ resolvedSrc, decoding }) => this.ensureStageImageReady(targetImage, resolvedSrc, {
+        sourceKey: cleanSrc,
+        sourceGeneration,
+        decoding
+      }));
     this.stageMachine.imageLoadingPromise = loadingPromise;
     void loadingPromise
       .finally(() => {
@@ -5816,7 +6224,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!isCurrentImageSwap()) return false;
       revealImage();
       return true;
-    }).catch(() => false);
+    }).catch(() => preserveVisibleFrame);
   }
 
   async syncStageSwitching(entry, currentMs, options = {}) {
@@ -5830,7 +6238,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const activeSlot = this.getActiveStageVideoSlot();
     const activeEl = this.getActiveStageVideoEl();
     const inactiveEl = this.getInactiveStageVideoEl();
-    const canStartStagePlayback = () => this.state.isPlaying === true
+    const canStartStagePlayback = () => this.isStageVideoPlaybackActive()
       && (this.state.isBuffering !== true || options.allowDuringBufferRecovery === true);
 
     if (!activeEl) return false;
@@ -5882,7 +6290,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       );
       if (hasGeminiAudio && !Number.isFinite(entry.clip?.veoVolumeOverridePct)) effectiveVideoVolume = 0;
       videoEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * effectiveVideoVolume);
-      videoEl.muted = videoEl.volume <= 0.0001;
+      videoEl.muted = this.externalVideoPlayback === true || videoEl.volume <= 0.0001;
     };
 
     if (String(activeEl.dataset?.src || "").trim() === String(entry.videoSrc || "").trim()
@@ -5967,7 +6375,6 @@ export class PodcasterPlaybackController extends EventEmitter {
           noWait: false,
           keepHidden: targetEl === inactiveEl,
           persistent: true,
-          forcePersistent: true,
           rowId: String(entry?.rowId || "").trim(),
           entryKey
         });
@@ -5978,7 +6385,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       const wasPreparedAtTarget = String(targetEl.dataset?.preparedEntryKey || "").trim() === entryKey
         && this.isVideoSurfaceReady(targetEl, entry.videoSrc)
         && targetEl.seeking !== true
-        && Math.abs(Number(targetEl.currentTime || 0) - Number(target.targetSec || 0)) <= (this.state.isPlaying && !this.state.forceStageMediaSync ? 0.25 : STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC);
+        && Math.abs(Number(targetEl.currentTime || 0) - Number(target.targetSec || 0)) <= (this.isStageVideoPlaybackActive() && !this.state.forceStageMediaSync ? 0.25 : STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC);
       if (!wasPreparedAtTarget) this.seekTo(targetEl, target.targetSec);
       const frameReady = wasPreparedAtTarget
         ? true
@@ -6081,7 +6488,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       noWait: false,
       keepHidden: true,
       persistent: true,
-      forcePersistent: true,
       rowId: String(entry?.rowId || "").trim(),
       entryKey
     });
@@ -6137,7 +6543,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       backdrop.hidden = false;
       if (isHoldActive) {
         try { backdrop.pause(); } catch (_) { }
-      } else if (this.state.isPlaying && backdrop.paused) {
+      } else if (this.isStageVideoPlaybackActive() && backdrop.paused) {
         backdrop.play().catch(() => {});
       }
 
@@ -6384,8 +6790,20 @@ export class PodcasterPlaybackController extends EventEmitter {
         return;
     }
 
+    const localTimeSec = Math.max(0, (Number(currentMs || 0) - Number(entry?.startMs || 0)) / 1000);
+    const durationSec = Math.max(0.5, Number(entry?.effectiveDurationMs || entry?.durationMs || 8000) / 1000);
+    let timing = null;
+    try { timing = JSON.parse(session.stylizedTextMap[rowId])?.timing || null; } catch (_) { /* older sessions */ }
+    const visibleStartSec = Math.max(0, Number(timing?.startSec || 0));
+    const visibleDurationSec = Math.max(0.5, Number(timing?.durationSec ?? durationSec) || durationSec);
+    if (localTimeSec < visibleStartSec || localTimeSec >= visibleStartSec + visibleDurationSec) {
+        container.hidden = true;
+        return;
+    }
+    const textTimeSec = localTimeSec - visibleStartSec;
     if (container.dataset.activeRowId === rowId && container.dataset.activeText === session.stylizedTextMap[rowId]) {
         container.hidden = false;
+        window.PodcasterMediaEditor?.seekStylizedText?.(container, textTimeSec);
         return;
     }
 
@@ -6394,11 +6812,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     container.hidden = false;
 
     if (window.PodcasterMediaEditor?.renderStylizedText) {
-        window.PodcasterMediaEditor.renderStylizedText(container, rowId, session);
+        window.PodcasterMediaEditor.renderStylizedText(container, rowId, session, { localTimeSec: textTimeSec, durationSec: visibleDurationSec });
     }
   }
 
   syncOverlayCards(currentMs) {
+    // Keep composition in lockstep with the same timeline lookup used by
+    // syncStylizedText(). During a scene boundary state.activeRowId can still
+    // refer to the previous scene while the text renderer already uses the
+    // new entry's rowId.
+    const timelineEntry = this.getEntryAtMs(Number(currentMs || 0));
+    const activeRowId = String(timelineEntry?.rowId || this.state.activeRowId || "").trim();
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const resolvedEffects = this.resolveSceneVisualEffects(activeRowId, session);
+    this.els?.podcastVideoStage?.setAttribute?.('data-effects-row-id', activeRowId);
+    this.els?.podcastVideoStage?.setAttribute?.('data-effects-image-warp', String(resolvedEffects?.imageWarp?.type || 'none'));
+    // Keep the shared composition layers synchronized in every host, including
+    // video-player.html where there is no PodcasterUI facade.
+    try { window.PodcasterSceneImageLayers?.sync?.(activeRowId, session, this.state); } catch (_) { }
+    try { window.PodcasterImageWarp?.syncCurrentSceneImageWarp?.(activeRowId, session, this.state); } catch (_) { }
     if (typeof window.renderPodcasterOverlayCardsForPreview !== "function") return;
     const stage = this.els?.podcastActiveSpeakerVideo?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
@@ -6406,14 +6838,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       || this.els?.podcastVideoStage
       || null;
     if (!stage) return;
-    const session = this.state.session || this.deps?.getActiveSession?.();
     const config = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
     window.renderPodcasterOverlayCardsForPreview({
       session,
       config,
       containerEl: stage,
       currentMs,
-      interactive: this.deps?.isDashboard !== true
+      interactive: this.deps?.isDashboard !== true && !stage.matches?.(".montage-export-preview-container")
     });
   }
 
@@ -6577,6 +7008,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     Object.values(this.dialoguePlayers).forEach((audioEl) => {
       try { audioEl?.pause?.(); } catch (_) { }
     });
+    (this._freeVoiceElements || Object.values(this.freeVoicePlayers || {}))
+      .forEach((audioEl) => { try { audioEl?.pause?.(); } catch (_) { } });
     this.getStageVideoElements().forEach((videoEl) => {
       try { videoEl.pause(); } catch (_) { }
     });
@@ -7185,6 +7618,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       try { audioEl.load(); } catch (_) { }
     });
     this.dialoguePlayers = {};
+    (this._freeVoiceElements || new Set(Object.values(this.freeVoicePlayers || {}))).forEach((audioEl) => {
+      try { audioEl.pause(); audioEl.remove(); } catch (_) { }
+    });
+    this._freeVoiceElements = null;
+    this._freeVoiceCreateInflight = null;
+    this._freeVoicePlayersBySource = null;
+    this.freeVoicePlayers = {};
     this.audioCache = {};
     this.dialogueAudioSourceKeys = {};
     this.stopBackgroundMusic();
@@ -7210,6 +7650,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.state.sessionMediaStatus = "idle";
     this.state.sessionMediaProgress = { completed: 0, total: 0, failures: [] };
     this.cachedTickEntries = null;
+    this.cachedTickSessionRef = null;
     this.cachedTickEntriesTime = 0;
     this.videoPrewarmKey = "";
     this.videoPrewarmPromise = null;
@@ -7303,9 +7744,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       const applyScale = this.deps?.applySceneMediaScaleToStage || window.applySceneMediaScaleToStage;
       applyScale?.({ rowId: "", mediaScale: 1, visualLayoutMode: "default", container: preview || null });
-      if (typeof window.hideStageImagePreview === "function") {
-        window.hideStageImagePreview();
-      }
+      this.hideAllImages();
       setPortrait?.(false);
       updateUi?.();
       return;
@@ -7350,7 +7789,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       String(clipCfg?.mediaOffsetYPct ?? "").trim(),
       String(clipCfg?.mediaMotionPreset || "").trim().toLowerCase()
     ].join("|");
-    const stateKey = `${sessionId}_${key}_${mediaSignature}`;
+    const stopMotionSequence = window.PodcasterStopMotion?.normalizeStopMotion?.(clip?.stopMotion || null) || null;
+    const stopMotionFingerprint = stopMotionSequence
+      ? `${stopMotionSequence.frames.length}|${stopMotionSequence.timingMode}|${stopMotionSequence.frameWeights.map((weight) => weight.toFixed(6)).join(",")}`
+      : "";
+    const stateKey = `${sessionId}_${key}_${mediaSignature}_${stopMotionFingerprint}`;
 
     const vState = this.deps?.podcastVideoState || window.podcastVideoState;
     if (!opts.force && vState && vState.lastSyncedStageKey === stateKey) return;
@@ -7397,41 +7840,40 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const isLikelyImage = this.deps?.isLikelyImageMediaRecord || window.isLikelyImageMediaRecord;
     const isImageStageClip = isLikelyImage?.(firstSegment || clip || null) || (clip?.mimeType?.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif)/i.test(src));
-    const downloadUrl = String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim();
 
     if (isImageStageClip) {
-      // showStageImagePreview( is called internally by swapStageToImagePreview
-      if (typeof window.swapStageToImagePreview === "function") {
-        if (window.swapStageToImagePreview(src, {
-          session: activeSession,
-          rowId: key,
-          fallbackUrl: downloadUrl,
-          afterSwap: () => {
-            this.getStageVideoElements().forEach((video) => {
-              this.hideStageVideoElementPreservingSource(video);
-            });
-            setPortrait?.(false);
-            updateUi?.();
-            this.syncOverlay(Number(vState?.montageCursorMs || 0), {
-              rowId: key,
-              forceRow: editorPreviewMode
-            });
-            const resolveSceneNum = this.deps?.resolveSceneNumberByRowId || window.resolveSceneNumberByRowId;
-            setStatus?.(`Escena ${resolveSceneNum?.(key, activeSession)} lista`);
-          }
-        })) {
-          // podcastActiveSpeakerImage fallback for test structural check
-          const resolveSceneNum = this.deps?.resolveSceneNumberByRowId || window.resolveSceneNumberByRowId;
-          setStatus?.(`Cargando escena ${resolveSceneNum?.(key, activeSession)}...`);
-          return;
-        }
-      }
+      // El preview del editor y la reproducción deben usar el mismo camino de
+      // imagen (doble slot con crossfade). Depender del modulo diferido
+      // swapStageToImagePreview dejaba el <video> anterior en pantalla cuando el
+      // modulo aun no cargaba, y pintaba solo el frame 1 de una secuencia stop
+      // motion en lugar del fotograma que corresponde al cursor.
+      const resolveSceneNum = this.deps?.resolveSceneNumberByRowId || window.resolveSceneNumberByRowId;
+      const cursorMs = Math.max(0, Number((this.deps?.podcastVideoState || window.podcastVideoState)?.montageCursorMs ?? this.state?.currentMs ?? 0) || 0);
+      const sceneDurationMs = Math.max(
+        1,
+        Number(clipCfg?.durationMs || clip?.durationMs || stageEntry.durationMs || 0) || 1
+      );
+      const imageEntry = this.resolveStopMotionEntryAtMs({
+        ...stageEntry,
+        startMs: Math.max(0, Number(clipCfg?.startMs || 0) || 0),
+        effectiveDurationMs: sceneDurationMs
+      }, cursorMs);
+      if (stopMotionSequence) this.preloadEntryStopMotion(imageEntry);
+      const imageOffsetSec = Number(this.resolveEntryTargetOffsetSec(imageEntry, cursorMs)?.targetOffsetSec ?? 0) || 0;
+      void this.requestImageStageSwap(imageEntry, imageOffsetSec).then((swapped) => {
+        if (swapped !== true) return;
+        setPortrait?.(false);
+        updateUi?.();
+        this.syncOverlay(cursorMs, { rowId: key, forceRow: editorPreviewMode });
+        setStatus?.(`Escena ${resolveSceneNum?.(key, activeSession)} lista`);
+      });
+      setPortrait?.(false);
+      setStatus?.(`Cargando escena ${resolveSceneNum?.(key, activeSession)}...`);
+      return;
     }
 
     if (src) {
-      if (typeof window.hideStageImagePreview === "function") {
-        window.hideStageImagePreview();
-      }
+      this.hideAllImages();
       setPortrait?.(false);
       const currentSrc = String(stageVideo.dataset.src || "").trim();
       if ((opts.force || currentSrc !== src) && this.stageMachine.loadingSrc !== src) {
@@ -7539,9 +7981,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     this.clearAllStageVisualSurfaces();
-    if (typeof window.hideStageImagePreview === "function") {
-      window.hideStageImagePreview();
-    }
     if (hasCustomBg) {
       setPortrait?.(false);
     } else {

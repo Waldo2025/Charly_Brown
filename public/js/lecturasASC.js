@@ -3740,9 +3740,6 @@ async function renderTabla(){
             <button class="lectura-action-btn action-ver ascView" title="Ver lectura" aria-label="Ver lectura">
               <i class="far fa-eye"></i>
             </button>
-            <button class="lectura-action-btn action-live ascReadLive" title="Leer con Gemini Flash Live" aria-label="Leer con Gemini Flash Live" data-coleccion="lecturasASC">
-              <i class="fas fa-volume-up"></i>
-            </button>
             <button class="lectura-action-btn action-music ascMusic" title="${musicLabel}" aria-label="${musicLabel}">
               <i class="fas ${hasMusic ? "fa-rotate-right" : "fa-music"}"></i>
             </button>
@@ -3868,9 +3865,6 @@ function aplicarFiltrosAsc(){
             </label>
             <button class="lectura-action-btn action-ver ascView" title="Ver lectura" aria-label="Ver lectura">
               <i class="far fa-eye"></i>
-            </button>
-            <button class="lectura-action-btn action-live ascReadLive" title="Leer con Gemini Flash Live" aria-label="Leer con Gemini Flash Live" data-coleccion="lecturasASC">
-              <i class="fas fa-volume-up"></i>
             </button>
             <button class="lectura-action-btn action-music ascMusic" title="${musicLabel}" aria-label="${musicLabel}">
               <i class="fas ${hasMusic ? "fa-rotate-right" : "fa-music"}"></i>

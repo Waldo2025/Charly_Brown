@@ -3,12 +3,11 @@ import {readFile} from "node:fs/promises";
 import vm from "node:vm";
 import {webcrypto} from "node:crypto";
 const files=new Map();
-const context=vm.createContext({crypto:webcrypto,Blob,Date,Map,Set,console,
+const context=vm.createContext({crypto:webcrypto,Blob,Date,Map,Set,console,TextEncoder,TextDecoder,
   ref:(_storage,path)=>({fullPath:path}),
   uploadBytes:async(reference,blob)=>files.set(reference.fullPath,await blob.text()),
-  getDownloadURL:async reference=>reference.fullPath,
+  getBytes:async reference=>new TextEncoder().encode(files.get(reference.fullPath)),
   listAll:async reference=>({items:[...files.keys()].filter(key=>key.startsWith(reference.fullPath+"/")).map(fullPath=>({fullPath}))}),
-  fetch:async path=>({ok:files.has(path),json:async()=>JSON.parse(files.get(path))})
 });
 vm.runInContext((await readFile(new URL("../public/js/sally-history.js",import.meta.url),"utf8")).replace(/^import[^\n]+\n/,"").replaceAll("export ",""),context);
 const first=await context.appendHistory({},"alice","project",{role:"assistant",kind:"analysis",text:"Reporte completo uno",inventoryPath:"run-one.json"});

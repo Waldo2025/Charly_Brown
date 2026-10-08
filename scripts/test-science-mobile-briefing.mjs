@@ -32,7 +32,7 @@ test("ZIP export ships the same mobile image and document-scroll fix", () => {
   assert.match(source, /height:min\(72svh,133vw\)!important/);
   assert.match(source, /object-fit:contain!important/);
   assert.match(source, /padding-bottom:max\(28px,env\(safe-area-inset-bottom\)\)!important/);
-  assert.match(source, /science-hud-themes\.css\?v=20260815-mobile-header-v17/g);
+  assert.match(source, /science-hud-themes\.css\?v=20260924-scientific-models-v1/g);
 });
 
 test("mobile portrait places progress above the challenge heading and removes example bold", async () => {

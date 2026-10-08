@@ -17,7 +17,7 @@ test("timeline clip duration module exposes the modal API", () => {
 test("podcaster.js imports and instantiates timeline clip duration API", () => {
   assert.match(
     podcasterSource,
-    /import \{ createPodcasterTimelineClipDurationApi \} from "\.\/podcaster-timeline-clip-duration\.js";/
+    /import \{ createPodcasterTimelineClipDurationApi \} from "\.\/podcaster-timeline-clip-duration\.js(\?[^"]*)?";/
   );
   assert.match(podcasterSource, /const podcasterTimelineClipDurationApi = createPodcasterTimelineClipDurationApi\(/);
 });

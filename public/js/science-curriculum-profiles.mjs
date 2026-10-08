@@ -1,5 +1,7 @@
 import { applyChemistrySimulatorProfile, validateChemistryProfiles } from "./science-chemistry-profiles.mjs?v=20260810-chemistry-v2";
 import { applyBiologySimulatorProfile, validateBiologyProfiles } from "./science-biology-profiles.mjs?v=20260813-energy-transformation-v4";
+import { applyMathTopicProfile } from "./science-model-math.mjs";
+import { applyPhysicsTopicProfile } from "./science-model-physics.mjs";
 
 export const CURRICULUM_PROFILE_VERSION = 1;
 
@@ -19,7 +21,7 @@ const controls = {
   motion: [{ id: "velocity", label: "Velocidad", min: 0, max: 40, step: 1, value: 12, unit: "m/s", effect: "Cambia el movimiento." }, { id: "mass", label: "Masa", min: 1, max: 25, step: 1, value: 5, unit: "kg", effect: "Modifica la respuesta inercial." }, { id: "force", label: "Fuerza", min: -100, max: 100, step: 5, value: 20, unit: "N", effect: "Cambia la aceleración." }],
   force: [{ id: "force", label: "Fuerza aplicada", min: 0, max: 150, step: 5, value: 60, unit: "N", effect: "Impulsa el sistema." }, { id: "friction", label: "Fuerza opuesta", min: 0, max: 120, step: 5, value: 25, unit: "N", effect: "Se opone al cambio." }, { id: "mass", label: "Masa", min: 1, max: 30, step: 1, value: 10, unit: "kg", effect: "Modifica la aceleración." }],
   gravity: [{ id: "height", label: "Altura", min: 1, max: 100, step: 1, value: 20, unit: "m", effect: "Cambia el tiempo de caída." }, { id: "gravity", label: "Gravedad", min: 1.6, max: 24.8, step: .1, value: 9.8, unit: "m/s²", effect: "Cambia la aceleración." }, { id: "mass", label: "Masa", min: .1, max: 20, step: .1, value: 1, unit: "kg", effect: "No cambia la caída ideal." }],
-  projectile: [{ id: "angle", label: "Ángulo", min: 5, max: 85, step: 1, value: 45, unit: "°", effect: "Cambia la trayectoria." }, { id: "power", label: "Velocidad inicial", min: 2, max: 50, step: 1, value: 20, unit: "m/s", effect: "Cambia el alcance." }, { id: "gravity", label: "Gravedad", min: 1.6, max: 24.8, step: .1, value: 9.8, unit: "m/s²", effect: "Curva la trayectoria." }],
+  projectile: [{ id: "angle", label: "Ángulo", min: 5, max: 85, step: 1, value: 45, unit: "°", effect: "Cambia la trayectoria." }, { id: "initialVelocity", label: "Velocidad inicial", min: 2, max: 50, step: 1, value: 20, unit: "m/s", effect: "Cambia el alcance y el tiempo de vuelo." }, { id: "gravity", label: "Gravedad", min: 1.6, max: 24.8, step: .1, value: 9.8, unit: "m/s²", effect: "Cambia la curvatura, el alcance y el tiempo de vuelo." }],
   fluid: [{ id: "force", label: "Fuerza", min: 5, max: 100, step: 5, value: 35, unit: "N", effect: "Presiona el fluido." }, { id: "area", label: "Área", min: 1, max: 20, step: 1, value: 5, unit: "m²", effect: "Modifica la presión." }, { id: "density", label: "Densidad", min: 200, max: 1600, step: 50, value: 700, unit: "kg/m³", effect: "Modifica el empuje." }],
   thermal: [{ id: "sourceTemperature", label: "Temperatura de fuente", min: 0, max: 100, step: 1, value: 65, unit: "°C", effect: "Define la fuente térmica." }, { id: "objectMass", label: "Masa del material", min: 25, max: 1000, step: 25, value: 150, unit: "g", effect: "Cambia la rapidez térmica." }, { id: "initialTemperature", label: "Temperatura inicial", min: -10, max: 60, step: 1, value: 20, unit: "°C", effect: "Define el estado inicial." }, { id: "thermalConductance", label: "Conductancia", min: 1, max: 30, step: 1, value: 12, unit: "W/K", effect: "Controla el flujo de calor." }],
   circuit: [{ id: "voltage", label: "Voltaje", min: 1, max: 24, step: 1, value: 9, unit: "V", effect: "Impulsa las cargas." }, { id: "resistance", label: "Resistencia", min: 1, max: 30, step: 1, value: 10, unit: "Ω", effect: "Limita la corriente." }],
@@ -125,6 +127,8 @@ const GROUPS = {
   }
 };
 
+export const SCIENCE_TOPIC_CATALOG = Object.freeze(Object.fromEntries(Object.entries(GROUPS).map(([subject, families]) => [subject, Object.freeze(Object.values(families).flat())])));
+
 const atomicVariant = (topic, profile) => {
   const map = {
     "Átomo": { focus: "integrar núcleo y nube electrónica", objective: "Construye carbono-12 neutro.", targets: [["protons", 6], ["neutrons", 6], ["electrons", 6]] },
@@ -229,6 +233,7 @@ function createProfile(subject, topic, familyId) {
       evidence: `La evidencia debe mostrar la relación científica o matemática propia de ${topic}.`
     }
   };
+  if (familyId === "projectile") profile.simulatorProfile.measurementUnit = "m";
   let configured = profile;
   if (familyId === "motion") configured = motionVariant(topic, configured);
   if (familyId === "atomic") configured = atomicVariant(topic, configured);
@@ -238,6 +243,8 @@ function createProfile(subject, topic, familyId) {
   if (familyId === "quadraticFactorization") configured = quadraticFactorizationVariant(topic, configured);
   if (subject === "chemistry") return applyChemistrySimulatorProfile(topic, configured);
   if (subject === "biology") return applyBiologySimulatorProfile(topic, configured);
+  if (subject === "math") return applyMathTopicProfile(topic, configured);
+  if (subject === "physics") return applyPhysicsTopicProfile(topic, configured);
   return configured;
 }
 
@@ -277,6 +284,7 @@ export function applyCurriculumProfile(activity, profile) {
   activity.simulator = {
     ...(activity.simulator || {}), modelId: simulator.modelId, sceneVariant: simulator.sceneVariant,
     formula: simulator.formula, measurementLabel: simulator.measurementLabel, measurementUnit: simulator.measurementUnit,
+    modelFidelity: simulator.modelFidelity || "illustrative", modelAssumptions: simulator.modelAssumptions || "Representación didáctica simplificada del fenómeno.",
     objectiveEnabled: simulator.objective.targets.length > 0 || Boolean(simulator.objective.dynamicTarget), objective: simulator.objective.label,
     objectiveStrategy: simulator.objective.strategy, objectiveTargets: simulator.objective.targets,
     objectiveTargetMetric: simulator.objective.dynamicTarget || "",

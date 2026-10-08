@@ -101,7 +101,7 @@ test('Fixed text stops after two quota failures; other errors never switch model
    authFetchJson:async(u,o)=>{models.push(o.body.model);throw Object.assign(Error('provider'),{status});}});
   vm.runInContext(request,c);
   await assert.rejects(c.requestQualityJson('text',{},0.3,{singleAttempt:true,textOnly:true}),e=>{assert.equal(e.status,status);if(status===429){assert.equal(e.modelFallbackUsed,true);assert.match(e.message,/dos intentos/);}return true;});
-  assert.deepEqual(models,status===429?['gemini-2.5-flash-lite','gemini-3.6-flash']:['gemini-2.5-flash-lite']);
+  assert.deepEqual(models,status===429?['gemini-2.5-flash-lite','gemini-3.8-flash']:['gemini-2.5-flash-lite']);
  }
 });
 
@@ -114,9 +114,9 @@ test('A response missing 98 fields is rejected before success; complete alternat
   authFetchJson:async(u,o)=>{calls.push(o.body);return {text:blocks(calls.length===1?doc.fields.slice(0,2):doc.fields)};},extractGeminiText:r=>r.text});
  vm.runInContext(request,c);
  const result=await c.requestQualityJson('all fields',data,0.3,{singleAttempt:true,textOnly:true,expectedContent:doc});
- assert.deepEqual(calls.map(x=>x.model),['gemini-3.5-flash-lite','gemini-3.6-flash']);
+ assert.deepEqual(calls.map(x=>x.model),['gemini-3.5-flash-lite','gemini-3.8-flash']);
  assert.equal(fillContentDocument(doc,result).texts.length,100);
- assert.equal(data._quotaFallbackModel,'gemini-3.6-flash');
+ assert.equal(data._quotaFallbackModel,'gemini-3.8-flash');
  assert.equal(doc.template.texts[0],'[[f00001]]');
 });
 test('Quota followed by incomplete content stops at two calls and never records a successful fallback',async()=>{

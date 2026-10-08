@@ -1,0 +1,149 @@
+{
+  "months": [
+    "2026-05",
+    "2026-06",
+    "2026-07",
+    "2026-08",
+    "2026-09"
+  ],
+  "podcasterSessions": {
+    "2026-09": 27,
+    "2026-07": 19,
+    "2026-05": 12,
+    "2026-08": 13,
+    "2026-06": 6
+  },
+  "readyVideos": {
+    "2026-09": 312,
+    "2026-08": 187
+  },
+  "readyAudio": {
+    "2026-08": 157,
+    "2026-09": 470
+  },
+  "pigpenSessions": {
+    "2026-09": 37,
+    "2026-07": 29,
+    "2026-08": 3,
+    "2026-06": 4
+  },
+  "pigpenTopics": {
+    "2026-07": 67,
+    "2026-09": 74,
+    "2026-08": 5
+  },
+  "imageCreatorSessions": {
+    "2026-09": 11,
+    "2026-07": 2,
+    "2026-06": 2
+  },
+  "imageCreatorImages": {
+    "2026-09": 36,
+    "2026-06": 5
+  },
+  "charlyUnits": {
+    "2026-06": 0,
+    "2026-07": 2,
+    "2026-09": 5
+  },
+  "scienceSessions": {
+    "2026-08": 13,
+    "2026-09": 2
+  },
+  "charlySessions": [
+    {
+      "id": "session_mtt26svi_41ejbh",
+      "title": "Tercero · Comprension Lectora · U3",
+      "createdAt": "2026-09-08T19:24:53.550Z",
+      "ownerUid": "00bKqS1OrAYUqPegoNKAlS2UL0s2",
+      "units": []
+    },
+    {
+      "id": "session_mu1nhiu3_bzwexn",
+      "title": "Tercero · Todos · Uproyecto",
+      "createdAt": "2026-09-18T20:08:48.440Z",
+      "ownerUid": "00bKqS1OrAYUqPegoNKAlS2UL0s2",
+      "units": [
+        {
+          "title": "Nueva sesión",
+          "acceptedActivities": 0,
+          "acceptedResources": 0,
+          "acceptedTeacherNotes": 0,
+          "acceptedReading": false,
+          "acceptedSya": true
+        },
+        {
+          "title": "Una Aventura STEAM en el Patio",
+          "acceptedActivities": 0,
+          "acceptedResources": 0,
+          "acceptedTeacherNotes": 0,
+          "acceptedReading": true,
+          "acceptedSya": true
+        },
+        {
+          "title": "Tercero · Todos · Uproyecto",
+          "acceptedActivities": 0,
+          "acceptedResources": 0,
+          "acceptedTeacherNotes": 0,
+          "acceptedReading": false,
+          "acceptedSya": true
+        }
+      ]
+    },
+    {
+      "id": "session_mu7e5wjo_vj71nb",
+      "title": "Tercero · Comprension Lectora · U3",
+      "createdAt": "2026-09-18T20:08:53.508Z",
+      "ownerUid": "00bKqS1OrAYUqPegoNKAlS2UL0s2",
+      "units": []
+    },
+    {
+      "id": "session_mulmxdje_85twsm",
+      "title": "Un proyecto interesante",
+      "createdAt": "2026-09-28T19:22:58.634Z",
+      "ownerUid": "3KvOj6jWEpeU0xXj6JZH81wv1263",
+      "units": [
+        {
+          "title": "Unidad 1",
+          "acceptedActivities": 16,
+          "acceptedResources": 20,
+          "acceptedTeacherNotes": 16,
+          "acceptedReading": true,
+          "acceptedSya": true
+        }
+      ]
+    },
+    {
+      "id": "session_muo6ijmw_s10kn6",
+      "title": "La Edad Media: ciencia y creencia",
+      "createdAt": "2026-09-30T14:06:51.368Z",
+      "ownerUid": "9ifAAc0ZdDOU10EGFQ33owKutHX2",
+      "units": [
+        {
+          "title": "Unidad 1",
+          "acceptedActivities": 5,
+          "acceptedResources": 0,
+          "acceptedTeacherNotes": 0,
+          "acceptedReading": true,
+          "acceptedSya": true
+        }
+      ]
+    }
+  ],
+  "scienceRows": [
+    {
+      "id": "7839bed6-0643-4f0f-ab98-1866d1ed5f1a",
+      "title": "Proyectiles: laboratorio interactivo",
+      "createdAt": "2026-09-25T07:34:59.845Z",
+      "ownerEmail": "wlopez@asc.education",
+      "mode": "simulator"
+    },
+    {
+      "id": "f26a27ab-a023-49fc-bbd7-625187ec9312",
+      "title": "Proyectiles: laboratorio interactivo",
+      "createdAt": "2026-09-25T06:25:35.901Z",
+      "ownerEmail": "wlopez@asc.education",
+      "mode": "simulator"
+    }
+  ]
+}

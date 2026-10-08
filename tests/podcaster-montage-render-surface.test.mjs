@@ -57,6 +57,14 @@ test("resolveMontageRenderEntryAtTime picks the active timeline entry", () => {
   assert.equal(resolveMontageRenderEntryAtTime(payload, 100)?.rowId, "row-1");
   assert.equal(resolveMontageRenderEntryAtTime(payload, 1500)?.rowId, "row-2");
   assert.equal(resolveMontageRenderEntryAtTime(payload, 99999)?.rowId, "row-2");
+
+  const payloadWithGap = {
+    entries: [
+      { rowId: "row-a", sceneIndex: 1, timelineStartMs: 0, durationMs: 1000 },
+      { rowId: "row-b", sceneIndex: 2, timelineStartMs: 2500, durationMs: 1000 }
+    ]
+  };
+  assert.equal(resolveMontageRenderEntryAtTime(payloadWithGap, 1800)?.rowId, "row-a");
 });
 
 test("resolveMontageActiveOverlayCards returns only active cards sorted by z-index", () => {

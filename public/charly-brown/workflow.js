@@ -16,7 +16,23 @@ export const DEFAULT_ACTIVITY_SECTIONS = Object.freeze([
   "Formación socioemocional",
   "Artes",
   "Habilidades",
+  "Dictado",
   "Matemáticas"
+]);
+
+export const COMPOSER_AGENT_TOOLS = Object.freeze([
+  { id: "planning_mode", group: "Planificación", name: "Modo plan", desc: "Define el contenido paso a paso con preguntas y opciones, antes de generar", icon: "fa-list-check" },
+  { id: "web_search", group: "Búsqueda & Web", name: "Búsqueda Web en Vivo", desc: "Google Search en tiempo real para datos, fechas y planes SEP", icon: "fa-globe" },
+  { id: "design_activity", group: "Actividades", name: "Actividad Didáctica", desc: "Diseña actividades interactivas para el subtema y currículo", icon: "fa-book-open" },
+  { id: "design_worksheet", group: "Recursos", name: "Ficha de Refuerzo", desc: "Ficha progresiva estructurada con clave y respuestas", icon: "fa-file-lines" },
+  { id: "design_annex", group: "Recursos", name: "Anexo Gráfico", desc: "Lámina, esquema conceptual o infografía visual", icon: "fa-image" },
+  { id: "design_cutout", group: "Recursos", name: "Recortable Manipulativo", desc: "Piezas interactivas listas para armar e imprimir", icon: "fa-scissors" },
+  { id: "design_video_script", group: "Recursos", name: "Guion de Video", desc: "Escenas audiovisuales con voz en off para Snoopy", icon: "fa-film" },
+  { id: "design_reading_stage", group: "Lectura", name: "Lectura & Comprensión", desc: "Narrativa escolar, sinónimos o preguntas reflexivas", icon: "fa-book" },
+  { id: "create_teacher_notes", group: "Docencia", name: "Notas del Maestro", desc: "Guía metodológica 1:1 por actividad y uso de recursos", icon: "fa-graduation-cap" },
+  { id: "design_sya_change", group: "Docencia", name: "Secuencia y Alcance", desc: "Proponer nuevos subtemas, revisar campos o restaurar la secuencia original", icon: "fa-list-check" },
+  { id: "research_topic", group: "Investigación", name: "Investigación Editorial", desc: "Fuentes académicas y documentos verificados", icon: "fa-magnifying-glass" },
+  { id: "propose_teaching_memory", group: "Memoria", name: "Reglas y Aprendizajes", desc: "Enseñanzas y preferencias pedagógicas aprendidas", icon: "fa-lightbulb" }
 ]);
 
 const VALID_STATUS = new Set(Object.values(WORKFLOW_STATUS));
@@ -164,6 +180,11 @@ function normalizeActivitySections(value = []) {
       agentInstructions: String(row.agentInstructions || "").trim(),
       category: String(row.category || "").trim(),
       subtopic: String(row.subtopic || "").trim(),
+      mathGroup: String(row.mathGroup || "").trim(),
+      mathIndex: Number.isInteger(Number(row.mathIndex)) ? Number(row.mathIndex) : -1,
+      mathSingleActivity: row.mathSingleActivity === true,
+      resourceTypes: Array.isArray(row.resourceTypes) ? row.resourceTypes.map((value) => String(value || "").trim()).filter(Boolean) : [],
+      resourceCodes: row.resourceCodes && typeof row.resourceCodes === "object" ? { ...row.resourceCodes } : {},
       resourceSelections: normalizeResourceSelections(row.resourceSelections),
       resourcesConfigured: row.resourcesConfigured === true,
       order: Number.isFinite(Number(row.order)) ? Number(row.order) : index,
@@ -200,6 +221,11 @@ function normalizeSectionSelections(value = []) {
       agentInstructions: String(row.agentInstructions || "").trim(),
       category: String(row.category || "").trim(),
       subtopic,
+      mathGroup: String(row.mathGroup || "").trim(),
+      mathIndex: Number.isInteger(Number(row.mathIndex)) ? Number(row.mathIndex) : -1,
+      mathSingleActivity: row.mathSingleActivity === true,
+      resourceTypes: Array.isArray(row.resourceTypes) ? row.resourceTypes.map((value) => String(value || "").trim()).filter(Boolean) : [],
+      resourceCodes: row.resourceCodes && typeof row.resourceCodes === "object" ? { ...row.resourceCodes } : {},
       resourceSelections: normalizeResourceSelections(row.resourceSelections),
       resourcesConfigured: row.resourcesConfigured === true
     };

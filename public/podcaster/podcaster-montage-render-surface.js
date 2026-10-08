@@ -34,7 +34,13 @@ export function resolveMontageRenderEntryAtTime(payload = {}, currentMs = 0, opt
     const endMs = Math.max(startMs + durationMs, Number(entry?.timelineEndMs || (startMs + durationMs)) || (startMs + durationMs));
     return timeMs >= startMs && timeMs < endMs;
   });
-  return active || entries[entries.length - 1] || null;
+  if (active) return active;
+  // During gaps, keep the most recently started scene. Falling back to the final
+  // entry made later-scene frames appear before that scene's timeline position.
+  const previous = entries
+    .filter((entry) => Math.max(0, Number(entry?.timelineStartMs ?? entry?.startMs ?? 0) || 0) <= timeMs)
+    .sort((a, b) => Number(b?.timelineStartMs ?? b?.startMs ?? 0) - Number(a?.timelineStartMs ?? a?.startMs ?? 0))[0];
+  return previous || entries[0] || null;
 }
 
 export function resolveMontageActiveOverlayCards(cards = [], currentMs = 0) {

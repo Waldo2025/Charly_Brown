@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>E2E · Video local con Servidor Snoopy</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background:#0b1020; color:#e6e9f5; margin:0; padding:24px; }
+  .wrap { max-width: 900px; margin:0 auto; }
+  h1 { font-size:20px; color:#6366f1; }
+  .card { background:#141a2e; border:1px solid #273052; border-radius:14px; padding:16px; margin:14px 0; }
+  button { background:#6366f1; color:#fff; border:0; border-radius:10px; padding:9px 14px; font-size:14px; cursor:pointer; margin-right:8px; }
+  button:disabled { opacity:.45; }
+  pre { background:#0f1526; border:1px solid #273052; border-radius:10px; padding:10px; font-size:12px; white-space:pre-wrap; min-height:120px; }
+  video { width:100%; max-width:560px; border-radius:12px; background:#000; display:block; }
+  img { border-radius:10px; max-width:208px; display:block; }
+  .hint { color:#9aa3c0; font-size:12.5px; }
+  .code { font-size:26px; letter-spacing:.14em; color:#34d399; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>E2E — generar video local con <a href="http://127.0.0.1:8792/consola" target="_blank" style="color:#8b93ff">consola Servidor Snoopy ↗</a></h1>
+  <p class="hint">Usa el módulo real <code>public/podcaster/podcaster-local-video-client.js</code> (el mismo que importa podcaster.js).</p>
+
+  <div class="card">
+    <button id="btnProbe">1 · Sondear motor</button>
+    <button id="btnPair">2 · Conectar con código</button>
+    <span id="pairCode" class="code"></span>
+    <div class="hint" id="pairState">Pendiente</div>
+  </div>
+
+  <div class="card">
+    <button id="btnFrame">3 · Crear imagen de referencia</button>
+    <div class="hint">La foto base del clip (canvas → data URL PNG), como la escena con imagen del podcaster.</div>
+    <div id="frameBox" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <button id="btnGen" disabled>4 · Generar video local (i2v)</button>
+    <div id="jobState" class="hint" style="margin:8px 0"></div>
+    <div id="planState" class="hint" style="margin:0 0 8px"></div>
+    <video id="player" controls muted playsinline></video>
+  </div>
+
+  <div class="card"><b>Registro</b><pre id="log"></pre></div>
+</div>
+
+<script type="module">
+import {
+  probeLocalVideoEngine,
+  getLocalVideoToken,
+  setLocalVideoToken,
+  requestLocalVideoPairing,
+  getLocalVideoPairStatus,
+  createLocalVideoJob,
+  getLocalVideoJob,
+  fetchLocalVideoBlob,
+} from "../public/podcaster/podcaster-local-video-client.js";
+
+const $ = (id) => document.getElementById(id);
+const log = (msg) => { $("log").textContent += msg + "\n"; };
+let firstFrameDataUrl = "";
+
+$("btnProbe").addEventListener("click", async () => {
+  const health = await probeLocalVideoEngine();
+  log("health: " + JSON.stringify(health));
+});
+
+$("btnPair").addEventListener("click", async () => {
+  try {
+    const pair = await requestLocalVideoPairing();
+    $("pairCode").textContent = pair.code;
+    log("pair/request → " + pair.pairId.slice(0, 8) + " código " + pair.code);
+    $("pairState").textContent = "Esperando confirmación en la consola de Snoopy…";
+    const timer = setInterval(async () => {
+      const status = await getLocalVideoPairStatus(pair.pairId);
+      if (status.status === "paired" && status.token) {
+        clearInterval(timer);
+        setLocalVideoToken(status.token);
+        $("pairState").textContent = "✔ Conectado (token guardado en localStorage)";
+        $("btnGen").disabled = false;
+        log("emparejado; token local = " + getLocalVideoToken().slice(0, 8) + "…");
+      } else if (status.status === "expired") {
+        clearInterval(timer);
+        $("pairState").textContent = "El código expiró";
+      }
+    }, 2000);
+  } catch (error) {
+    log("error pairing: " + error.message);
+  }
+});
+
+$("btnFrame").addEventListener("click", () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 832; canvas.height = 480;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 832, 480);
+  grad.addColorStop(0, "#1e1b4b"); grad.addColorStop(1, "#6366f1");
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 832, 480);
+  ctx.fillStyle = "#fff"; ctx.font = "bold 46px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("Sala del podcast · escena E2E", 416, 240);
+  ctx.font = "28px sans-serif"; ctx.fillStyle = "#c7d2fe";
+  ctx.fillText("imagen de referencia para Wan 2.2", 416, 290);
+  firstFrameDataUrl = canvas.toDataURL("image/png");
+  const img = document.createElement("img");
+  img.src = firstFrameDataUrl;
+  $("frameBox").replaceChildren(img);
+  log("primer frame listo (" + Math.round(firstFrameDataUrl.length / 1024) + " KB data URL)");
+});
+
+$("btnGen").addEventListener("click", async () => {
+  if (!firstFrameDataUrl) { log("primero crea la imagen de referencia"); return; }
+  $("btnGen").disabled = true;
+  try {
+    const { jobId, plan } = await createLocalVideoJob({
+      mode: "i2v",
+      prompt: "Robot presentador de podcast mueve la cabeza y saluda, plano medio, luz suave de estudio.",
+      negativePrompt: "marcas de agua, subtítulos, texto ilegible",
+      firstFrame: firstFrameDataUrl,
+      durationSec: 8, aspectRatio: "16:9",
+    });
+    log("job creado " + jobId.slice(0, 8) + "…");
+    if (plan) {
+      log(`plan de Snoopy: ${plan.width}×${plan.height} · ${plan.lengthFrames} frames a ${plan.fps} fps (${plan.durationSec}s) · ${plan.steps} pasos · unos ${plan.estimatedMinutes} min`);
+    }
+    for (;;) {
+      const job = await getLocalVideoJob(jobId);
+      $("jobState").textContent = `${job.status} · ${Math.round((job.progress || 0) * 100)}% · ${job.hint || ""}`;
+      if (job.plan) {
+        $("planState").textContent = job.plan.elapsedMinutes != null
+          ? `${job.plan.elapsedMinutes} min transcurridos de ~${job.plan.estimatedMinutes} estimados · quedan ~${job.plan.remainingMinutes} min`
+          : `Snoopy planificó ${job.plan.width}×${job.plan.height} · ${job.plan.steps} pasos · ~${job.plan.estimatedMinutes} min`;
+      }
+      if (job.status === "ready") {
+        const blob = await fetchLocalVideoBlob(jobId);
+        $("player").src = URL.createObjectURL(blob);
+        $("player").play().catch(() => {});
+        log("video listo: " + Math.round(blob.size / 1024) + " KB " + blob.type);
+        break;
+      }
+      if (job.status === "error") { log("error: " + job.hint); break; }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  } catch (error) {
+    log("error generando: " + error.message);
+  } finally {
+    $("btnGen").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

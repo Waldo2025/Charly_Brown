@@ -20,7 +20,7 @@ assert.doesNotMatch(
 
 assert.match(
   source,
-  /const data = await authFetchJson\(`\/api\/podcaster\/sessions\/list-videos\?sessionSlug=\$\{encodeURIComponent\(sessionSlug\)\}`\);\s*const rawVideos =/,
+  /const data = await authFetchJson\(`\/api\/podcaster\/sessions\/list-videos\?sessionSlug=\$\{encodeURIComponent\(sessionSlug\)\}`\)\s*\.catch\([\s\S]*?\);\s*const rawVideos =/,
   "La biblioteca de reemplazo debe cargar su respuesta antes de normalizar los videos."
 );
 

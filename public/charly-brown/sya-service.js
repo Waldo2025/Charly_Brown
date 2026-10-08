@@ -54,6 +54,19 @@ export function getSyaGroupedByCategory(meta = {}, sya = {}) {
       .filter((entry) => entry && Object.values(entry.fields).some(Boolean));
     if (items.length) grouped.push({ category, items });
   });
+  const extra = sya?.__subtopics && typeof sya.__subtopics === "object" ? sya.__subtopics : {};
+  Object.values(extra).forEach((definition) => {
+    const subtopic = String(definition?.name || "").trim();
+    const category = String(definition?.category || "").trim();
+    if (!subtopic || !category) return;
+    if (meta.category && meta.category !== ALL_OPTION && meta.category !== category) return;
+    if (meta.subtopic && meta.subtopic !== ALL_OPTION && !sameSubtopic(meta.subtopic, subtopic)) return;
+    let group = grouped.find((item) => item.category === category);
+    if (!group) { group = { category, items: [] }; grouped.push(group); }
+    if (!group.items.some((item) => sameSubtopic(item.subtopic, subtopic))) {
+      group.items.push({ subtopic, fields: buildSubtopicSyaFields(sya, subtopic) });
+    }
+  });
   if (grouped.length) return grouped;
   const selectedCategory = String(meta.category || "").trim();
   const selectedSubtopic = String(meta.subtopic || "").trim();
@@ -64,7 +77,7 @@ export function getSyaGroupedByCategory(meta = {}, sya = {}) {
 export function getCompleteSyaGroupedByCategory(meta = {}, sya = {}) {
   const categories = filterCategoriesBySelection(meta, getCategoriesForGrade(meta.grade));
   const fallback = buildFallbackSya(meta);
-  return Object.entries(categories).map(([category, subtopics]) => ({
+  const groups = Object.entries(categories).map(([category, subtopics]) => ({
     category,
     items: subtopics.map((subtopic) => {
       const fields = buildSubtopicSyaFields(sya, subtopic);
@@ -80,6 +93,20 @@ export function getCompleteSyaGroupedByCategory(meta = {}, sya = {}) {
       };
     })
   })).filter((group) => group.items.length);
+  const extra = sya?.__subtopics && typeof sya.__subtopics === "object" ? sya.__subtopics : {};
+  Object.values(extra).forEach((definition) => {
+    const subtopic = String(definition?.name || "").trim();
+    const category = String(definition?.category || "").trim();
+    if (!subtopic || !category) return;
+    if (meta.category && meta.category !== ALL_OPTION && meta.category !== category) return;
+    if (meta.subtopic && meta.subtopic !== ALL_OPTION && !sameSubtopic(meta.subtopic, subtopic)) return;
+    let group = groups.find((item) => item.category === category);
+    if (!group) { group = { category, items: [] }; groups.push(group); }
+    if (!group.items.some((item) => sameSubtopic(item.subtopic, subtopic))) {
+      group.items.push({ subtopic, fields: buildSubtopicSyaFields(sya, subtopic) });
+    }
+  });
+  return groups;
 }
 
 export function getFocusedSya(meta = {}, sya = {}) {
@@ -150,7 +177,7 @@ function buildSubtopicSyaEntry(sya = {}, subtopic = "") {
   };
 }
 
-function buildSubtopicSyaFields(sya = {}, subtopic = "") {
+export function buildSubtopicSyaFields(sya = {}, subtopic = "") {
   const keys = resolveSyaKeyBases(subtopic);
   const normalizedMap = buildNormalizedSyaFieldMap(sya);
   return {
@@ -182,7 +209,16 @@ function resolveSyaKeyBases(subtopic = "") {
   if (normalized === "artes") aliases.add("Artes");
   if (normalized === "habilidades") aliases.add("Habilidades");
   if (normalized === "conocimientodelmedio") aliases.add("conocimientoDelMedio");
-  if (normalized === "ortografia") aliases.add("Ortografia");
+  if (normalized.includes("ortografia")) {
+    aliases.add("Ortografia");
+    aliases.add("Ortografía");
+    aliases.add("Convenciones lingüísticas: Ortografía");
+  }
+  if (normalized.includes("gramatica")) {
+    aliases.add("Gramatica");
+    aliases.add("Gramática");
+    aliases.add("Convenciones lingüísticas: Gramática");
+  }
   if (normalized === "comprensionlectora" || normalized === "lectura") {
     aliases.add("Lectura");
     aliases.add("ComprensionLectora");
@@ -192,6 +228,10 @@ function resolveSyaKeyBases(subtopic = "") {
   }
   if (normalized === "expresionescrita") aliases.add("ExpresiónEscrita");
   if (normalized === "expresionoral") aliases.add("ExpresiónOral");
+  if (normalized === "dictado") {
+    aliases.add("Dictado");
+    aliases.add("dictado");
+  }
   if (normalized === "matematicas") aliases.add("Matemáticas");
   return Array.from(aliases).filter(Boolean);
 }

@@ -77,6 +77,7 @@ test("uploadFileToBucketNonResumable prefers signed url PUT before sdk stream fa
       destination: "podcaster/exports/file.mp4",
       filePath: tempFile,
       contentType: "video/mp4",
+      useSignedUrl: true,
       fetchImpl: async (url, options = {}) => {
         if (options?.body && typeof options.body.on === "function") {
           await new Promise((resolve, reject) => {
@@ -128,6 +129,7 @@ test("uploadFileToBucketNonResumable signs custom metadata headers used by the P
       destination: "podcaster/uploads/file.png",
       filePath: tempFile,
       contentType: "image/png",
+      useSignedUrl: true,
       cacheControl: "public,max-age=86400",
       metadata: {
         firebaseStorageDownloadTokens: "token-123",

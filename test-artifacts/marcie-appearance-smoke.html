@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css">
+<link rel="stylesheet" href="/MarcieBlogEditor/css/marcie-templates.css">
+<title>Prueba de apariencia de Marcie</title>
+<button id="section-large" onclick="document.getElementById('article-view').setAttribute('data-text-section-size','large')">Sección grande</button>
+<button id="paragraph-small" onclick="document.getElementById('article-view').setAttribute('data-text-p-size','small')">Párrafo pequeño</button>
+<button id="quote-purple" onclick="document.getElementById('article-view').setAttribute('data-quote-color','purple')">Cita púrpura</button>
+<div id="article-view" class="article-template-surface" data-article-template="default" data-text-section-size="normal" data-text-section-weight="semibold">
+  <article>
+    <h1 id="article-title">Título principal</h1>
+    <p id="article-subtitle">Subtítulo descriptivo</p>
+    <div id="article-body-container">
+      <h2>Primera sección</h2>
+      <p>Párrafo del artículo</p>
+      <blockquote><p>Cita destacada</p></blockquote>
+    </div>
+  </article>
+</div>
+</html>

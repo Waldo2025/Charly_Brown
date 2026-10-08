@@ -48,4 +48,10 @@ assert.doesNotMatch(
   "no debe quedar una allowlist inline divergente entre proxy-image y proxy-media."
 );
 
+assert.match(
+  serverSource,
+  /assertProxyMediaStorageAccess[\s\S]*\^sallyBrown[\s\S]*SallyBrownSessions[\s\S]*collaborators[\s\S]*asset_forbidden/,
+  "el proxy debe validar la membresia de la sesion antes de servir archivos privados de Sally."
+);
+
 console.log("Backend storage route hardcodes audit OK.");

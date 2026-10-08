@@ -20,7 +20,7 @@ test("agrupa los accesos solicitados sin perder sus guards de rol", () => {
     "Crear cursos de Moodle",
     "Peppermint Patty Analizer",
     "Voice Transcribe",
-    "Podcaster Studio",
+    "Snoopy Editor",
     "Actividades de ciencias",
     "PigPen Escape Rooms",
     "Experiencias",
@@ -65,6 +65,12 @@ test("el acordeón expande el grupo seleccionado y el grupo de la página activa
   assert.match(sidebarSource, /sidebarWasCollapsed \|\| !wasExpanded/);
   assert.match(sidebarSource, /sidebar-link\[aria-current='page'\]/);
   assert.match(sidebarCss, /prefers-reduced-motion: reduce/);
+});
+
+test("abre cada sitio con el sidebar contraído y permite desplegar los grupos", () => {
+  assert.match(sidebarSource, /sidebar\.classList\.remove\("show"\)/);
+  assert.match(sidebarSource, /document\.body\.classList\.add\("sidebar-collapsed"\)/);
+  assert.match(sidebarSource, /if \(sidebarWasCollapsed\) \{[\s\S]*sidebar\.classList\.add\("show"\)/);
 });
 
 test("video-player ofrece un acceso directo a home", () => {

@@ -17,7 +17,7 @@ test('Diagram nodes reflect selection, replacement, deselection and restored sta
 });
 test('Coordinates show axes and valid start without giving the goal',()=>{
  const c=fixedInteraction('respuesta_coordenadas',E);const html=E.render('respuesta_coordenadas',c,{},'q','en');
- assert.match(html,/scope="col"/);assert.match(html,/scope="row"/);assert.match(html,/E \(2, 2\) · Start/);
+ assert.match(html,/scope="col"/);assert.match(html,/scope="row"/);assert.match(html,/The cell marked “Start” shows where to begin/);assert.match(html,/aria-label="E \(2, 2\), Start"/);assert.match(html,/exp-start-indicator[^>]*>Start<\/span>/);
  c.start_option='missing';assert.ok(E.structuralIssues('respuesta_coordenadas',c).length);
  delete c.start_option;assert.deepEqual(E.structuralIssues('respuesta_coordenadas',c),[]);
 });

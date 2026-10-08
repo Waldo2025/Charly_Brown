@@ -1,5 +1,7 @@
 
 import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js";
+import { readSavingsPolicy } from "../js/savings-client.js";
+import { applyReferenceImageAsScene } from "./podcaster-reference-scene.js";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";
@@ -10,9 +12,21 @@ import {
 } from "./podcaster-video-generation-timing.js";
 import {
   AVAILABLE_PODCASTER_VIDEO_MODELS,
+  PODCASTER_VIDEO_MODEL_LOCAL,
+  isLocalVideoModel,
   isVertexVeoModelId,
   normalizeVertexVeoModelId
-} from "./podcaster-video-model-catalog.js";
+} from "./podcaster-video-model-catalog.js?v=2026-10-03.local-video-2";
+import {
+  probeLocalVideoEngine,
+  createLocalVideoJob,
+  getLocalVideoJob,
+  fetchLocalVideoBlob,
+  cancelLocalVideoJob,
+  linkLocalVideoClip
+} from "./podcaster-local-video-client.js?v=2026-10-04.snoopy-connect-1";
+import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-10-03.local-video-2";
+import { getPodcasterLocalMediaDataUrl } from "./podcaster-local-media-cache.js";
 
 const runtime = requirePodcasterGenerationRuntime();
 
@@ -20,6 +34,8 @@ const runtime = requirePodcasterGenerationRuntime();
 const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 3;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 const DIALOGUE_VIDEO_POLL_TIMEOUT_MS = 30 * 60 * 1000;
+// Wan 2.2 en la GPU del equipo puede tardar mucho más que un proveedor remoto.
+const LOCAL_VIDEO_POLL_TIMEOUT_MS = 90 * 60 * 1000;
 const PODCASTER_VIDEO_PROMPT_PROFILE = "podcaster_video_v2";
 const PODCASTER_VIDEO_MODEL_AUTO = "auto";
 const PODCASTER_VIDEO_MODEL_OMNI = "gemini-omni-flash-preview";
@@ -359,13 +375,15 @@ async function cancelDialogueVideoForRow(rowId = "") {
 
 function normalizePodcasterVideoModelPreference(value = "") {
   const requested = normalizeVertexVeoModelId(value);
+  if (isLocalVideoModel(requested)) return PODCASTER_VIDEO_MODEL_LOCAL;
   if (PODCASTER_VIDEO_MODEL_PREFERENCES.includes(requested) || isVertexVeoModelId(requested)) return requested;
   return LEGACY_PODCASTER_VIDEO_MODEL_MAP[requested] || PODCASTER_VIDEO_MODEL_AUTO;
 }
 
 function resolvePodcasterVideoGeneratorPreference(modelPreference = PODCASTER_VIDEO_MODEL_AUTO, requestedGenerator = "") {
   const explicitGenerator = String(requestedGenerator || "").trim().toLowerCase();
-  if (["auto", "omni", "veo"].includes(explicitGenerator)) return explicitGenerator;
+  if (["auto", "omni", "veo", "local"].includes(explicitGenerator)) return explicitGenerator;
+  if (isLocalVideoModel(modelPreference)) return "local";
   if (modelPreference === PODCASTER_VIDEO_MODEL_OMNI) return "omni";
   if (String(modelPreference || "").startsWith("veo-")) return "veo";
   return "auto";
@@ -376,6 +394,7 @@ function resolvePodcasterVideoRouting(options = {}) {
   const generator = resolvePodcasterVideoGeneratorPreference(configuredModel, options.generator);
   const highQuality = options.highQuality === true;
   let model = configuredModel;
+  if (generator === "local") model = PODCASTER_VIDEO_MODEL_LOCAL;
   if (generator === "auto") model = PODCASTER_VIDEO_MODEL_AUTO;
   if (generator === "omni") model = PODCASTER_VIDEO_MODEL_OMNI;
   if (generator === "veo") {
@@ -1026,6 +1045,500 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   throw error;
 }
 
+/**
+ * El plan que devolvió Servidor Snoopy, pasado a texto: el usuario tiene que saber
+ * cuántos minutos le esperan antes de quedarse mirando una barra quieta.
+ */
+function localPlanStatusText(plan, requestedDurationSec) {
+  if (!plan || !Number(plan.width)) {
+    return `Pidiéndole ${requestedDurationSec || 8} segundos de escena a Servidor Snoopy…`;
+  }
+  const minutes = Number(plan.estimatedMinutes) > 0 ? ` · unos ${Math.round(plan.estimatedMinutes)} min` : "";
+  const resolution = `${Math.round(plan.width)}×${Math.round(plan.height)}`;
+  const steps = Number(plan.steps) > 0 ? ` con ${Math.round(plan.steps)} pasos` : "";
+  const tail = String(plan.note || "").trim();
+  return `Snoopy genera ${Number(plan.durationSec) || requestedDurationSec}s en ${resolution}${steps}${minutes}, gratis en tu Mac${tail ? `. ${tail}` : "…"}`;
+}
+
+async function pollLocalDialogueVideoJob(jobId = "", options = {}) {
+  const pollIntervalMs = 2500;
+  const pollStartedAt = Date.now();
+  let lastStateKey = "";
+  for (;;) {
+    if (options.pendingKey && dialogueVideoGenerationCanceled.has(options.pendingKey)) {
+      await cancelLocalVideoJob(jobId);
+      throw createDialogueVideoCanceledError();
+    }
+    let data;
+    try {
+      data = await getLocalVideoJob(jobId);
+    } catch (error) {
+      if ([401, 404].includes(Number(error.status))) throw error;
+      await sleep(pollIntervalMs);
+      continue;
+    }
+    const status = String(data?.status || "").trim().toLowerCase();
+    const hint = String(data?.hint || "").trim();
+    const stateKey = `${String(data?.stage || "").trim()}|${status}|${String(data?.updatedAt || "").trim()}`;
+    if (stateKey !== lastStateKey) {
+      lastStateKey = stateKey;
+      if (typeof options.onUpdate === "function") {
+        try { options.onUpdate(data); } catch (_) { }
+      }
+    }
+    if (status === "ready") return data;
+    if (status === "canceled") throw createDialogueVideoCanceledError();
+    if (status === "error") {
+      const error = new Error(String(data?.error?.message || hint || "El motor local de video falló."));
+      error.status = 502;
+      error.detail = data;
+      throw error;
+    }
+    if (!options.silent) {
+      const waitedSec = Math.max(0, Math.round((Date.now() - pollStartedAt) / 1000));
+      setGenerationStatus(hint || `Generando video local gratis... (${waitedSec}s)`, "is-busy");
+    }
+    if (Date.now() - pollStartedAt >= LOCAL_VIDEO_POLL_TIMEOUT_MS) {
+      const error = new Error("El motor local tardó demasiado en generar el video.");
+      error.status = 504;
+      throw error;
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
+function buildLocalVideoPrompt(body = {}) {
+  const parts = [
+    String(body.scenePrompt || "").trim(),
+    String(body.videoDirective || "").trim(),
+    String(body.visualNotes || "").trim(),
+    String(body.sceneDescription || "").trim()
+  ].filter(Boolean);
+  const base = parts.join(". ") || "Escena educativa de un podcast con dos locutores conversando.";
+  return `${base}. Persona hablando de forma natural y expresiva, iluminación cinematográfica suave, plano limpio sin texto.`.slice(0, 2000);
+}
+
+const LOCAL_VIDEO_FIRST_FRAME_MAX_PX = 1280;
+
+// El motor local no sabe escribir: si el primer frame ya trae el rótulo pintado,
+// Wan anima las letras y salen garabatos encima de las caras.
+const TEXT_BEARING_REFERENCE_RE = /stylized[-_]?text|title[-_]?card|tarjeta[-_]?t[ií]tulo|r[oó]tulo/i;
+
+function isTextBearingReference(record) {
+  const name = String(record?.name || "").trim();
+  const path = String(record?.storagePath || record?.path || record?.downloadUrl || record?.url || "").trim();
+  return TEXT_BEARING_REFERENCE_RE.test(name) || TEXT_BEARING_REFERENCE_RE.test(path);
+}
+
+function averageOpaqueColor(ctx, width, height) {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let seen = 0;
+  try {
+    const data = ctx.getImageData(0, 0, width, height).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 16) {
+        red += data[i - 3];
+        green += data[i - 2];
+        blue += data[i - 1];
+        seen += 1;
+      }
+    }
+  } catch (_) {
+    return "#000000";
+  }
+  if (!seen) return "#000000";
+  return `rgb(${Math.round(red / seen)}, ${Math.round(green / seen)}, ${Math.round(blue / seen)})`;
+}
+
+const captureReferenceImageDataUrl = async (src = "") => {
+  const clean = String(src || "").trim();
+  if (!clean || clean.startsWith("podcaster-local-media:")) return "";
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value = "") => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timeout);
+      resolve(String(value || "").trim());
+    };
+    const timeout = window.setTimeout(() => finish(""), 12000);
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.addEventListener("error", () => finish(""), { once: true });
+    image.addEventListener("load", () => {
+      try {
+        const naturalWidth = Math.max(2, Number(image.naturalWidth || image.width || 0) || 0);
+        const naturalHeight = Math.max(2, Number(image.naturalHeight || image.height || 0) || 0);
+        const scale = Math.min(1, LOCAL_VIDEO_FIRST_FRAME_MAX_PX / Math.max(naturalWidth, naturalHeight));
+        const width = Math.max(2, Math.round(naturalWidth * scale));
+        const height = Math.max(2, Math.round(naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0, width, height);
+        // El relleno blanco dejaba cara lavada y niebla en cualquier PNG con
+        // transparencia: se aplana sobre el color promedio de lo visible.
+        ctx.fillStyle = averageOpaqueColor(ctx, width, height);
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = "source-over";
+        finish(canvas.toDataURL("image/jpeg", 0.92));
+      } catch (_) {
+        finish("");
+      }
+    }, { once: true });
+    image.src = clean;
+  });
+};
+
+// El motor local necesita píxeles, no rutas: resuelve la referencia de la escena
+// aunque la sesión venga de la nube y la imagen ya no esté en memoria.
+async function resolveLocalVideoFirstFrame(candidates = []) {
+  const records = (Array.isArray(candidates) ? candidates : [])
+    .filter((item) => item && typeof item === "object")
+    .filter((record) => !isTextBearingReference(record));
+  for (const record of records) {
+    const inline = String(record.dataUrl || "").trim();
+    if (/^data:image\//i.test(inline)) return inline;
+    const cacheKey = String(record.localMediaCacheKey || "").trim();
+    if (cacheKey) {
+      try {
+        const cached = await getPodcasterLocalMediaDataUrl(cacheKey);
+        if (/^data:image\//i.test(String(cached || "").trim())) return String(cached).trim();
+      } catch (_) { }
+    }
+    const downloadUrl = String(record.downloadUrl || record.url || "").trim();
+    const storagePath = String(record.storagePath || record.path || "").trim();
+    if (!downloadUrl && !storagePath) continue;
+    const resolvedSrc = typeof resolveStorageVideoUrl === "function"
+      ? resolveStorageVideoUrl(downloadUrl, storagePath, {
+        type: "image",
+        mimeType: String(record.mimeType || "image/png").trim() || "image/png",
+        name: String(record.name || "").trim(),
+        updatedAt: String(record.updatedAt || "").trim()
+      })
+      : (downloadUrl || storagePath);
+    const captured = await captureReferenceImageDataUrl(resolvedSrc);
+    if (captured) return captured;
+  }
+  return "";
+}
+
+async function generateLocalDialogueVideo(context = {}) {
+  const {
+    body, rowId, sessionId, pendingKey, silent, onJobUpdate,
+    aspectRatio = "16:9", requestedDurationSec = 4
+  } = context;
+  const health = await probeLocalVideoEngine();
+  if (!health) {
+    const error = new Error("El motor de video local no está disponible. Inicia ComfyUI y `node tools/podcaster-local-video/server.mjs`; no se usará ningún proveedor de pago.");
+    error.status = 503;
+    throw error;
+  }
+  if (health.comfyReachable !== true) {
+    const error = new Error("El motor local respondió, pero ComfyUI no está accesible en :8188. Arranca ComfyUI y reintenta.");
+    error.status = 503;
+    throw error;
+  }
+  const firstFrame = String(
+    await resolveLocalVideoFirstFrame(context.referenceCandidates)
+    || [
+      ...(Array.isArray(body.referenceImageDataUrls) ? body.referenceImageDataUrls : []),
+      body.referenceImageDataUrl,
+      body.continuityReferenceImageDataUrl
+    ].find((item) => /^data:image\//i.test(String(item || "").trim()))
+    || ""
+  ).trim();
+  if (!/^data:image\//i.test(firstFrame)) {
+    const candidates = (Array.isArray(context.referenceCandidates) ? context.referenceCandidates : [])
+      .filter((item) => item && typeof item === "object");
+    const onlyTextBearing = candidates.length > 0 && candidates.every(isTextBearingReference);
+    const hasReferenceRecord = candidates
+      .some((item) => Boolean(item.dataUrl || item.localMediaCacheKey || item.downloadUrl || item.storagePath));
+    const error = new Error(onlyTextBearing
+      ? "La única referencia de esta escena es el rótulo generado. El motor local no puede animar texto: regenera la imagen de la escena o adjunta una foto sin rótulos."
+      : hasReferenceRecord
+        ? "La escena tiene una imagen de referencia, pero el motor local no pudo leerla. Readjúntala desde el visor de referencias y vuelve a generar; no se usará ningún proveedor de pago."
+        : "El modo local necesita una imagen de referencia como primer frame (adjunta una imagen de escena o usa «Reemplazar escena»). El texto-only llegará en una versión posterior.");
+    error.status = 400;
+    throw error;
+  }
+  const portrait = aspectRatio === "9:16";
+  // Snoopy decide píxeles, frames y pasos: conoce su RAM y su GPU. El sitio solo pide
+  // la duración de la escena (8 s) y si es vertical.
+  const durationSec = Math.max(4, Math.min(8, Number(requestedDurationSec) || 8));
+  const { jobId, plan } = await createLocalVideoJob({
+    mode: "i2v",
+    prompt: buildLocalVideoPrompt(body),
+    negativePrompt: "marcas de agua, subtítulos, texto, letras, tipografía, rótulos, carteles escritos, texto ilegible, distorsiones faciales",
+    firstFrame,
+    durationSec,
+    aspectRatio,
+    portrait
+  });
+  if (!jobId) throw new Error("El motor local no devolvió un jobId.");
+  rememberLocalVideoPendingJob({
+    jobId,
+    plan,
+    durationSec,
+    aspectRatio,
+    sessionId,
+    rowId,
+    sceneTitle: String(body.scenePrompt || body.sceneDescription || "").trim().slice(0, 80)
+  });
+  return finishLocalDialogueVideoJob({
+    jobId,
+    plan,
+    durationSec,
+    aspectRatio,
+    sessionId,
+    rowId,
+    silent,
+    onJobUpdate,
+    pendingKey,
+    sceneTitle: String(body.scenePrompt || body.sceneDescription || "").trim().slice(0, 80)
+  });
+}
+
+/**
+ * Segunda mitad del trabajo local: esperar a que Snoopy termine, subir el clip a la
+ * biblioteca del sitio y anotar el gasto. Está separada porque, si el navegador se
+ * recarga a mitad, hay que retomar justo aquí con el jobId que ya existe.
+ */
+async function finishLocalDialogueVideoJob(context = {}) {
+  const {
+    jobId, plan = null, durationSec = 8, aspectRatio = "16:9",
+    sessionId, rowId, silent, onJobUpdate, pendingKey, sceneTitle = ""
+  } = context;
+  if (!silent) setGenerationStatus(localPlanStatusText(plan, durationSec), "is-busy");
+  if (pendingKey && dialogueVideoGenerationCanceled.has(pendingKey)) {
+    await cancelLocalVideoJob(jobId);
+    throw createDialogueVideoCanceledError();
+  }
+  traceVisualReferenceScene("local-job-accepted", { sessionId, rowId, jobId, model: PODCASTER_VIDEO_MODEL_LOCAL });
+  const localJob = await pollLocalDialogueVideoJob(jobId, { silent, onUpdate: onJobUpdate, pendingKey });
+  // En Macs con poca RAM el motor recorta el clip a lo que cabe en memoria: la
+  // duración de la línea de tiempo tiene que venir del motor, no de lo pedido.
+  const effectiveDurationSec = Number(localJob?.durationSec) > 0 ? Number(localJob.durationSec) : durationSec;
+  if (!silent) setGenerationStatus("Subiendo el video local a tu biblioteca…", "is-busy");
+  const blob = await fetchLocalVideoBlob(jobId);
+  const fileName = `local-wan-${Date.now()}.mp4`;
+  const file = new File([blob], fileName, { type: "video/mp4" });
+  const uploaded = await uploadPodcasterAsset(file, {
+    kind: "scene-video",
+    sessionId,
+    rowId,
+    fileName
+  });
+  const media = uploaded?.media || null;
+  if (!media?.storagePath || !media?.downloadUrl) {
+    const error = new Error("El video local se generó pero no pudo alojarse en Storage.");
+    error.status = 502;
+    throw error;
+  }
+  try {
+    await authFetchJson(buildVeoApiUrl("/api/podcaster/local-video/accounting"), {
+      method: "POST",
+      body: JSON.stringify({ sessionId, rowId })
+    });
+  } catch (error) {
+    console.warn("[Podcaster][LocalVideo] accounting falló", error);
+  }
+  // Para que la lista «Videos de Snoopy» del Mac diga a qué escena pertenece cada clip.
+  linkLocalVideoClip(jobId, {
+    title: sceneTitle,
+    storageUrl: media.downloadUrl
+  });
+  return {
+    dialogueVideo: {
+      name: fileName,
+      mimeType: "video/mp4",
+      storagePath: media.storagePath,
+      downloadUrl: media.downloadUrl,
+      model: PODCASTER_VIDEO_MODEL_LOCAL,
+      generator: "local",
+      durationSeconds: effectiveDurationSec,
+      mediaDurationMs: Math.round(effectiveDurationSec * 1000),
+      aspectRatio,
+      updatedAt: String(media.updatedAt || new Date().toISOString()).trim()
+    }
+  };
+}
+
+// ── La escena en generación sobrevive a un refresco del sitio ────────────────
+// Snoopy tarda minutos, y el navegador puede recargarse en medio. El jobId se guarda
+// en este equipo: al volver se pinta otra vez el chip de la escena y la cola se
+// retoma donde estaba, sin pedir un video nuevo (y sin gastar nada repetido).
+const LOCAL_VIDEO_PENDING_STORAGE_KEY = "snoopy-local-video-jobs";
+const LOCAL_VIDEO_PENDING_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+const localVideoResumeTasks = new Set();
+
+function localVideoPendingKey(sessionId = "", rowId = "") {
+  const cleanSession = String(sessionId || "").trim();
+  const cleanRow = String(rowId || "").trim();
+  if (!cleanSession || !cleanRow) return "";
+  return `${cleanSession}:${cleanRow}`;
+}
+
+function readLocalVideoPendingJobs() {
+  try {
+    const parsed = JSON.parse(String(window.localStorage.getItem(LOCAL_VIDEO_PENDING_STORAGE_KEY) || "{}"));
+    if (!parsed || typeof parsed !== "object") return {};
+    const now = Date.now();
+    const fresh = {};
+    Object.entries(parsed).forEach(([pendingKey, record]) => {
+      if (!record?.jobId || !record?.sessionId || !record?.rowId) return;
+      if (!Number(record.createdAt) || now - Number(record.createdAt) > LOCAL_VIDEO_PENDING_MAX_AGE_MS) return;
+      fresh[pendingKey] = { ...record, pendingKey };
+    });
+    return fresh;
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalVideoPendingJobs(jobs = {}) {
+  try {
+    window.localStorage.setItem(LOCAL_VIDEO_PENDING_STORAGE_KEY, JSON.stringify(jobs));
+  } catch { /* almacenamiento bloqueado: la escena sigue, solo se pierde el respaldo */ }
+}
+
+function rememberLocalVideoPendingJob(record = {}) {
+  const pendingKey = localVideoPendingKey(record.sessionId, record.rowId);
+  if (!pendingKey || !record.jobId) return;
+  const jobs = readLocalVideoPendingJobs();
+  jobs[pendingKey] = {
+    jobId: String(record.jobId).trim(),
+    sessionId: String(record.sessionId).trim(),
+    rowId: String(record.rowId).trim(),
+    plan: record.plan || null,
+    durationSec: Number(record.durationSec) || 8,
+    aspectRatio: String(record.aspectRatio || "16:9").trim(),
+    sceneTitle: String(record.sceneTitle || "").slice(0, 80),
+    createdAt: Date.now()
+  };
+  writeLocalVideoPendingJobs(jobs);
+}
+
+function forgetLocalVideoPendingJob(pendingKey = "") {
+  const clean = String(pendingKey || "").trim();
+  if (!clean) return;
+  const jobs = readLocalVideoPendingJobs();
+  if (!(clean in jobs)) return;
+  delete jobs[clean];
+  writeLocalVideoPendingJobs(jobs);
+}
+
+/**
+ * Avisa al selector «Reemplazar escena» de que ya hay un video nuevo en la biblioteca,
+ * para que lo muestre sin tener que cerrar y volver a abrir el modal.
+ */
+function emitSceneVideoGenerated({ rowId = "", sessionId = "", clip = null } = {}) {
+  const key = String(rowId || "").trim();
+  const storagePath = String(clip?.storagePath || "").trim();
+  if (!key || !storagePath) return;
+  document.dispatchEvent(new CustomEvent("podcaster:scene-video-generated", {
+    detail: {
+      rowId: key,
+      sessionId: String(sessionId || "").trim(),
+      storagePath,
+      downloadUrl: String(clip?.downloadUrl || "").trim(),
+      name: String(clip?.name || "").trim()
+    }
+  }));
+}
+
+async function resumeLocalDialogueVideoJob(record = {}) {
+  const session = getActiveSession();
+  const sessionId = String(session?.id || "").trim();
+  // La cola de Snoopy pertenece a la sesión que está abierta ahora.
+  if (!sessionId || sessionId !== record.sessionId) return;
+  const pendingKey = localVideoPendingKey(sessionId, record.rowId);
+  if (!pendingKey) return;
+  const rowStillExists = (session?.script?.rows || [])
+    .some((row) => String(row?.id || "").trim() === record.rowId);
+  if (!rowStillExists) {
+    forgetLocalVideoPendingJob(pendingKey);
+    return;
+  }
+  if (dialogueVideoGenerationTasks.has(pendingKey) || localVideoResumeTasks.has(pendingKey)) return;
+  localVideoResumeTasks.add(pendingKey);
+  dialogueVideoGenerationPending.add(pendingKey);
+  const sceneNumber = resolveSceneNumberByRowId(record.rowId, session);
+  ensureTimelineScenePendingVisible(session, record.rowId, {
+    hint: localPlanStatusText(record.plan, record.durationSec),
+    stage: "busy"
+  });
+  addChatMessage("system", `Retomando la escena ${sceneNumber}: Servidor Snoopy seguía generándola, así que no se pidió un video nuevo.`);
+  try {
+    const health = await probeLocalVideoEngine();
+    if (!health) {
+      throw new Error("Servidor Snoopy ya no responde en este Mac, así que la escena a medio hacer no pudo terminarse.");
+    }
+    const result = await finishLocalDialogueVideoJob({
+      jobId: record.jobId,
+      plan: record.plan,
+      durationSec: record.durationSec,
+      aspectRatio: record.aspectRatio,
+      sessionId,
+      rowId: record.rowId,
+      silent: true,
+      sceneTitle: record.sceneTitle
+    });
+    const rawClip = result?.dialogueVideo;
+    if (!rawClip) throw new Error("El motor local terminó, pero no devolvió un clip válido.");
+    const application = await runtime.applySceneMediaSelection(
+      runtime.captureSceneMediaSelection(session, record.rowId),
+      {
+        ...rawClip,
+        generator: "local",
+        textPolicy: "visual-only",
+        aspectRatio: record.aspectRatio,
+        requestedDurationSeconds: record.durationSec,
+        mediaDurationMs: rawClip.durationSeconds ? Math.round(rawClip.durationSeconds * 1000) : null,
+        promptVersion: PODCASTER_VIDEO_PROMPT_PROFILE,
+        removedTextDirectives: []
+      }
+    );
+    if (application?.status !== "applied") {
+      addChatMessage("system", `La escena ${sceneNumber} se generó gratis, pero la escena cambió mientras tanto. Está en “Reemplazar escena → Generados”.`);
+    } else {
+      addChatMessage("system", `Escena ${sceneNumber} lista, gratis en la GPU de tu Mac.`);
+    }
+    emitSceneVideoGenerated({ rowId: record.rowId, sessionId, clip: application?.clip || rawClip });
+  } catch (error) {
+    if (isDialogueVideoCanceledError(error)) {
+      addChatMessage("system", `Se canceló la escena ${sceneNumber} que se estaba retomando.`);
+    } else {
+      addChatMessage("system", `No se pudo retomar la escena ${sceneNumber}: ${buildGenerationErrorMessage(error, "Error al continuar la generación local.")}`);
+    }
+    console.warn("[Podcaster][LocalVideo][resume]", error);
+  } finally {
+    forgetLocalVideoPendingJob(pendingKey);
+    dialogueVideoGenerationPending.delete(pendingKey);
+    localVideoResumeTasks.delete(pendingKey);
+    timelineSceneVideoGenerationPending.delete(pendingKey);
+    timelineSceneVideoGenerationStatus.delete(pendingKey);
+    try { runtime.renderPodcastVideoTimeline?.(getActiveSession(), { reason: "ephemeral" }); } catch (_) { }
+    updatePodcastPlayerUi();
+  }
+}
+
+/** Reanuda, uno por uno, los videos locales que quedaron a medio hacer. */
+async function resumeLocalDialogueVideoJobs() {
+  const jobs = readLocalVideoPendingJobs();
+  const records = Object.values(jobs)
+    .filter((record) => record?.jobId)
+    .sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
+  if (!records.length) return;
+  for (const record of records) {
+    await resumeLocalDialogueVideoJob(record);
+  }
+}
+
 async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
   let session = options.session || getActiveSession();
@@ -1043,6 +1556,16 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   }
   if (typeof window.PodcasterMediaReferenceApi?.waitForRowReferenceUploads === "function") {
     await window.PodcasterMediaReferenceApi.waitForRowReferenceUploads(key);
+  }
+
+  const savingsPolicy = await readSavingsPolicy();
+  if (savingsPolicy.level !== "off" && (rowIndex + 1) % 2 === 0) {
+    const reference = getRowReferenceImageList(session, key)[0];
+    if (!reference) throw new Error(`La escena ${rowIndex + 1} requiere una imagen de referencia para el modo ahorro.`);
+    const applied = applyReferenceImageAsScene(session, key, reference);
+    upsertActiveSession(() => applied.session, { render: false, autosaveReason: "savings-reference-scene" });
+    runtime.renderPodcastVideoTimeline?.(getActiveSession(), { force: true, reason: "structure" });
+    return applied.clip;
   }
 
 
@@ -1242,7 +1765,10 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
     try {
       let continuityReferenceImageDataUrl = "";
-      if (relateWithPreviousScene && previousClipPrimary && (previousClipPrimary.downloadUrl || previousClipPrimary.storagePath)) {
+      // Con el rótulo escrito dentro de la escena, el clip anterior llega al motor local
+      // con las letras pintadas y Wan las deforma: la continuidad se salta ahí.
+      const continuityBlockedForLocalText = isLocalVideoModel(selectedVideoModel) && Boolean(inSceneText);
+      if (relateWithPreviousScene && previousClipPrimary && (previousClipPrimary.downloadUrl || previousClipPrimary.storagePath) && !continuityBlockedForLocalText) {
         try {
           const videoSrc = resolveStorageVideoUrl(previousClipPrimary.downloadUrl || "", previousClipPrimary.storagePath || "");
           if (videoSrc) continuityReferenceImageDataUrl = await captureContinuityFrameDataUrl(videoSrc);
@@ -1450,6 +1976,28 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         ...traceMeta
       });
 
+      let localResult = null;
+      if (isLocalVideoModel(selectedVideoModel)) {
+        localResult = await generateLocalDialogueVideo({
+          body,
+          rowId: key,
+          sessionId,
+          pendingKey,
+          silent,
+          onJobUpdate: options.onJobUpdate,
+          aspectRatio,
+          requestedDurationSec,
+          referenceCandidates: [
+            ...effectiveReferenceImages,
+            rowReferenceImage,
+            speakerReferenceImage,
+            scenarioReferenceImage
+          ]
+        });
+      }
+
+      let remoteResult = null;
+      if (!localResult && !isLocalVideoModel(selectedVideoModel)) {
       let resp = null;
       const maxBusyRetries = 6;
       const busyRetryDelayMs = 10000;
@@ -1524,7 +2072,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         throw createDialogueVideoCanceledError();
       }
 
-      const result = await pollDialogueVideoGenerationJob(resp.jobId, {
+      remoteResult = await pollDialogueVideoGenerationJob(resp.jobId, {
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
         silent,
@@ -1532,6 +2080,9 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         traceMeta,
         pendingKey
       });
+      }
+
+      const result = localResult || remoteResult;
 
       const previousClip = resolveDialogueVideoForRow(session, key);
       const rawFinalClip = result?.dialogueVideo;
@@ -1560,6 +2111,9 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           : "la sesión o versión de destino ya no está disponible";
         const error = new Error(`El video se creó, pero ${reason}. Está disponible en Reemplazar escena → Generados.`);
         error.code = "SCENE_MEDIA_NOT_APPLIED";
+        // Decirle al usuario que lo busque en el selector y dejarlo vacío sería mentir:
+        // el clip sí está en la biblioteca, así que refrescamos la lista.
+        emitSceneVideoGenerated({ rowId: key, sessionId, clip: finalClip });
         throw error;
       }
       finalClip = application.clip;
@@ -1574,6 +2128,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         downloadUrl: String(finalClip?.downloadUrl || "").trim(),
         ...traceMeta
       });
+
+      emitSceneVideoGenerated({ rowId: key, sessionId, clip: finalClip });
 
       return finalClip;
     } catch (error) {
@@ -1602,6 +2158,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       dialogueVideoGenerationTasks.delete(pendingKey);
       dialogueVideoGenerationJobs.delete(pendingKey);
       dialogueVideoGenerationCanceled.delete(pendingKey);
+      forgetLocalVideoPendingJob(pendingKey);
       traceVisualReferenceScene("request-cleanup", {
         sessionId,
         rowId: key,
@@ -1828,6 +2385,8 @@ async function runGenerateMissingDialogueVideos(options = {}) {
   }
 
   const readyRows = eligibleRows.slice();
+  const savingsPolicy = await readSavingsPolicy();
+  let savingsVeoStarted = false;
   podcastVideoState.bulkVideoGenerationActive = true;
   podcastVideoState.bulkVideoGenerationMode = regenerateAll ? "all" : "missing";
 
@@ -1855,6 +2414,8 @@ async function runGenerateMissingDialogueVideos(options = {}) {
     for (let i = 0; i < readyRows.length; i++) {
       const row = readyRows[i];
       const rowId = String(row?.id || "").trim();
+      const sceneNumber = rows.findIndex((item) => String(item?.id || "") === rowId) + 1;
+      if (savingsPolicy.level !== "off" && sceneNumber % 2 === 1 && savingsVeoStarted) continue;
       setPodcastVideoStatus(`Generando escena ${i + 1}/${readyRows.length}...`);
 
       try {
@@ -1870,6 +2431,7 @@ async function runGenerateMissingDialogueVideos(options = {}) {
           deferTimelineRender: false,
           syncStageAfterGenerate: false
         });
+        if (savingsPolicy.level !== "off" && sceneNumber % 2 === 1) savingsVeoStarted = true;
         successCount++;
       } catch (error) {
         failures.push(`Escena ${resolveSceneNumberByRowId(rowId, session)}: ${error.message}`);
@@ -2202,5 +2764,6 @@ registerPodcasterGenerationShared({
   buildTimelineSceneGenerationKey,
   runSceneVideoGenerationFlow,
   generateDialogueVideoForRow,
+  resumeLocalDialogueVideoJobs,
   generateDialogueAudioForRow: (rowId, options) => runtime.generateDialogueAudioForRow(rowId, options)
 });

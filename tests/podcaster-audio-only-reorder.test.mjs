@@ -129,8 +129,14 @@ test("audio-only timeline reorder compacts Gemini chips to each scene start with
   const result = vm.runInContext(`buildReorderedGeminiDialogueTrack(beforeSession, afterSession);`, context);
 
   assert.equal(result.changed, true);
-  assert.equal(result.track.segments[0].startMs, 400);
+  assert.equal(result.track.segments[0].startMs, 0);
   assert.equal(result.track.segments[0].anchorStartMs, 0);
-  assert.equal(result.track.segments[1].startMs, 1600);
+  assert.equal(result.track.segments[1].startMs, 1200);
   assert.equal(result.track.segments[1].anchorStartMs, 1200);
+
+  context.isAudioOnlyPodcastStudioMode = () => false;
+  const videoResult = vm.runInContext(`buildReorderedGeminiDialogueTrack(beforeSession, afterSession);`, context);
+  assert.equal(videoResult.track.segments[0].startMs, 400);
+  assert.equal(videoResult.track.segments[1].startMs, 1600);
+  assert.equal(videoResult.track.segments[1].relativeOffsetMs, 400);
 });

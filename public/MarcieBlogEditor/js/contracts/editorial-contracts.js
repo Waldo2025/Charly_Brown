@@ -148,6 +148,14 @@ function articleVerificationBlockers(article = {}, context = {}) {
   };
   const citationIntegrity = globalThis.MarcieBibliography?.integrity(article);
   if (citationIntegrity && !citationIntegrity.valid) addBlocker("Hay citas sin documento bibliográfico asociado: " + citationIntegrity.missing.join(", "));
+  const blocks = Array.isArray(article.blocks) ? article.blocks : [];
+  blocks.forEach((block, index) => {
+    if (block?.type !== "heading" || !String(block.text || "").trim()) return;
+    const next = blocks[index + 1];
+    if (!next || next.type === "heading") {
+      addBlocker(`La sección «${String(block.text).slice(0, 100)}» quedó sin contenido.`, `empty-section-${index}`);
+    }
+  });
   const expectedMode = normalizeEditorialMode(context.editorialMode || article.editorialMode || "marcie");
   const evidenceOnly = context.scope === "evidence";
   if (!evidenceOnly && expectedMode === "aida" && !isAidaArticleCompatible(article)) {
@@ -162,7 +170,12 @@ function articleVerificationBlockers(article = {}, context = {}) {
     }
   }
   if (!sources.length) addBlocker("El artículo no tiene fuentes recuperadas y verificadas.", "sources-empty");
-  if (sources.some((source) => source?.verificationStatus !== "verified")) addBlocker("Existen fuentes que no superaron la verificación de contenido.", "sources-unverified");
+  const targetSourceCount = Number(article.researchDossier?.targetSourceCount || 0);
+  const verifiedDocumentCount = sources.filter((source) => source?.sourceType !== "youtube_video" && source?.verificationStatus === "verified").length;
+  if (targetSourceCount > 0 && verifiedDocumentCount < targetSourceCount) {
+    addBlocker(`La investigación conserva ${verifiedDocumentCount} de ${targetSourceCount} documentos verificados.`, "sources-below-target");
+  }
+  if (sources.some((source) => source?.verificationStatus !== "verified" && !(source?.sourceType === "youtube_video" && source?.verificationStatus === "attributed_only"))) addBlocker("Existen fuentes que no superaron la verificación de contenido.", "sources-unverified");
   if (sources.some((source) => globalThis.MarcieBibliography?.metadataGaps(source).length)) addBlocker("Existen fuentes sin los metadatos necesarios para una referencia APA 7 completa.", "sources-metadata-incomplete");
   if (!claims.length) addBlocker("El artículo todavía no tiene una comprobación de afirmaciones factuales.", "claims-empty");
   claims.forEach((claim) => {

@@ -14,6 +14,10 @@ function extract(name) {
 
 const requests = [];
 const context = vm.createContext({
+  PEDAGOGY_VERSION: 'fixture',
+  buildObjectiveBlueprintKey: () => 'fixture-key',
+  objectiveCheckpointStore: {load: async () => null},
+  requestFixedFoundationContent: async context => {requests.push(context.modelo);throw new Error('request captured');},
   TEXT_MODEL_DEFAULT: 'gemini-2.5-flash',
   normalizeString: (value, fallback = '') => String(value || fallback),
   buildDeterministicQuestionPlanTemplate: () => [],

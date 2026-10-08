@@ -1,0 +1,10 @@
+{
+  "cases": [
+    "child cannot read or mutate parent DOM",
+    "opaque-origin iframe excludes same-origin, navigation and forms",
+    "run command and child state telemetry",
+    "unrelated message sender rejected",
+    "destroy removes frame and listener while retaining parent-owned identity"
+  ],
+  "errors": []
+}

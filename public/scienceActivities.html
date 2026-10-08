@@ -4,7 +4,7 @@
   <script src="js/cache-version-loader.js"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
-  <link rel="modulepreload" href="js/scienceActivities.bundle.js?v=20260831-trimester-groups-v221">
+  <link rel="modulepreload" href="js/scienceActivities.bundle.js?v=20260924-production-agents-v1">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Science Activities Creator</title>
   <link rel="icon" type="image/png" href="pigpen.png">
@@ -13,7 +13,8 @@
   <link rel="stylesheet" data-cache-href="sidebar.css">
   <link rel="stylesheet" data-cache-href="header.css">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-  <link rel="stylesheet" href="scienceActivities.css?v=20260815-question-points-v51">
+  <link rel="stylesheet" href="science-candidate-review.css">
+  <link rel="stylesheet" href="scienceActivities.css?v=20260924-production-agents-v1">
   <style>
     .sa-briefing-layer {
       align-items: flex-start !important;
@@ -56,6 +57,7 @@
               <button id="newProjectBtn" class="sa-icon-button" type="button" data-tooltip="Nueva actividad" aria-label="Nueva actividad"><i class="fas fa-file-circle-plus"></i></button>
               <button id="saveProjectBtn" class="sa-icon-button" type="button" data-tooltip="Guardar" aria-label="Guardar actividad"><i class="fas fa-bookmark"></i></button>
               <button id="generateBtn" class="sa-icon-button sa-icon-gemini" type="button" data-tooltip="Crear con IA" aria-label="Crear actividad con IA"><span class="sa-action-sheen" aria-hidden="true"></span><i class="fas fa-wand-magic-sparkles"></i></button>
+              <button id="scienceProductionOpenBtn" class="sa-icon-button" type="button" aria-label="Planes y agentes" title="Planes y agentes"><i class="fas fa-diagram-project" aria-hidden="true"></i></button>
               <button id="exportProjectBtn" class="sa-icon-button" type="button" data-tooltip="Exportar ZIP" aria-label="Exportar ZIP"><i class="fas fa-file-zipper"></i></button>
             </div>
             <div class="sa-summary-group sa-summary-group-panels" id="sa-panelHeaderControls" aria-label="Controles de paneles">
@@ -75,6 +77,14 @@
               <i class="fas fa-sliders"></i>
             </div>
             <form id="activityForm" class="sa-form">
+              <label class="sa-field" id="simulatorProductionModeField" hidden>
+                <span>Modelo del simulador</span>
+                <select id="simulatorProductionMode"><option value="curated">Modelo científico del catálogo</option><option value="new">Proponer modelo nuevo (requiere revisión)</option><option value="approved">Reutilizar modelo aprobado</option></select>
+              </label>
+              <label class="sa-field" id="approvedSimulatorModelField" hidden>
+                <span>Modelo aprobado</span>
+                <select id="approvedSimulatorModel"><option value="">Selecciona un modelo</option></select>
+              </label>
               <label class="sa-field">
                 <span>Materia</span>
                 <select id="subjectSelect">
@@ -249,7 +259,7 @@
               <label class="sa-field">
                 <span>Modelo de IA</span>
                 <select id="modelSelect">
-                  <option value="gemini-3.6-flash" selected>Gemini 3.6 Flash · recomendado</option>
+                  <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash · recomendado</option>
                   <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                   <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
                   <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
@@ -484,7 +494,48 @@
 
   <script type="module" data-cache-src="js/chromeLayout.js"></script>
   <script type="module" data-cache-src="js/sidebar.js"></script>
-  <script type="module" src="js/scienceActivities.bundle.js?v=20260831-trimester-groups-v221"></script>
+  <dialog id="scienceProductionDialog" class="sa-production-dialog" aria-labelledby="scienceProductionTitle">
+    <div class="sa-panel-title"><h2 id="scienceProductionTitle">Plan y agentes científicos</h2><button data-production="close" class="sa-icon-button" type="button" aria-label="Cerrar">×</button></div>
+    <p data-production="status" role="status" aria-live="polite"></p>
+    <label class="sa-field"><span>Ejecuciones guardadas</span><select data-production="runs" aria-label="Elegir ejecución"></select></label>
+    <p>Revisa los objetivos, niveles y recursos. Puedes editar el plan antes de aprobar su ejecución.</p>
+    <label class="sa-field"><span>Título del plan</span><input data-production="title" aria-label="Título del plan"></label>
+    <label class="sa-field"><span>Objetivo científico</span><textarea data-production="objective" rows="3" aria-label="Objetivo científico"></textarea></label>
+    <label class="sa-field"><span>Instrucciones para los agentes</span><textarea data-production="plan" rows="5" aria-label="Instrucciones del plan"></textarea></label>
+    <details><summary>Niveles y recursos propuestos</summary><p data-production="outline"></p></details>
+    <div class="sa-production-actions">
+      <button data-production="revise" class="sa-generate-button sa-button-secondary" type="button">Guardar cambios</button>
+      <button data-production="approve" class="sa-generate-button" type="button">Aprobar y ejecutar</button>
+      <button data-production="start" class="sa-generate-button" type="button" hidden>Ejecutar plan aprobado</button>
+      <button data-production="show-progress" class="sa-generate-button sa-button-secondary" type="button"><i class="fas fa-chart-line" aria-hidden="true"></i> Ver avance de agentes</button>
+      <button data-production="refresh" class="sa-generate-button sa-button-secondary" type="button">Actualizar</button>
+      <button data-production="cancel" class="sa-generate-button sa-button-destructive" type="button">Cancelar generación</button>
+      <button data-production="preview" class="sa-generate-button sa-button-secondary" type="button" hidden>Vista previa parcial</button>
+      <button data-production="apply" class="sa-generate-button" type="button" hidden>Abrir resultado en el editor</button>
+    </div>
+    <section data-production="partial" class="sa-production-partial" hidden aria-label="Vista previa parcial"></section>
+    <h3>Trabajo de los agentes</h3>
+    <ul data-production="tasks" class="sa-production-tasks" aria-label="Estado de tareas"></ul>
+    <p data-production="warnings" role="status"></p>
+    <p data-production="error" role="alert"></p>
+  </dialog>
+  <section id="scienceProductionProgress" class="sa-production-progress" hidden aria-live="polite" aria-label="Progreso de agentes científicos">
+    <div class="sa-production-progress-head">
+      <div class="sa-production-progress-mark" aria-hidden="true"><i class="fas fa-diagram-project"></i></div>
+      <div class="sa-production-progress-heading"><span>PRODUCCIÓN CIENTÍFICA</span><h2 data-progress="title">Creando simulador</h2><p data-progress="status">Los agentes están preparando la actividad.</p></div>
+      <button data-progress="close" class="sa-icon-button" type="button" aria-label="Ocultar progreso" title="Ocultar progreso">×</button>
+    </div>
+    <div class="sa-production-progress-meter"><div data-progress="bar"></div></div>
+    <div class="sa-production-progress-summary"><strong data-progress="count">0 de 0 agentes</strong><span data-progress="phase">Preparando</span></div>
+    <ul data-progress="tasks" class="sa-production-progress-tasks" aria-label="Trabajo de los agentes"></ul>
+    <div class="sa-production-progress-actions">
+      <button data-progress="plan" class="sa-generate-button sa-button-secondary" type="button"><i class="fas fa-list-check" aria-hidden="true"></i> Ver plan</button>
+      <button data-progress="retry" class="sa-generate-button sa-button-secondary" type="button" hidden><i class="fas fa-rotate-right" aria-hidden="true"></i> Reintentar fallidos</button>
+      <button data-progress="cancel" class="sa-generate-button sa-button-destructive" type="button"><i class="fas fa-stop" aria-hidden="true"></i> Cancelar</button>
+      <button data-progress="apply" class="sa-generate-button" type="button" hidden><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> Abrir resultado</button>
+    </div>
+  </section>
+  <script type="module" src="js/scienceActivities.bundle.js?v=20260924-production-agents-v1"></script>
   <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

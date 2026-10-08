@@ -6,6 +6,7 @@ import {
   getMontagePreviewRowId,
   logMontageExportDevtools,
   pollMontageExportJob,
+  runFrontendMontageExport,
   resetMontageExportJobState,
   setMontageExportBusy,
   setMontageExportContinueButton,
@@ -14,8 +15,9 @@ import {
   setMontageExportStatus,
   startMontageExportElapsedTimer,
   stopMontageExportElapsedTimer,
-  stripMontageExportSubmissionPayload
-} from "./podcaster-montage-export.js?v=2026-08-20.2";
+  stripMontageExportSubmissionPayload,
+  validateFrontendMontageExport
+} from "./podcaster-montage-export.js?v=2026-10-08.local-export-cadence-1";
 
 let montageExportV2SubmitLocked = false;
 
@@ -153,6 +155,25 @@ export async function runMontageExportV2() {
     const session = window.getActiveSession?.() || null;
     const builtRuntimeEntries = window.buildTimelineRuntimeEntries?.(session);
     const runtimeEntries = Array.isArray(builtRuntimeEntries) ? builtRuntimeEntries : [];
+    const executionTarget = window.montageExportState?.executionTarget === "local_browser" ? "local_browser" : "cloud_run";
+    if (executionTarget === "local_browser") {
+      const durationMs = Math.max(0, Number(window.getTimelineTotalDurationMs?.(session) || 0) || 0);
+      const earlyValidationMessage = validateFrontendMontageExport({
+        onlyAudio: window.els?.montageExportOnlyAudio?.checked === true || window.montageExportState?.onlyAudio === true,
+        exportMode: window.montageExportState?.exportMode,
+        entries: [{
+          durationMs,
+          useNativeVideoAudio: runtimeEntries.some((entry) => entry?.useNativeVideoAudio === true
+            || entry?.clip?.useNativeVideoAudio === true
+            || window.shouldUseNativeVideoAudioForRow?.(session, String(entry?.rowId || "").trim()) === true)
+        }]
+      });
+      if (earlyValidationMessage) {
+        setMontageExportProgress(null);
+        setMontageExportStatus("Esta exportación requiere Cloud Run.", earlyValidationMessage, { tone: "warning" });
+        return;
+      }
+    }
     resetMontageExportJobState();
     startMontageExportElapsedTimer();
     clearMontageExportPolling();
@@ -171,7 +192,10 @@ export async function runMontageExportV2() {
     if (window.els?.montageExportOnlyAudio?.checked === true && window.montageExportState) {
       window.montageExportState.onlyAudio = true;
     }
-    const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: true });
+    const prepared = await buildMontageExportPayloadForSubmission(session, {
+      renderOnScreenTextFrames: executionTarget !== "local_browser",
+      allowUploads: executionTarget !== "local_browser"
+    });
     if (!prepared?.ok || !prepared?.payload) {
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
       setMontageExportBusy(false, { label: "Exportar" });
@@ -188,7 +212,7 @@ export async function runMontageExportV2() {
     const renderedTextFrameCount = renderedTextSegments.reduce((total, segment) => {
       return total + (Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0);
     }, 0);
-    if (onScreenTextSegmentCount > 0 && renderedTextFrameCount < 1) {
+    if (executionTarget !== "local_browser" && onScreenTextSegmentCount > 0 && renderedTextFrameCount < 1) {
       setMontageExportStatus(
         "No pudimos preparar el karaoke para exportar.",
         "No se generaron las capturas PNG del texto en pantalla; se detuvo para no exportar un MP4 sin el highlight seleccionado.",
@@ -211,6 +235,13 @@ export async function runMontageExportV2() {
       payload.overlayCards = { enabled: false, segments: [] };
       payload.brandOverlay = { enabled: false };
       payload.partyKaraoke = false;
+    }
+
+    if (executionTarget === "local_browser") {
+      payload.renderMode = "browser";
+      payload.executionTarget = "local_browser";
+      await runFrontendMontageExport({ payload, session });
+      return;
     }
     payload.clientBuild = {
       module: "podcaster-montage-export-v2.js",

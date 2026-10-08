@@ -1,4 +1,4 @@
-import { experience } from './escape-room-experience.mjs?v=20260912-text-pieces-v9';
+import { experience } from './escape-room-experience.mjs?v=20260924-coordinate-grid-v12';
 
 const str = {type:'string'};
 const strings = {type:'array',items:str};
@@ -36,7 +36,7 @@ export function experienceAuthoringInstruction(type, { filteredTransport = false
     completar_diagrama:'targets son nodos o conexiones rotulables con coordenadas x,y de 10 a 90. connections une los nodos mediante flechas. options son etiquetas que pueden colocarse; evita posiciones superpuestas.',
     resolver_restricciones:'targets son posiciones ordenadas y options elementos. Declara TODAS las reglas públicas también en rules, cada una con {kind,a,b,value}; la propiedad discriminante se llama kind, nunca type. different exige no repetir; before/after usan a,b como IDs de elementos; at/not_at usan a como elemento y value como índice de destino desde 0. Sólo usa estas restricciones. El validador acepta cualquier distribución completa que las cumpla.',
     informacion_suficiente:'Un destino. Declara TODOS los conjuntos mínimos de datos suficientes en solutions, excluye información redundante. minimum=1.',
-    respuesta_coordenadas:'Un destino. options representa una cuadrícula rectangular completa, cada celda con x,y enteros y etiqueta; no señales la celda solución con un formato diferente.',
+    respuesta_coordenadas:'Un destino y una cuadrícula rectangular completa. Declara el par ordenado como (x, y): x es la columna desde la izquierda y aumenta a la derecha; y es la fila desde arriba y aumenta hacia abajo. Si el reto describe un recorrido, marca la casilla inicial, indica sus coordenadas y escribe el cambio exacto en x y en y con cantidad y dirección (por ejemplo, una columna a la derecha y una fila hacia abajo); si un eje no cambia, dilo expresamente. No digas «según el desplazamiento indicado» si no indicas los pasos. El recorrido debe terminar en la coordenada de la solución privada. Cada celda tiene coordenadas enteras únicas y una etiqueta; no señales la solución por su formato.',
     balancear_cantidades:'targets son recipientes o lados. Cada opción es una unidad reutilizable con label y value; usa valores negativos para el lado que se resta. goal es la igualdad objetivo. maximum limita el total de fichas. solutions contiene una distribución comprobada. El alumno suma/retira con botones.'
   };
   const alternatives = d.family === "slots" ? " Cada destino debe ofrecer al menos dos alternativas reales del mismo grupo (tres en completar_patron). Salvo en resolver_restricciones, incluye al menos un distractor que no sea válido en ese destino (dos en completar_patron); en restricciones la validez depende de la distribución completa. allowed=[] muestra el banco completo; si separas grupos, incluye sus distractores y nunca sólo la solución." : "";

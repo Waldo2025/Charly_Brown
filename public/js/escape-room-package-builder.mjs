@@ -1,6 +1,6 @@
-import { experience, createExperienceEngine, EXPERIENCE_CSS } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
+import { experience, createExperienceEngine, EXPERIENCE_CSS } from "./escape-room-experience.mjs?v=20260924-coordinate-grid-v12";
 import { createRewardEngine } from "./escape-room-rewards.mjs?v=20260912-jigsaw-v3";
-import { normalizeEscapeRoomProject, getMissionAcceptedAnswers, resolveFinalPasscode, resolveOptionAnswerIndex, normalizeAcceptedAnswers } from "./escape-room-creator-model.mjs?v=20260912-jigsaw-v63";
+import { normalizeEscapeRoomProject, getMissionAcceptedAnswers, resolveFinalPasscode, resolveOptionAnswerIndex, normalizeAcceptedAnswers } from "./escape-room-creator-model.mjs?v=20260925-signed-answers-v64";
 import { formatGameMessage, getGameMessages } from "./escape-room-game-i18n.mjs?v=20260907-room-unlock-v44";
 
 function escapeHtml(value = "") {
@@ -1182,11 +1182,11 @@ html.is-fullscreen body:not(.menu-mode) .game-shell {
 .fill-blank-input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .fill-blank-input[aria-invalid="true"] { border-color: #e66b73 !important; }
 #experienceBonusDialog [data-exp-bonus-status]{padding:18px 20px;line-height:1.5}#experienceBonusDialog .exp-tray{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}#experienceBonusDialog [data-exp-part]{background:var(--panel,#18202c);color:var(--text,#eef3fc);border:1px solid var(--line,#8888);border-radius:10px;padding:10px;font:inherit;min-height:44px}#experienceBonusDialog button:focus-visible{outline:3px solid var(--accent,#5279b9);outline-offset:2px}
-.sequence-board{container-type:inline-size}@container(max-width:639px){.sequence-board .sequence-list{grid-template-columns:1fr}}
+.sequence-board { display: grid; gap: 10px; }
 .sequence-list {
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;
   display: grid;
-  gap: 9px;
+  grid-template-columns: 1fr;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3645,10 +3645,14 @@ const REVIEW_PROGRESS_ID = ${JSON.stringify(options.progressIdentity || "")};
     const subtype = mission?.subtipo_respuesta || "frase_corta";
     const raw = String(value ?? "").trim();
     if (subtype === "numero") {
-      const digits = raw.replace(/[^\\d.-]+/g, "");
-      if (!digits) return "";
-      const number = Number(digits);
+      const clean = raw.replace(/\\s+/g, "").replace(/,/g, ".");
+      const match = clean.match(/^[-+]?\\d+(?:\\.\\d+)?/);
+      if (!match) return "";
+      const number = Number(match[0]);
       return Number.isFinite(number) ? String(number) : "";
+    }
+    if (subtype === "codigo_corto") {
+      return raw.toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/\\s+/g, "");
     }
     const base = normalizeBaseText(raw);
     if (!base) return "";

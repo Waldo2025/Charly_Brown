@@ -1,3 +1,8 @@
+import { loadScienceExportSourceDependencies, SCIENCE_GAME_SOURCE_DEPENDENCIES, SCIENCE_SIMULATOR_SOURCE_DEPENDENCIES } from "./science-export-source-dependencies.mjs";
+import { exportGeneratedSimulator } from "./science-generated-export.mjs";
+import { createScienceIllustratedScene, normalizeScienceIllustratedScene } from "./science-scene-art-direction.mjs";
+import { createScienceProductionClient } from "./science-production-client.mjs";
+import { mountScienceProductionUI } from "./science-production-ui.mjs";
 import { authFetchJson, buildApiUrl, buildVeoApiUrl } from "./api-client.js";
 import { createCurriculumRegistry, resolveCurriculumProfile, applyCurriculumProfile, buildCuratedProfileAssessment } from "./science-curriculum-profiles.mjs?v=20260814-factorization-v8";
 import { installScienceActivitiesMotion } from "./science-activities-motion.mjs?v=20260730-micro-missions-v1";
@@ -205,8 +210,8 @@ const SCIENCE_CHARACTER_STORAGE_BUCKET = "gs://charly-brown.firebasestorage.app"
 const SCIENCE_THEME_STORAGE_KEY = "scienceActivities.theme.v1";
 const EXPERIENCE_PROPOSAL_MEMORY_KEY = "scienceActivities.experienceProposals.v1";
 const GAME_RUNTIME_SPECIFIER = "./science-game-runtime.mjs?v=20260814-question-scroll-origin-v20";
-const SIMULATOR_RUNTIME_SPECIFIER = "./science-simulator-runtime.mjs?v=20260815-number-line-controls-v54";
-const SIMULATOR_EXPORT_BUNDLE_VERSION = "20260815-number-line-controls-v9";
+const SIMULATOR_RUNTIME_SPECIFIER = "./science-simulator-runtime.mjs?v=20260924-scientific-models-v1";
+const SIMULATOR_EXPORT_BUNDLE_VERSION = "20260924-scientific-models-v1";
 const RUNTIME_URL = new URL(GAME_RUNTIME_SPECIFIER, import.meta.url);
 const PHASER_URL = new URL("../vendor/phaser/phaser.esm.min.js", import.meta.url);
 const ANIME_URL = new URL("../vendor/animejs/anime.esm.min.js", import.meta.url);
@@ -266,7 +271,7 @@ function loadOptionalStyle(href, id) {
 
 async function loadGameRuntime() {
   await Promise.all([
-    loadOptionalStyle("science-hud-themes.css?v=20260815-centered-gameplay-v44", "hud-themes"),
+    loadOptionalStyle("science-hud-themes.css?v=20260924-scientific-models-v1", "hud-themes"),
     loadOptionalStyle("science-timeline-responsive.css?v=20260814-timeline-pointer-v11", "timeline-responsive")
   ]);
   gameRuntimePromise ||= import(GAME_RUNTIME_SPECIFIER);
@@ -722,6 +727,11 @@ const SIMULATOR_VISUAL_PLAN_SCHEMA = {
 };
 
 function normalizeSimulatorVisualScene(activity, scene = activity?.visualScene) {
+  if (scene?.version === 2) {
+    const normalized = normalizeScienceIllustratedScene(activity, scene);
+    normalized.selectionKey ||= simulatorVisualSelectionKey(activity);
+    return normalized;
+  }
   const source = scene && typeof scene === "object" ? scene : {};
   const isCodeDrawnNumberLine = activity?.simulator?.modelId === "number-line"
     || activity?.simulationType === "number-line"
@@ -1391,7 +1401,7 @@ function buildTopicActivity(subject, topic, scenario) {
   principles.math ||= "Una relación matemática conserva su validez cuando sus operaciones y representaciones son equivalentes.";
   actions.math ||= "Comprobar relación";
   const isAdditionSubtraction = template.variant === "addition-subtraction";
-  return normalizeActivity({
+  const activity = normalizeActivity({
     schemaVersion: 2,
     title,
     subtitle: typeLabel,
@@ -1413,6 +1423,8 @@ function buildTopicActivity(subject, topic, scenario) {
     challenge: isAdditionSubtraction ? null : { targetLabel: `Explorar ${topic}`, targetValue: 1, tolerance: .1 },
     visual: { primary: scenario.ground, accent: scenario.accent, character: `${topic} explorer` }
   });
+  if ($("#gameModeSelect")?.value === "simulator") activity.visualScene = createScienceIllustratedScene(activity);
+  return activity;
 }
 
 const DEFAULT_ACTIVITY = {
@@ -1909,6 +1921,12 @@ function normalizeActivity(input) {
     ? normalizeScienceTrimester(input?.trimester)
     : "Trimestre 1";
   activity.maxPoints = normalizeActivityMaxPoints(input?.maxPoints);
+  if (input?.simulator?.generated?.html) {
+    activity.gameMode = "simulator";
+    activity.controls = structuredClone(input.controls || []);
+    activity.assessments = [];
+    return activity;
+  }
   activity.expectedLearnings = meaningfulActivityText(input?.expectedLearnings);
   activity.startScreen = {
     ...structuredClone(DEFAULT_ACTIVITY.startScreen),
@@ -3824,6 +3842,10 @@ function renderContentEditor() {
       const currentAssessment = state.activity.assessments[regenerationIndex];
       if (!currentAssessment) return;
       const includesImage = currentAssessment.type === "image-multiple";
+      if (scienceProductionRunId(state.activity)) {
+        await regenerateScienceProductionResource({ kind: "question", assessmentIndex: regenerationIndex });
+        return;
+      }
       const confirmed = window.confirm(`Se reemplazarán la pregunta ${regenerationIndex + 1}, sus respuestas y su retroalimentación${includesImage ? ", además de generar una imagen nueva" : ""}. ¿Deseas continuar?`);
       if (!confirmed) return;
 
@@ -3928,6 +3950,10 @@ function renderContentEditor() {
     if (!regenerate) return;
     const assessment = state.activity?.assessments?.[state.contentQuestionIndex];
     if (!assessment || assessment.type !== "image-multiple") return;
+    if (scienceProductionRunId(state.activity)) {
+      await regenerateScienceProductionResource({ kind: "image", role: "question" });
+      return;
+    }
     const visualEditor = regenerate.closest(".sa-visual-question-editor");
     const originalButtonMarkup = regenerate.innerHTML;
     regenerate.disabled = true;
@@ -4286,7 +4312,7 @@ function renderSimulatorContentEditor(editor) {
       <label class="sa-field"><span>Objetivo opcional</span><textarea id="simulatorObjective" rows="3">${escapeHtml(activity.simulator.objective || "")}</textarea></label>
       <label class="sa-field"><span>Tolerancia</span><input id="simulatorTolerance" type="number" min="0" step="0.01" value="${Number(activity.simulator.tolerance ?? .1)}"></label>
       <div class="sa-simulator-visual-editor">
-        <div class="sa-inspector-heading"><span>Escena visual Gemini</span><i class="fas fa-images"></i></div>
+        <div class="sa-inspector-heading"><span>${visualScene.version === 2 ? "Escena ilustrada" : "Escena visual"}</span><i class="fas fa-images"></i></div>
         <figure class="sa-simulator-background-preview ${backgroundSource ? "has-image" : "is-empty"}">${backgroundSource ? `<img src="${escapeHtml(backgroundSource)}" alt="${escapeHtml(visualScene.background.alt)}">` : `<span>${customScenarioPending ? "Fondo personalizado pendiente de Gemini" : "Fondo vectorial de respaldo"}</span>`}</figure>
         <button type="button" class="sa-simulator-visual-action" data-regenerate-simulator-background>${backgroundSource ? "Regenerar fondo" : customScenarioPending ? "Generar fondo solicitado" : "Generar escena visual"}</button>
         <div class="sa-simulator-layer-list">${visualScene.layers.map((layer) => {
@@ -4325,6 +4351,14 @@ function renderSimulatorContentEditor(editor) {
     event.preventDefault();
     syncEditorToActivity();
     if (!validateSimulatorCustomVisualChoices()) return;
+    if (scienceProductionRunId(state.activity)) {
+      await regenerateScienceProductionResource({ kind: "image", role: layerButton ? "primary" : "background", layerId: layerButton?.dataset.regenerateSimulatorLayer });
+      return;
+    }
+    if (state.activity.visualScene?.version === 2) {
+      await generateWithGemini();
+      return;
+    }
     state.generating = true;
     await setGenerating(true);
     try {
@@ -7161,7 +7195,7 @@ async function alignVisualQuestionToGeneratedImage(activity, assessment, imageDa
   const requestOptions = {
     method: "POST",
     body: {
-      model: $("#modelSelect")?.value || "gemini-3.6-flash",
+      model: $("#modelSelect")?.value || "gemini-3.8-flash",
       payload: {
         systemInstruction: { parts: [{ text: "Eres especialista en visión científica y evaluación escolar. Debes basar toda la pregunta únicamente en la evidencia realmente visible en la imagen adjunta." }] },
         contents: [{
@@ -7557,260 +7591,146 @@ async function enforceExactlyOneVisualQuestion(activity, assessments = []) {
   return questions;
 }
 
+const PRODUCTION_CONTEXT_KEY = "scienceActivities.productionContexts.v1";
+let scienceProductionUI;
+function productionContexts() {
+  try { return JSON.parse(localStorage.getItem(PRODUCTION_CONTEXT_KEY) || "{}"); } catch { return {}; }
+}
+let approvedScienceModelsLoading = null;
+async function syncScienceProductionOptions() {
+  const simulator = $("#gameModeSelect").value === "simulator";
+  $("#simulatorProductionModeField").hidden = !simulator;
+  const approved = simulator && $("#simulatorProductionMode").value === "approved";
+  $("#approvedSimulatorModelField").hidden = !approved;
+  if (!approved) return;
+  if (!approvedScienceModelsLoading) {
+    approvedScienceModelsLoading = authFetchJson("/api/science-activities/models").then(({ models = [] }) => {
+      const select = $("#approvedSimulatorModel");
+      const selected = select.value || state.activity?.simulator?.modelId;
+      select.replaceChildren(...models.map((model) => {
+        const option = document.createElement("option"); option.value = model.modelId; option.textContent = `${model.title} · ${model.version || model.hash.slice(0, 8)}`; return option;
+      }));
+      if (!models.length) { const option = document.createElement("option"); option.value = ""; option.textContent = "Aún no hay modelos aprobados"; select.append(option); }
+      if (models.some((model) => model.modelId === selected)) select.value = selected;
+    }).catch((error) => { showToast(error?.message || "No se pudo cargar el catálogo aprobado."); }).finally(() => { approvedScienceModelsLoading = null; });
+  }
+  await approvedScienceModelsLoading;
+}
+function scienceProductionRunId(activity) {
+  return activity?.generation?.productionRunId || activity?.generation?.runId || "";
+}
+async function regenerateScienceProductionResource(request) {
+  const id = scienceProductionRunId(state.activity);
+  if (!id) return;
+  try {
+    const contexts = productionContexts(); contexts[id] = { sessionId: state.activeSessionId, title: state.activity.title };
+    localStorage.setItem(PRODUCTION_CONTEXT_KEY, JSON.stringify(contexts));
+    const client = createScienceProductionClient(authFetchJson);
+    const { run } = await client.get(id);
+    const tasks = Array.isArray(run.tasks) ? run.tasks : Object.values(run.tasks || {});
+    const task = request.kind === "question"
+      ? tasks.find((item) => item.stage === "questions" && item.input?.levelIndex === Number(state.activity.assessments[request.assessmentIndex]?.levelIndex || 0))
+      : tasks.filter((item) => item.stage === "image" && item.input?.role === request.role)[request.role === "primary" ? Math.max(0, Number(String(request.layerId || "").split("-").at(-1)) || 0) : 0];
+    if (!task) throw new Error("No se encontró la tarea original. Crea un plan nuevo para este recurso.");
+    await getScienceProductionUI().regenerate(id, { taskId: task.id, ...(request.kind === "question" ? { questionIndex: Number(state.activity.assessments[request.assessmentIndex]?.questionIndex ?? request.assessmentIndex % state.activity.questionsPerLevel) } : {}) });
+  } catch (error) { showToast(error?.message || "No fue posible regenerar el recurso con los agentes."); }
+}
+function getScienceProductionUI() {
+  if (scienceProductionUI) return scienceProductionUI;
+  scienceProductionUI = mountScienceProductionUI({
+    client: createScienceProductionClient(authFetchJson),
+    onError: (error) => showToast(error?.message || "No fue posible contactar a los agentes."),
+    onResult: async (run, explicitlyRequested) => {
+      if (state.activity?.generation?.productionRunId === run.id && state.activity.generation.productionRevision === run.revision && state.activity.generation.productionCompletedAt === run.result?.generation?.completedAt) return true;
+      const context = productionContexts()[run.id];
+      if (!explicitlyRequested && (!context || String(context.sessionId) !== String(state.activeSessionId))) return false;
+      if (context && String(context.sessionId) !== String(state.activeSessionId)) {
+        const session = state.sessions.find((item) => String(item.id) === String(context.sessionId));
+        if (session) await activateSession(session, { userInitiated: true });
+        else if (!explicitlyRequested) return false;
+        else { flushLocalDraftSave(); state.activeSessionId = context.sessionId; localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, String(context.sessionId)); }
+      }
+      if (run.result?.generation?.complete !== true) throw new Error("La validación de la actividad aún no está completa.");
+      const previousActivity = state.activity;
+      try {
+        state.activity = normalizeActivity(run.result);
+        state.activity.generation = { ...run.result.generation, productionRunId: run.id, productionRevision: run.revision, productionCompletedAt: run.result.generation.completedAt };
+        if (context?.title) state.activity.title = context.title;
+        sanitizeVisibleActivityCopy(state.activity);
+        state.previewActivity = structuredClone(state.activity);
+        state.gameProgress = null;
+        syncActivityToEditor();
+        await renderGame({ resetProgress: true });
+        if (sessionSetupState.active) completeInitialSessionSetup();
+        await autosaveProject("generation");
+        showToast("Actividad creada y validada por los agentes.");
+        return true;
+      } catch (error) { state.activity = previousActivity; throw error; }
+    }
+  });
+  return scienceProductionUI;
+}
+
 async function generateWithGemini(options = {}) {
   if (state.generating) return;
-  const initialSetup = options?.initialSetup === true || sessionSetupState.active;
-  const previousActivity = state.activity;
-  const preserveActiveSessionTitle = !initialSetup && Boolean(state.activeSessionId);
-  const preservedSessionTitle = preserveActiveSessionTitle
-    ? String($("#activityTitle")?.value || previousActivity?.title || "").trim()
-    : "";
-  let generationSucceeded = false;
-  let completedAssessmentDraftKey = "";
-  const selectedMode = $("#gameModeSelect").value;
-  const selectedTrimester = normalizeScienceTrimester($("#trimesterSelect").value);
-  const selectedSubject = $("#subjectSelect").value;
-  const selectedTopic = getSelectedTopic();
-  const requestedLevelCount = positiveInteger($("#gameLevelCount").value, 1);
-  const requestedQuestionsPerLevel = configuredQuestionsPerLevel($("#questionsPerLevel").value, 1);
-  $("#questionsPerLevel").value = String(requestedQuestionsPerLevel);
-  const selectedProfile = curriculumProfileFor(selectedSubject, selectedTopic);
-  const requestedExperience = selectedMode === "simulator"
-    ? selectedProfile?.simulatorProfile?.focus || ""
-    : $("#experiencePrompt").value.trim();
-  const requestedExpectedLearnings = selectedMode === "simulator" ? "" : $("#expectedLearnings").value.trim();
-  if (!selectedTrimester) {
-    showToast("Selecciona el trimestre de la sesión.");
-    $("#trimesterSelect").focus();
-    return;
+  const subject = $("#subjectSelect").value;
+  const topic = getSelectedTopic();
+  const gameMode = $("#gameModeSelect").value;
+  const trimester = normalizeScienceTrimester($("#trimesterSelect").value);
+  if (!trimester) { showToast("Selecciona el trimestre de la sesión."); $("#trimesterSelect").focus(); return; }
+  const experiencePrompt = gameMode === "simulator" ? "" : $("#experiencePrompt").value.trim();
+  if (gameMode === "game" && !experiencePrompt) { showToast("Describe qué deben experimentar los estudiantes."); $("#experiencePrompt").focus(); return; }
+  if (gameMode === "simulator" && $("#simulatorProductionMode").value !== "approved" && !validateSimulatorCustomVisualChoices()) return;
+  const config = {
+    subject, topic, trimester, gameMode, simulatorMode: gameMode === "simulator" ? $("#simulatorProductionMode").value : "curated",
+    grade: $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES[subject],
+    difficulty: $("#difficultySelect").value, visualStyle: $("#visualStyleSelect").value,
+    levelCount: positiveInteger($("#gameLevelCount").value, 1),
+    questionsPerLevel: configuredQuestionsPerLevel($("#questionsPerLevel").value, 1),
+    experiencePrompt, expectedLearnings: gameMode === "simulator" ? "" : $("#expectedLearnings").value.trim(),
+    model: $("#modelSelect").value
+  };
+  if (config.simulatorMode === "approved") {
+    config.modelId = $("#approvedSimulatorModel").value;
+    if (!config.modelId) { showToast("Selecciona un modelo aprobado del catálogo."); return; }
   }
-  if (selectedMode === "game" && !requestedExperience) {
-    showToast("Describe qué deben experimentar los estudiantes.");
-    $("#experiencePrompt").focus();
-    return;
+  const activity = buildTopicActivity(subject, topic, getSelectedScenario());
+  Object.assign(activity, config);
+  if (gameMode !== "simulator") {
+    config.questionTypeSchedule = buildQuestionTypeSchedule(activity, config.levelCount * config.questionsPerLevel).map((type, index) => index === 0 ? "image-multiple" : type === "image-multiple" ? "multiple" : type);
   }
-  beginScienceGenerationTrace({
-    modo: selectedMode,
-    materia: selectedSubject,
-    tema: selectedTopic,
-    niveles: requestedLevelCount,
-    preguntasPorNivel: requestedQuestionsPerLevel,
-    totalPreguntas: requestedLevelCount * requestedQuestionsPerLevel,
-    modelo: $("#modelSelect").value,
-    cantidadAprendizajes: parseExpectedLearningStatements(requestedExpectedLearnings).length,
-    longitudExperiencia: requestedExperience.length
-  });
-  if (selectedMode === "simulator") {
-    if (!selectedProfile) {
-      finishScienceGenerationTrace("error", { etapa: "validación", error: `El tema ${selectedTopic} no tiene un simulador científico curado.` });
-      showToast(`El tema ${selectedTopic} no tiene un simulador científico curado.`);
-      return;
-    }
-    if (!validateSimulatorCustomVisualChoices()) {
-      finishScienceGenerationTrace("error", { etapa: "validación visual", error: "La configuración visual del simulador está incompleta." });
-      return;
-    }
-    state.generating = true;
-    if (initialSetup) hideSessionSetupModal();
-    await setGenerating(true);
-    try {
-    logScienceGenerationStep("Preparando configuración del simulador", { tema: selectedTopic });
-    const selectedVariableValues = getSelectedSimulatorVariableValues();
-    const simulatorActivity = buildTopicActivity(selectedSubject, selectedTopic, getSelectedScenario());
-    simulatorActivity.controls.forEach((control) => {
-      if (Number.isFinite(selectedVariableValues[control.id])) control.value = Math.max(Math.min(selectedVariableValues[control.id], Math.max(control.min, control.max)), Math.min(control.min, control.max));
-    });
-    simulatorActivity.simulator = { ...(simulatorActivity.simulator || {}), values: { ...(simulatorActivity.simulator?.values || {}), ...selectedVariableValues } };
-    simulatorActivity.gameMode = "simulator";
-    simulatorActivity.trimester = selectedTrimester;
-    simulatorActivity.visualStyle = $("#visualStyleSelect").value;
-    simulatorActivity.grade = $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES[selectedSubject];
-    simulatorActivity.difficulty = $("#difficultySelect").value;
-    simulatorActivity.simulatorVisualSelection = getSelectedSimulatorVisualSelection();
-    simulatorActivity.experiencePrompt = "";
-    simulatorActivity.expectedLearnings = "";
-    simulatorActivity.title = preservedSessionTitle || `${selectedTopic}: simulador interactivo`;
-    simulatorActivity.subtitle = SIMULATION_LABELS[selectedProfile.simulatorProfile.modelId] || "Simulador científico";
-    simulatorActivity.mission = selectedProfile.simulatorProfile.focus;
-    simulatorActivity.scientificPrinciple = selectedProfile.simulatorProfile.formula;
-    simulatorActivity.generation = { complete: true, levelCount: 0, questionsPerLevel: 0, totalQuestions: 0, completedAt: Date.now() };
-    state.activity = normalizeActivity(simulatorActivity);
-    logScienceGenerationStep("Generando escena visual del simulador", { modelo: selectedProfile.simulatorProfile.modelId });
-    state.activity.visualScene = await generateSimulatorVisualSceneWithGemini(state.activity, { replan: true });
-    state.previewActivity = structuredClone(state.activity);
-    state.gameProgress = null;
-    syncActivityToEditor();
-    await renderGame({ resetProgress: true });
-    logScienceGenerationStep("Preview del simulador renderizado", { tema: selectedTopic });
-    generationSucceeded = true;
-    if (initialSetup) completeInitialSessionSetup();
-    const generatedScene = state.activity.visualScene;
-    const hasGeneratedBackground = Boolean(generatedScene?.background?.dataUrl || generatedScene?.background?.imageUrl || generatedScene?.background?.imageSrc);
-    const hasGeneratedPrimaryLayer = simulatorUsesProgrammaticPrimary(state.activity)
-      || Boolean(generatedScene?.layers?.[0]?.dataUrl || generatedScene?.layers?.[0]?.imageUrl || generatedScene?.layers?.[0]?.imageSrc);
-    showToast(latestSimulatorQuotaWarning(generatedScene) || (hasGeneratedBackground && hasGeneratedPrimaryLayer
-      ? `Simulador visual de ${selectedTopic} preparado.`
-      : `Simulador de ${selectedTopic} preparado con escena vectorial de respaldo. Revisa las advertencias visuales en Contenido.`));
-    finishScienceGenerationTrace("success", { modo: "simulator", tema: selectedTopic });
-    } catch (error) {
-      console.error("[ScienceActivities] Simulator generation failed:", error);
-      state.activity = previousActivity;
-      finishScienceGenerationTrace("error", { etapa: "simulador", error: String(error?.message || "error desconocido") });
-      showToast(error?.message || "No fue posible preparar el simulador.");
-    } finally {
-      state.generating = false;
-      await setGenerating(false, { materializePreview: generationSucceeded });
-      if (generationSucceeded) void autosaveProject("generation");
-      else if (initialSetup) showSessionSetupModal();
-    }
-    return;
+  activity.curriculumGenerationContract = buildCurriculumGenerationContract(activity);
+  activity.imageGenerationContract = ACTIVITY_SCENE_REALISM_CONTRACT;
+  activity.generation = { complete: false, curriculumPolicyVersion: CURRICULUM_POLICY_VERSION };
+  if (gameMode === "simulator") {
+    const values = getSelectedSimulatorVariableValues();
+    activity.controls.forEach((control) => { if (Number.isFinite(values[control.id])) control.value = Math.max(Math.min(values[control.id], Math.max(control.min, control.max)), Math.min(control.min, control.max)); });
+    activity.simulator = { ...activity.simulator, values: { ...activity.simulator?.values, ...values } };
+    activity.simulatorVisualSelection = getSelectedSimulatorVisualSelection();
   }
-  if (state.activity.subject !== selectedSubject || state.activity.topic !== selectedTopic) {
-    state.activity = buildTopicActivity(selectedSubject, selectedTopic, getSelectedScenario());
-  }
-  state.activity.subject = selectedSubject;
-  state.activity.trimester = selectedTrimester;
-  state.activity.topic = selectedTopic;
-  state.activity.experiencePrompt = selectedMode === "simulator" ? "" : requestedExperience;
-  state.activity.expectedLearnings = selectedMode === "simulator" ? "" : requestedExpectedLearnings;
-  state.activity.scenario = structuredClone(getSelectedScenario());
-  if (selectedSubject === "math") {
-    const mathTemplate = resolveTopicTemplate("math", selectedTopic);
-    state.activity.simulationType = mathTemplate.type;
-    state.activity.variant = mathTemplate.variant;
-    state.activity.grade = $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES.math;
-    state.activity.controls = structuredClone(CONTROL_PRESETS[mathTemplate.type] || CONTROL_PRESETS.math);
-    state.activity.simulator = {
-      ...(state.activity.simulator || {}),
-      modelId: mathTemplate.variant,
-      formula: STEM_MODEL_REGISTRY[mathTemplate.variant]?.formula || "Relación matemática",
-      values: {}
-    };
-  }
+  const context = { sessionId: sessionSetupState.newSessionId || state.activeSessionId, title: !sessionSetupState.active && state.activeSessionId ? String($("#activityTitle")?.value || state.activity?.title || "").trim() : "" };
   state.generating = true;
-  if (initialSetup) hideSessionSetupModal();
-  await setGenerating(true);
+  $("#generateBtn").disabled = true;
+  $("#formGenerateBtn").disabled = true;
   try {
-    logScienceGenerationStep("Solicitando diseño base del videojuego", { materia: selectedSubject, tema: selectedTopic });
-    const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
-      method: "POST",
-      body: {
-        model: $("#modelSelect").value,
-        payload: {
-          systemInstruction: {
-            parts: [{
-              text: "Eres diseñador senior de simulaciones STEM 2D para secundaria. Devuelve JSON válido y pedagógicamente correcto. No inventes leyes científicas. Diseña experimentos breves, visuales, inclusivos y seguros."
-            }]
-          },
-          contents: [{ role: "user", parts: [{ text: buildPrompt() }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: ACTIVITY_SCHEMA,
-            temperature: .74
-          }
-        }
-      }
-    });
-    const generatedActivity = parseGeneratedJson(extractResponseText(response));
-    logScienceGenerationStep("Diseño base recibido y JSON interpretado", { titulo: String(generatedActivity?.title || ""), tema: selectedTopic });
-    generatedActivity.subject = selectedSubject;
-    generatedActivity.trimester = selectedTrimester;
-    generatedActivity.topic = selectedTopic;
-    if (preservedSessionTitle) generatedActivity.title = preservedSessionTitle;
-    generatedActivity.grade = $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES[selectedSubject];
-    generatedActivity.difficulty = $("#difficultySelect").value;
-    generatedActivity.gameMode = selectedMode;
-    generatedActivity.visualStyle = $("#visualStyleSelect").value;
-    generatedActivity.experiencePrompt = selectedMode === "simulator" ? "" : requestedExperience;
-    generatedActivity.expectedLearnings = selectedMode === "simulator" ? "" : requestedExpectedLearnings;
-    generatedActivity.scenario = structuredClone(getSelectedScenario());
-    generatedActivity.generation = {
-      ...(generatedActivity.generation || {}),
-      curriculumPolicyVersion: CURRICULUM_POLICY_VERSION
-    };
-    if (selectedSubject === "math") {
-      const mathTemplate = resolveTopicTemplate("math", selectedTopic);
-      generatedActivity.simulationType = mathTemplate.type;
-      generatedActivity.variant = mathTemplate.variant;
+    if (config.simulatorMode === "approved") {
+      const { model } = await authFetchJson(`/api/science-activities/models/${encodeURIComponent(config.modelId)}`);
+      if (!model?.generated?.html || model.generated.reviewStatus !== "approved") throw new Error("El modelo seleccionado no está aprobado.");
+      activity.simulator = { ...activity.simulator, modelId: model.modelId, generated: model.generated };
+      activity.controls = structuredClone(model.controls || []);
+      activity.simulationType = "generated";
     }
-    state.activity = normalizeActivity(generatedActivity);
-    state.activity.levelCount = requestedLevelCount;
-    state.activity.questionsPerLevel = requestedQuestionsPerLevel;
-    state.activity.difficulty = $("#difficultySelect").value;
-    state.activity.gameMode = $("#gameModeSelect").value;
-    state.activity.visualStyle = $("#visualStyleSelect").value;
-    const isSimulator = state.activity.gameMode === "simulator";
-    logScienceGenerationStep("Generando guía pedagógica y personaje", { niveles: requestedLevelCount, tienePersonaje: Boolean(state.activity.playerCharacter) });
-    const [learningGuide, playerSprite] = isSimulator
-      ? [null, null]
-      : await Promise.all([
-        generateLearningGuideWithGemini(state.activity),
-        Promise.resolve(state.activity.playerCharacter ? createCharacterSprite(state.activity.playerCharacter) : state.activity.playerSprite)
-      ]);
-    logScienceGenerationStep("Guía pedagógica y personaje preparados", { nivelesGuia: learningGuide?.levels?.length || 0, personajeGenerado: Boolean(playerSprite) });
-    if (isSimulator) {
-      state.activity.visualScene = await generateSimulatorVisualSceneWithGemini(state.activity, { replan: true });
+    const run = await getScienceProductionUI().create(config, activity);
+    if (run?.id) {
+      const contexts = productionContexts(); contexts[run.id] = context;
+      localStorage.setItem(PRODUCTION_CONTEXT_KEY, JSON.stringify(contexts));
     }
-    state.activity.learningGuide = isSimulator ? null : normalizeLearningGuideForSubject(state.activity, learningGuide);
-    state.activity.playerSprite = playerSprite;
-    state.activity.playerCharacter = isSimulator ? null : state.activity.playerCharacter;
-    if (isSimulator) {
-      state.activity.assessments = [];
-    } else {
-      logScienceGenerationStep("Iniciando generación de preguntas Gemini", { total: requestedLevelCount * requestedQuestionsPerLevel });
-      const activeAssessmentDraftKey = generationDraftKey(state.activity);
-      const generatedAssessments = await generateAssessmentsWithGemini(state.activity);
-      completedAssessmentDraftKey = activeAssessmentDraftKey;
-      logScienceGenerationStep("Preparando pregunta visual obligatoria", { preguntas: generatedAssessments.length });
-      const assessmentsWithVisual = await ensureSingleVisualQuestion(state.activity, generatedAssessments);
-      state.activity.assessments = await enforceExactlyOneVisualQuestion(state.activity, assessmentsWithVisual);
-      logScienceGenerationStep("Conjunto final de preguntas validado", { preguntas: state.activity.assessments.length, preguntasVisuales: state.activity.assessments.filter((assessment) => assessment.type === "image-multiple").length });
-    }
-    const expectedQuestionCount = isSimulator ? 0 : positiveInteger(state.activity.levelCount, 1)
-      * positiveInteger(state.activity.questionsPerLevel, 1);
-    if (state.activity.gameMode !== "simulator" && state.activity.assessments.length !== expectedQuestionCount) {
-      throw new Error(`No se completaron las ${expectedQuestionCount} preguntas solicitadas.`);
-    }
-    state.activity.generation = {
-      complete: true,
-      curriculumPolicyVersion: CURRICULUM_POLICY_VERSION,
-      questionSourcePolicy: isSimulator ? "simulator" : "gemini-only-v1",
-      levelCount: isSimulator ? 0 : positiveInteger(state.activity.levelCount, 1),
-      questionsPerLevel: isSimulator ? 0 : positiveInteger(state.activity.questionsPerLevel, 1),
-      totalQuestions: expectedQuestionCount,
-      completedAt: Date.now()
-    };
-    if (!isSimulator) ensureActivityAssessments(state.activity);
-    sanitizeVisibleActivityCopy(state.activity);
-    if (preservedSessionTitle) state.activity.title = preservedSessionTitle;
-    logScienceGenerationStep("Título de sesión protegido", {
-      conservado: Boolean(preservedSessionTitle),
-      titulo: state.activity.title
-    });
-    logScienceGenerationStep("Sincronizando actividad con el editor", { totalPreguntas: expectedQuestionCount });
-    syncActivityToEditor();
-    state.previewActivity = structuredClone(state.activity);
-    await renderGame();
-    logScienceGenerationStep("Preview interactivo renderizado", { totalPreguntas: expectedQuestionCount });
-    if (completedAssessmentDraftKey) {
-      await deleteGenerationDraft(completedAssessmentDraftKey).catch((error) => {
-        console.warn("[ScienceActivities] No se pudo limpiar el borrador ya completado:", error);
-      });
-    }
-    generationSucceeded = true;
-    if (initialSetup) completeInitialSessionSetup();
-    showToast(isSimulator ? "La IA creó un simulador científico interactivo." : "La IA creó una nueva actividad interactiva.");
-    finishScienceGenerationTrace("success", { modo: state.activity.gameMode, preguntas: expectedQuestionCount, titulo: state.activity.title });
   } catch (error) {
-    console.error("[ScienceActivities] AI generation failed:", error);
-    state.activity = previousActivity;
-    finishScienceGenerationTrace("error", { etapa: "videojuego", error: String(error?.message || "error desconocido"), status: Number(error?.status || 0) });
-    showToast(error?.message || "No fue posible completar la actividad. Puedes reanudar la generación.");
+    showToast(error?.message || "No fue posible preparar la generación.");
   } finally {
     state.generating = false;
-    await setGenerating(false, { materializePreview: generationSucceeded });
-    if (generationSucceeded) void autosaveProject("generation");
-    else if (initialSetup) showSessionSetupModal();
+    $("#generateBtn").disabled = false;
+    $("#formGenerateBtn").disabled = false;
   }
 }
 
@@ -7886,6 +7806,14 @@ async function renderGame(options = {}) {
   const runtimeActivity = structuredClone(previewActivity);
   runtimeActivity.scenario = { ...(runtimeActivity.scenario || {}), label: "" };
   try {
+    if (runtimeActivity.simulator?.generated?.html) {
+      const { createGeneratedScienceSimulator } = await import("./science-model-generated-runtime.mjs");
+      const instance = await createGeneratedScienceSimulator($("#scienceGameMount"), runtimeActivity);
+      if (state.gameRenderRevision !== renderRevision) { instance.destroy(); return; }
+      $("#scienceGameControls").replaceChildren();
+      state.gameInstance = instance;
+      return;
+    }
     if (runtimeActivity.gameMode === "simulator") {
       const repairedVisualScene = await repairStoredSimulatorLayerCutouts(runtimeActivity, runtimeActivity.visualScene);
       // La normalización también puede materializar los recursos locales por defecto
@@ -8040,6 +7968,7 @@ function initializeInspectorTabs() {
           const requestedSelectionKey = simulatorVisualSelectionKey(state.activity);
           const sceneSelectionChanged = state.activity.visualScene?.selectionKey !== requestedSelectionKey;
           if (sceneSelectionChanged) {
+            if (state.activity.visualScene?.version === 2) { await generateWithGemini(); return; }
             state.generating = true;
             await setGenerating(true);
             try {
@@ -8476,6 +8405,9 @@ function syncActivityToEditor() {
   }
   renderCharacterPreview();
   $("#gameModeSelect").value = activity.gameMode || "game";
+  $("#simulatorProductionModeField").hidden = activity.gameMode !== "simulator";
+  $("#simulatorProductionMode").value = ["new", "approved"].includes(activity.simulatorMode) ? activity.simulatorMode : "curated";
+  void syncScienceProductionOptions();
   $("#trimesterSelect").value = normalizeScienceTrimester(activity.trimester);
   $("#difficultySelect").value = activity.difficulty || $("#difficultySelect").value || "balanced";
   $("#gradeSelect").value = activity.grade || SUBJECT_DEFAULT_GRADES[activity.subject] || "2º secundaria";
@@ -10648,6 +10580,11 @@ async function exportPreviewProjectZip() {
   if (!JSZip) return;
   if (!state.previewActivity) return showToast("Primero genera o aplica los cambios al preview.");
   const exportActivity = structuredClone(state.previewActivity);
+  if (exportActivity.simulator?.generated?.html) {
+    try { await exportGeneratedSimulator(JSZip, exportActivity, { css: `${EXPORTED_CSS}\n.science-generated-frame{width:100%;height:100%;border:0;background:var(--bg)}`, filename: `${slugify(exportActivity.title)}.zip` }); showToast("Simulador aprobado exportado sin conexión."); }
+    catch (error) { showToast(error?.message || "No fue posible exportar el simulador."); }
+    return;
+  }
   const runtimeActivity = structuredClone(state.previewActivity);
   try {
     validatePreviewExportSnapshot(exportActivity);
@@ -10668,7 +10605,7 @@ async function exportPreviewProjectZip() {
       [exportBundle, new URL(`./export-bundles/${exportBundle}?v=${isSimulator ? SIMULATOR_EXPORT_BUNDLE_VERSION : SCIENCE_EXPORT_PACKAGE_VERSION}`, import.meta.url), "bundle compilado", true],
       ["vendor/animejs/LICENSE.md", ANIME_LICENSE_URL, "licencia de Anime.js", !isSimulator],
       ["science-assessment.css", new URL("../science-assessment-export.css?v=20260815-segmented-switch-v34", import.meta.url), "estilos del juego", true],
-      ["science-hud-themes.css", new URL("../science-hud-themes.css?v=20260815-centered-gameplay-v18", import.meta.url), "temas visuales", true],
+      ["science-hud-themes.css", new URL("../science-hud-themes.css?v=20260924-scientific-models-v1", import.meta.url), "temas visuales", true],
       ["science-timeline-responsive.css", new URL("../science-timeline-responsive.css?v=20260814-timeline-pointer-v11", import.meta.url), "layout responsive", true]
     ].filter(([, , , required]) => required);
     const textResources = await Promise.all(resourceRequests.map(async ([path, url, label]) => {
@@ -10736,7 +10673,7 @@ async function exportProject() {
   setGenerating(true);
   try {
     const exportActivity = structuredClone(state.activity);
-    const [runtimeSource, phaserSource, animeSource, animeLicense, motionSource] = await Promise.all([
+    const [runtimeSource, phaserSource, animeSource, animeLicense, motionSource, gameSourceDependencies] = await Promise.all([
       fetch(RUNTIME_URL).then((response) => {
         if (!response.ok) throw new Error("No se pudo leer el motor de la actividad.");
         return response.text();
@@ -10756,7 +10693,8 @@ async function exportProject() {
       fetch(MOTION_URL).then((response) => {
         if (!response.ok) throw new Error("No se pudo leer el sistema de animaciones.");
         return response.text();
-      })
+      }),
+      loadScienceExportSourceDependencies(SCIENCE_GAME_SOURCE_DEPENDENCIES)
     ]);
     const zip = new JSZip();
     await localizePreviewExportImages(zip, exportActivity, exportActivity);
@@ -10767,6 +10705,7 @@ async function exportProject() {
     zip.file("vendor/animejs/anime.esm.min.js", animeSource);
     zip.file("vendor/animejs/LICENSE.md", animeLicense);
     zip.file("science-motion.mjs", motionSource.replace("../vendor/animejs/anime.esm.min.js", "./vendor/animejs/anime.esm.min.js"));
+    gameSourceDependencies.forEach(([name, source]) => zip.file(name, source));
     zip.file("activity.json", JSON.stringify(exportActivity, null, 2));
     zip.file("LEEME.txt", `SCIENCE ACTIVITIES\n\n${exportActivity.title}\n${SUBJECT_LABELS[exportActivity.subject]} · ${exportActivity.topic}\n\nIncluye Phaser, Anime.js, el runtime de Rive y todos los recursos visuales para funcionar sin conexión. Las imágenes fueron recodificadas sin metadatos y limitadas a un ancho máximo de 1280 px.\nConsulta assets/RIVE-HUD-ATTRIBUTION.txt para la atribución del recurso Rive.\nAbre index.html con doble clic o desde una plataforma educativa. El paquete no requiere internet.`);
     const blob = typeof zip.generateAsync === "function" ? await zip.generateAsync({ type: "blob" }) : zip.generate({ type: "blob" });
@@ -10801,7 +10740,8 @@ async function exportProjectWithAssessment() {
     assessmentStyles,
     simulatorRuntimeSource,
     hudThemeStyles,
-    timelineResponsiveStyles
+    timelineResponsiveStyles,
+    simulatorSourceDependencies
   ] = await Promise.all([
     fetch(new URL("./science-assessment-export.js?v=20260815-result-capture-v9", import.meta.url)).then((response) => {
       if (!response.ok) throw new Error("No se pudo cargar el runtime de preguntas.");
@@ -10815,7 +10755,7 @@ async function exportProjectWithAssessment() {
       if (!response.ok) throw new Error("No se pudo cargar el simulador Phaser.");
       return response.text();
     }),
-    fetch(new URL("../science-hud-themes.css?v=20260815-centered-gameplay-v18", import.meta.url)).then((response) => {
+    fetch(new URL("../science-hud-themes.css?v=20260924-scientific-models-v1", import.meta.url)).then((response) => {
       if (!response.ok) throw new Error("No se pudieron cargar los temas visuales del HUD.");
       return response.text();
     }),
@@ -10823,6 +10763,7 @@ async function exportProjectWithAssessment() {
       if (!response.ok) throw new Error("No se pudo cargar el layout responsive.");
       return response.text();
     }),
+    loadScienceExportSourceDependencies(SCIENCE_SIMULATOR_SOURCE_DEPENDENCIES)
   ]);
 
   syncEditorToActivity();
@@ -10938,6 +10879,7 @@ async function exportProjectWithAssessment() {
     }
       this.file("science-assessment.js", assessmentScript);
       this.file("science-simulator-runtime.mjs", simulatorRuntimeSource);
+      simulatorSourceDependencies.forEach(([name, source]) => this.file(name, source));
       this.file("science-assessment.css", `${assessmentStyles}\n\n${hudThemeStyles}\n\n${timelineResponsiveStyles}`);
       return originalGenerateAsync.apply(this, args);
   };
@@ -11292,6 +11234,11 @@ async function init() {
   fillScenarioOptions(state.activity.scenario?.id || DEFAULT_ACTIVITY.scenario.id);
   await loadSessions();
   bindEvents();
+  $("#gameModeSelect").addEventListener("change", syncScienceProductionOptions);
+  $("#simulatorProductionMode").addEventListener("change", syncScienceProductionOptions);
+  void syncScienceProductionOptions();
+  $("#scienceProductionOpenBtn").addEventListener("click", () => getScienceProductionUI().open());
+  void runtimeConfigReady.then(() => getScienceProductionUI().restore());
 
   let restored = false;
   const localActive = state.sessions.find((session) => String(session.id) === String(state.activeSessionId));

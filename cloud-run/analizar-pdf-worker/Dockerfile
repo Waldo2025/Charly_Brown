@@ -24,6 +24,10 @@ COPY backend/package.json backend/package-lock.json ./backend/
 COPY backend/scripts ./backend/scripts
 RUN npm ci --omit=dev --prefix backend
 
+COPY functions/package.json functions/package-lock.json ./functions/
+RUN npm ci --omit=dev --prefix functions
+COPY functions/src ./functions/src
+
 COPY backend/python/requirements-analizar-pdf.txt /tmp/requirements-analizar-pdf.txt
 RUN pip3 install --no-cache-dir --break-system-packages \
       -r /tmp/requirements-analizar-pdf.txt \

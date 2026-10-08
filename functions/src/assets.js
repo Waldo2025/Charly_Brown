@@ -18,7 +18,7 @@ function normalizeStoragePath(value = "") {
 }
 
 function isPublicLibraryPath(storagePath = "") {
-  return String(storagePath || "").startsWith("podcaster/library/");
+  return String(storagePath || "").startsWith("podcaster/library/") || String(storagePath || "").startsWith("schroeder-sound-lab/approved/");
 }
 
 function sessionIdFromStoragePath(storagePath = "") {
@@ -26,13 +26,23 @@ function sessionIdFromStoragePath(storagePath = "") {
   return match ? String(match[1] || "").trim() : "";
 }
 
-async function assertAssetAccess({ req, storagePath, db }) {
+async function assertAssetAccess({ req, storagePath, db, authContext: suppliedAuthContext = null }) {
   if (isPublicLibraryPath(storagePath)) return null;
-  const authContext = await resolveAuthContext(req);
+  const authContext = suppliedAuthContext || await resolveAuthContext(req);
   const sessionId = sessionIdFromStoragePath(storagePath);
   if (!sessionId) throw Object.assign(new Error("asset_forbidden"), { status: 403 });
   const snapshot = await db.collection("podcaster_sessions").doc(sessionId).get();
-  if (!snapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
+  if (!snapshot.exists) {
+    // Local-first sessions can upload to their authenticated owner's namespace
+    // before the Firestore session document has synced. Keep the compatibility
+    // path scoped to the caller's exact UID; never infer access from the session
+    // slug alone.
+    const pathParts = String(storagePath || "").split("/");
+    const ownerIndex = pathParts.indexOf("owners");
+    const pathOwnerId = ownerIndex >= 0 ? String(pathParts[ownerIndex + 1] || "") : "";
+    if (pathOwnerId && pathOwnerId === String(authContext?.uid || "")) return authContext;
+    throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
+  }
   const session = snapshot.data() || {};
   const sharedWithIds = Array.isArray(session.sharedWithIds) ? session.sharedWithIds.map(String) : [];
   if (String(session.ownerId || "") !== authContext.uid && !sharedWithIds.includes(authContext.uid) && !await hasAdminRoleWithProfile(authContext, db)) {
@@ -178,6 +188,7 @@ module.exports = {
   normalizeStoragePath,
   isPublicLibraryPath,
   sessionIdFromStoragePath,
+  assertAssetAccess,
   resolveByteRange,
   createSignedAssetUrl,
   registerAssetRoutes

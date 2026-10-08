@@ -1,9 +1,12 @@
 export function simulatorUsesFullyProgrammaticScene(activity = {}) {
+  // v2 keeps its illustrated environment even when every manipulative is exact code.
+  if (activity.visualScene?.version === 2) return false;
   const modelId = String(activity?.simulator?.modelId || activity?.simulationType || "").trim();
   return modelId === "quadratic-factorization-rectangle";
 }
 
 export function simulatorUsesProgrammaticPrimary(activity = {}) {
+  if (activity.visualScene?.version === 2) return activity.visualScene.representation === 'code';
   const modelId = String(activity?.simulator?.modelId || activity?.simulationType || "").trim();
   return modelId === "number-line" || simulatorUsesFullyProgrammaticScene(activity);
 }
@@ -25,7 +28,7 @@ export function validateLocalizedSimulatorExportContract(activity, runtimeActivi
   if (!runtimeBackground.startsWith("data:image/")) {
     throw new Error("No se pudo incrustar el fondo del simulador para abrir el ZIP con doble clic.");
   }
-  const isEcosystemEnergyFlow = activity?.simulator?.sceneVariant === "ecosystem-energy-flow";
+  const isEcosystemEnergyFlow = activity?.visualScene?.version !== 2 && activity?.simulator?.sceneVariant === "ecosystem-energy-flow";
   if (isEcosystemEnergyFlow) {
     for (let trophicLevel = 0; trophicLevel <= 5; trophicLevel += 1) {
       const manifestIndex = (manifestScene?.layers || []).findIndex((layer) => Number(layer?.trophicLevel) === trophicLevel);

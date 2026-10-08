@@ -213,7 +213,6 @@ export const STAGE_VISUAL_CONFIG = {
 };
 
 let activeStageKey = null;
-let currentOrbitalFrame = null;
 let activeItemElements = [];
 
 /**
@@ -225,11 +224,11 @@ export function buildStageVisualHtml(stageKey = "proposals") {
   return `
     <div class="automation-stage-dynamic-container" data-stage-visuals-root="${config.id}">
       <!-- Halo ambiental de iluminación -->
-      <div class="automation-stage-ambient-halo" style="background: ${config.ambientHalo}"></div>
+      <div class="automation-stage-ambient-halo"></div>
 
       <!-- Anillos orbitales sutiles -->
-      <div class="automation-stage-orbit-ring is-primary" style="border-color: ${config.orbitRingColor}"></div>
-      <div class="automation-stage-orbit-ring is-secondary" style="border-color: ${config.orbitRingColor}"></div>
+      <div class="automation-stage-orbit-ring is-primary"></div>
+      <div class="automation-stage-orbit-ring is-secondary"></div>
 
       <!-- Contenedor de elementos orbitales 3D (sólo iconos flotando y girando) -->
       <div class="automation-stage-orbit-layer" data-orbit-layer>
@@ -237,7 +236,7 @@ export function buildStageVisualHtml(stageKey = "proposals") {
           <div class="automation-orbit-item" 
                data-orbit-item-id="${item.id}"
                data-orbit-idx="${idx}"
-               style="opacity: 0; transform: translate3d(0, 0, 0) scale(0.6);">
+               >
             <span class="automation-orbit-icon">${item.icon}</span>
           </div>
         `).join("")}
@@ -260,87 +259,33 @@ export function startStageOrbitalAnimation(rootElement, stageKey = "proposals", 
   if (!container) return;
 
   const itemNodes = Array.from(container.querySelectorAll(".automation-orbit-item"));
-  activeItemElements = itemNodes.map((el, i) => {
-    const itemConfig = config.items[i] || config.items[0];
-    return {
-      el,
-      radiusX: itemConfig.orbitRadiusX,
-      radiusY: itemConfig.orbitRadiusY,
-      speed: itemConfig.speed,
-      initialAngle: (itemConfig.initialAngle * Math.PI) / 180,
-      currentAngle: (itemConfig.initialAngle * Math.PI) / 180
-    };
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  activeItemElements = itemNodes.map((el, index) => {
+    const item = config.items[index] || config.items[0];
+    if (reducedMotion || !el.animate) {
+      el.classList.add("is-static");
+      return { el, animation: null };
+    }
+    const keyframes = Array.from({ length: 17 }, (_, step) => {
+      const angle = (step / 16) * Math.PI * 2;
+      const depth = (Math.sin(angle) + 1) / 2;
+      return {
+        offset: step / 16,
+        transform: `translate3d(${(Math.cos(angle) * item.orbitRadiusX).toFixed(1)}px, ${(Math.sin(angle) * item.orbitRadiusY).toFixed(1)}px, 0) scale(${(0.78 + depth * 0.38).toFixed(3)})`,
+        opacity: 0.62 + depth * 0.38,
+        zIndex: Math.sin(angle) > 0 ? 6 : 2
+      };
+    });
+    const animation = el.animate(keyframes, { duration: item.speed, iterations: Infinity, easing: "linear", delay: -(item.initialAngle / 360) * item.speed });
+    return { el, animation };
   });
-
-  // Animación de entrada elegante con elasticidad
-  if (animateFunc && typeof animateFunc === "function") {
-    itemNodes.forEach((node, idx) => {
-      try {
-        animateFunc({
-          targets: node,
-          opacity: [0, 1],
-          scale: [0.3, 1],
-          duration: 750,
-          delay: idx * 120,
-          easing: "easeOutElastic(1, .6)"
-        });
-      } catch (_) {
-        node.style.opacity = "1";
-        node.style.transform = "translate3d(0, 0, 0) scale(1)";
-      }
-    });
-  } else {
-    itemNodes.forEach((node) => {
-      node.style.opacity = "1";
-      node.style.transform = "translate3d(0, 0, 0) scale(1)";
-    });
-  }
-
-  // Bucle orbital fluido continuo
-  let lastTime = performance.now();
-
-  const tick = (now) => {
-    const delta = now - lastTime;
-    lastTime = now;
-
-    activeItemElements.forEach((item) => {
-      if (!item.el || !item.el.isConnected) return;
-
-      // Incrementar ángulo según velocidad
-      const angularSpeed = (2 * Math.PI) / item.speed;
-      item.currentAngle = (item.currentAngle + angularSpeed * delta) % (2 * Math.PI);
-
-      // Coordenadas elípticas
-      const x = Math.cos(item.currentAngle) * item.radiusX;
-      const y = Math.sin(item.currentAngle) * item.radiusY;
-
-      // Efecto de profundidad 3D:
-      // Cuando sin(angle) > 0, está por delante (y > 0). Mayor escala, z-index 6, brillo.
-      // Cuando sin(angle) < 0, está por detrás (y < 0). Menor escala, z-index 2, opacidad reducida.
-      const depthFactor = (Math.sin(item.currentAngle) + 1) / 2; // 0 (atrás) a 1 (adelante)
-      const scale = 0.78 + depthFactor * 0.38; // 0.78 a 1.16
-      const opacity = 0.62 + depthFactor * 0.38; // 0.62 a 1.0
-      const zIndex = Math.sin(item.currentAngle) > 0 ? 6 : 2;
-
-      item.el.style.zIndex = zIndex;
-      item.el.style.opacity = opacity;
-      item.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
-    });
-
-    currentOrbitalFrame = requestAnimationFrame(tick);
-  };
-
-  currentOrbitalFrame = requestAnimationFrame(tick);
 }
 
 /**
  * Detiene las animaciones de la órbita activa
  */
 export function stopStageOrbitalAnimation() {
-  if (currentOrbitalFrame) {
-    cancelAnimationFrame(currentOrbitalFrame);
-    currentOrbitalFrame = null;
-  }
+  activeItemElements.forEach((item) => item.animation?.cancel());
   activeItemElements = [];
 }
 
@@ -364,25 +309,13 @@ export function transitionToStageVisuals(rootElement, newStageKey, animateFunc =
 
   // Transición: Salida suave de elementos actuales
   const oldItems = oldVisualContainer.querySelectorAll(".automation-orbit-item");
-  if (animateFunc && typeof animateFunc === "function" && oldItems.length) {
-    try {
-      animateFunc({
-        targets: oldItems,
-        opacity: [1, 0],
-        scale: [1, 0.4],
-        duration: 350,
-        easing: "easeInQuad",
-        complete: () => {
-          stopStageOrbitalAnimation();
-          oldVisualContainer.outerHTML = buildStageVisualHtml(newStageKey);
-          startStageOrbitalAnimation(rootElement, newStageKey, animateFunc);
-        }
-      });
-    } catch (_) {
+  if (oldItems.length && oldVisualContainer.animate) {
+    const exit = oldVisualContainer.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: "forwards" });
+    exit.finished.then(() => {
       stopStageOrbitalAnimation();
       oldVisualContainer.outerHTML = buildStageVisualHtml(newStageKey);
       startStageOrbitalAnimation(rootElement, newStageKey, animateFunc);
-    }
+    }).catch(() => {});
   } else {
     stopStageOrbitalAnimation();
     oldVisualContainer.outerHTML = buildStageVisualHtml(newStageKey);

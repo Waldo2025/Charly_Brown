@@ -1,14 +1,18 @@
+import { installScriptCopyButtons } from "./video-script-copy.js";
 import { escapeHtml } from "./ui-components.js";
 import { getFocusedSya, getSyaGroupedByCategory, hasAllSelection } from "./sya-service.js";
 import { isProjectSelection } from "./unit-contracts.js";
 import { collectSessionBibliography } from "./bibliography.js";
-import { normalizeActivitySubtopicTitle } from "./activity-label.js";
+import { normalizeActivitySubtopicTitle, cleanResourceSubtopicTitle } from "./activity-label.js";
+import { initUnitDrawer, openActivityDrawer, openReadingDrawer, openResourceDrawer, openTeacherNotesDrawer, closeUnitDrawer, findFichaTeacherNote } from "./unit-drawer.js?v=20260928-fichas-tabs-6";
 
 
 const COLLAPSE_PREFIX = "cbAcceptedCollapse:";
 export function renderAcceptedPanel({
   root,
   session,
+  isAutomating = false,
+  automationProgress = null,
   readingOptions = [],
   readingFilter = "",
   onNewSession,
@@ -22,34 +26,373 @@ export function renderAcceptedPanel({
   onEditActivity,
   onEditResource,
   onRegenerateActivity,
+  onConvertActivityStyles,
+  onRegenerateActivityStep,
+  onRegenerateInfo,
+  onAdjustActivityDifficulty,
+  onImproveSya,
+  onSaveSya,
   onRegenerateResource,
+  onAdjustResourceDifficulty,
   onRemoveActivity,
   onRemoveResource,
   onOpenUnit,
+  onGenerateResourcesForActivity,
   onGenerateNotesForActivity,
   onGenerateNotesForResource,
+  onRegenerateTeacherNote,
   onGenerateGlobalNotes,
   onEditTeacherNotes,
-  onDeleteTeacherNotes
+  onDeleteTeacherNotes,
+  onReorderActivities,
+  onReorderResources,
+  onReorderTeacherNotes
 } = {}) {
   const panel = root?.querySelector("#cbAcceptedPanel");
   const globalBtn = root?.querySelector("#cbGenerateGlobalNotesBtn");
   if (!panel) return;
 
   if (globalBtn) globalBtn.onclick = () => onGenerateGlobalNotes?.();
+
+  // Initialize Inspector Drawer
+  initUnitDrawer(panel.ownerDocument || document);
+
+  if (isAutomating) {
+    renderAutomationSpinner(panel, automationProgress);
+    return;
+  }
   const units = Array.isArray(session?.units) ? session.units : [];
   if (!units.length) {
     panel.innerHTML = "";
     return;
   }
-  panel.innerHTML = `${units.map((unit) => renderUnitPanel(unit, unit.id === session.activeUnitId)).join("")}${renderSessionBibliography(session)}`;
-  installApprovedContentActions(panel, { onEditReadingSection, onEditActivity, onEditResource });
+  panel.innerHTML = `${units.map((unit) => renderUnitPanel(unit, unit.id === session.activeUnitId, session)).join("")}${renderSessionBibliography(session)}`;
+  bindItemDragAndDrop(panel, { onReorderActivities, onReorderResources, onReorderTeacherNotes });
+
+  // Hook clicks on item cards to open Inspector Drawer
+  panel.querySelectorAll("[data-activity-card-id]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".cb-card-menu, [data-activity-action]")) return;
+      const unitId = card.dataset.unitId;
+      const activityId = card.dataset.activityCardId;
+      const targetUnit = units.find((u) => u.id === unitId) || session.units?.[0];
+      const activity = targetUnit?.accepted?.activities?.find((a, idx) => a.id === activityId || String(idx) === activityId);
+      if (activity) {
+        if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+          closeUnitDrawer();
+        } else {
+          panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+          card.classList.add("is-active-item");
+          openActivityDrawer({
+            activity,
+            mathActivities: (targetUnit.accepted.activities || []).filter((item) => normalize(item.subtopic) === normalize(activity.subtopic)),
+            initialMathActivityIndex: (targetUnit.accepted.activities || []).filter((item) => normalize(item.subtopic) === normalize(activity.subtopic)).findIndex((item) => item.id === activity.id),
+            unit: targetUnit,
+            session,
+            onEdit: (id, _unitId, nextHtml) => onEditActivity?.(id, unitId, nextHtml),
+            onRegenerate: (id) => onRegenerateActivity?.(id, unitId),
+            onRegenerateStep: (id, stepIndex) => onRegenerateActivityStep?.(id, unitId, stepIndex),
+            onRegenerateInfo,
+            onAdjustDifficulty: (id, difficulty, stepIndex) => onAdjustActivityDifficulty?.(id, unitId, difficulty, stepIndex),
+            onImproveSya: (subtopic, category, fields, targetUnitId) => onImproveSya?.(targetUnitId, subtopic, category, fields),
+            onSaveSya: (subtopic, fields, targetUnitId) => onSaveSya?.(targetUnitId, subtopic, fields),
+            onRemove: (id) => onRemoveActivity?.(id, unitId),
+            onRemoveResource: (id) => onRemoveResource?.(id, unitId),
+            onNotes: (id) => onGenerateNotesForActivity?.(id, unitId),
+            onAddResource: (id) => onGenerateResourcesForActivity?.(id, unitId)
+          });
+        }
+      }
+    });
+  });
+
+  panel.querySelectorAll("[data-reading-card-id]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".cb-card-menu, [data-reading-panel-action]")) return;
+      const unitId = card.dataset.unitId;
+      const targetUnit = units.find((u) => u.id === unitId) || session.units?.[0];
+      const reading = targetUnit?.accepted?.reading;
+      if (reading) {
+        if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+          closeUnitDrawer();
+        } else {
+          panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+          card.classList.add("is-active-item");
+          openReadingDrawer({
+            reading,
+            unit: targetUnit,
+            session,
+            onEdit: (part) => onEditReadingSection?.(part, unitId),
+            onRemove: () => onRemoveReading?.(unitId)
+          });
+        }
+      }
+    });
+  });
+
+  panel.querySelectorAll("[data-resource-card-id]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".cb-card-menu, [data-resource-action]")) return;
+      const unitId = card.dataset.unitId;
+      const resourceId = card.dataset.resourceCardId;
+      const targetUnit = units.find((u) => u.id === unitId) || session.units?.[0];
+      const resource = targetUnit?.accepted?.resources?.find((r) => r.id === resourceId);
+      if (resource) {
+        if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+          closeUnitDrawer();
+        } else {
+          panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+          card.classList.add("is-active-item");
+          {
+            const resourcePages = (targetUnit?.accepted?.resources || []).filter((item) => normalize(item.subtopic) === normalize(resource.subtopic) && getResourceBadgeMeta(item).type === getResourceBadgeMeta(resource).type);
+            openResourceDrawer({
+              resource,
+              resourcePages,
+              initialResourcePageIndex: Math.max(0, resourcePages.findIndex((item) => item.id === resource.id)),
+              activity: findResourceActivity(resource, targetUnit) || targetUnit?.accepted?.activities?.find((a) => a.id === resource.activityId),
+              unit: targetUnit,
+              session,
+              onEdit: (id) => onEditResource?.(id, unitId),
+              onRegenerate: (id) => onRegenerateResource?.(id, unitId),
+              onAdjustDifficulty: (id, difficulty) => onAdjustResourceDifficulty?.(id, unitId, difficulty),
+              onRemove: (id) => onRemoveResource?.(id, unitId) || window.handleRemoveResource?.(id, unitId),
+              onRemoveResource: (id) => onRemoveResource?.(id, unitId) || window.handleRemoveResource?.(id, unitId)
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // Hook clicks on teacher notes item cards to open Inspector Drawer
+  panel.querySelectorAll("[data-teacher-notes-card-id]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".cb-card-menu, [data-teacher-notes-action]")) return;
+      const unitId = card.dataset.unitId;
+      const activityId = card.dataset.activityId;
+      const resourceId = card.dataset.resourceId;
+      const isFichasGroup = card.dataset.isFichasGroup === "true";
+      const noteId = card.dataset.teacherNotesCardId;
+      const targetUnit = units.find((u) => u.id === unitId) || session.units?.[0];
+      const projectMode = isProjectSelection(targetUnit?.meta || session || {});
+
+      if (isFichasGroup) {
+        const fichaResources = (targetUnit?.accepted?.resources || []).filter((r) => getResourceBadgeMeta(r).type === "ficha");
+        if (fichaResources.length) {
+          const fichaNotes = fichaResources.map((ficha, index) => {
+            const note = findFichaTeacherNote(ficha, targetUnit, index);
+            return {
+              resource: ficha,
+              note: note || null,
+              title: formatFichaDisplayTitle(ficha, targetUnit, index)
+            };
+          });
+
+          if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+            closeUnitDrawer();
+          } else {
+            panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+            card.classList.add("is-active-item");
+            const firstEntry = fichaNotes[0];
+            const hasAnyNotes = fichaNotes.some((fn) => fn.note && (fn.note.html || fn.note.content));
+            openTeacherNotesDrawer({
+              note: firstEntry.note || {
+                id: firstEntry.note?.id || `ficha-${firstEntry.resource.id}`,
+                resourceId: firstEntry.resource.id,
+                title: `NDM: ${firstEntry.title}`,
+                html: ""
+              },
+              resource: firstEntry.resource,
+              fichaNotes,
+              initialFichaNoteIndex: 0,
+              initialTab: hasAnyNotes ? "notes" : "ficha",
+              unit: targetUnit,
+              session,
+              title: fichaResources.length > 1 ? "NDM: Fichas de trabajo" : `NDM: ${firstEntry.title}`,
+              noteHtml: firstEntry.note?.html || "",
+              onSave: (id, html) => onEditTeacherNotes?.(id, html, unitId),
+              onRegenerate: (id) => onGenerateNotesForResource?.(id, unitId) || onRegenerateResource?.(id, unitId),
+              onNotes: (id) => onGenerateNotesForResource?.(id, unitId),
+              onDelete: (id) => onDeleteTeacherNotes?.(id, unitId)
+            });
+          }
+          return;
+        }
+      }
+
+      if (activityId) {
+        const activity = targetUnit?.accepted?.activities?.find((a, idx) => a.id === activityId || String(idx) === activityId || String(a.id) === String(activityId));
+        const subtopicTitle = activity ? getActivityToggleLabel(activity, projectMode, targetUnit.meta?.category) : "Subtema";
+        const note = (activity?.notes && activity.notes[0]) ||
+          (targetUnit?.accepted?.teacherNotes || []).find((n) => (activity && n.activityId === activity.id) || n.id === noteId || (n.subtopic && activity?.subtopic && normalize(n.subtopic) === normalize(activity.subtopic))) ||
+          (targetUnit?.accepted?.notes || []).find((n) => (activity && n.activityId === activity.id) || n.id === noteId) ||
+          (targetUnit?.teacherNotes || []).find((n) => activity && n.activityId === activity.id);
+        const siblingActivities = (targetUnit?.accepted?.activities || []).filter((item) => activity && normalize(item.subtopic) === normalize(activity.subtopic));
+        const siblingNotes = [
+          ...(targetUnit?.accepted?.teacherNotes || []).filter((entry) => activity && normalize(entry.subtopic) === normalize(activity.subtopic)),
+          ...siblingActivities.flatMap((item) => item.notes || [])
+        ];
+        const mathNotes = siblingNotes.length
+          ? siblingNotes.map((entry) => ({ activity: siblingActivities.find((item) => item.id === entry.activityId) || activity, note: entry }))
+          : [{ activity, note: null }];
+
+        if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+          closeUnitDrawer();
+        } else {
+          panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+          card.classList.add("is-active-item");
+          openTeacherNotesDrawer({
+            note: note || {
+              title: `NDM: ${subtopicTitle}`,
+              html: ""
+            },
+            mathNotes,
+            initialMathNoteIndex: Math.max(0, mathNotes.findIndex((item) => item.note?.id === note?.id)),
+            activity,
+            unit: targetUnit,
+            session,
+            title: note?.title || `NDM: ${subtopicTitle}`,
+            noteHtml: note?.html || note?.content || note?.text || "",
+            onSave: (id, html) => onEditTeacherNotes?.(id, html, unitId),
+            onRegenerate: (id) => note?.id ? onRegenerateTeacherNote?.(id, unitId) : onGenerateNotesForActivity?.(activity?.id || id, unitId),
+            onNotes: (id) => onGenerateNotesForActivity?.(id || activity?.id, unitId),
+            onDelete: (id) => onDeleteTeacherNotes?.(id, unitId)
+          });
+        }
+        return;
+      }
+
+      if (resourceId) {
+        const resource = targetUnit?.accepted?.resources?.find((r) => r.id === resourceId);
+        if (resource) {
+          const badgeMeta = getResourceBadgeMeta(resource);
+          if (badgeMeta.type === "recortable") {
+            // Los recortables no llevan nota de maestro separada
+            return;
+          }
+          const fichaResources = badgeMeta.type === "ficha"
+            ? (targetUnit?.accepted?.resources || []).filter((r) => getResourceBadgeMeta(r).type === "ficha")
+            : [];
+          const fichaNotes = fichaResources.map((ficha, index) => {
+            const note = findFichaTeacherNote(ficha, targetUnit, index);
+            return {
+              resource: ficha,
+              note: note || null,
+              title: formatFichaDisplayTitle(ficha, targetUnit, index)
+            };
+          });
+          const initialFichaNoteIndex = Math.max(0, fichaResources.findIndex((f) => f.id === resource.id));
+          const selectedFicha = fichaNotes[initialFichaNoteIndex] || { resource, note: null, title: formatFichaDisplayTitle(resource, targetUnit, initialFichaNoteIndex) };
+
+          if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+            closeUnitDrawer();
+          } else {
+            panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+            card.classList.add("is-active-item");
+            const note = selectedFicha.note || findFichaTeacherNote(resource, targetUnit, initialFichaNoteIndex);
+            openTeacherNotesDrawer({
+              note: note || {
+                id: note?.id || `ficha-${resource.id}`,
+                resourceId: resource.id,
+                title: `NDM: ${selectedFicha.title}`,
+                html: ""
+              },
+              resource,
+              fichaNotes,
+              initialFichaNoteIndex,
+              initialTab: "notes",
+              unit: targetUnit,
+              session,
+              title: fichaResources.length > 1 ? "NDM: Fichas de trabajo" : `NDM: ${selectedFicha.title}`,
+              noteHtml: note?.html || "",
+              onSave: (id, html) => onEditTeacherNotes?.(id, html, unitId),
+              onRegenerate: (id) => onGenerateNotesForResource?.(resource.id, unitId) || onRegenerateResource?.(resource.id, unitId),
+              onDelete: (id) => onDeleteTeacherNotes?.(id, unitId)
+            });
+          }
+          return;
+        }
+      }
+
+      // Fallback: direct note from accepted.teacherNotes (excluyendo recortables)
+      const note = targetUnit?.accepted?.teacherNotes?.find((n, idx) => n.id === noteId || String(idx) === noteId);
+      if (note) {
+        const noteTitleLower = String(note.title || "").toLowerCase();
+        if (noteTitleLower.includes("recortable") || noteTitleLower.includes("cutout")) return;
+        if (card.classList.contains("is-active-item") && !document.getElementById("cbInspectorPanelRoot")?.classList.contains("is-closed")) {
+          closeUnitDrawer();
+        } else {
+          panel.querySelectorAll(".cb-up-item-card.is-active-item").forEach((el) => el.classList.remove("is-active-item"));
+          card.classList.add("is-active-item");
+          openTeacherNotesDrawer({
+            note,
+            mathNotes: (targetUnit?.accepted?.teacherNotes || []).filter((item) => normalize(item.subtopic) === normalize(note.subtopic)).map((item) => ({ activity: null, note: item })),
+            initialMathNoteIndex: Math.max(0, (targetUnit?.accepted?.teacherNotes || []).filter((item) => normalize(item.subtopic) === normalize(note.subtopic)).findIndex((item) => item.id === note.id)),
+            unit: targetUnit,
+            session,
+            title: note.title ? `NDM: ${note.title.replace(/^Nota del maestro:\s*/i, "")}` : "NDM: Notas del maestro",
+            noteHtml: note.html || note.content || note.text || "",
+            onSave: (id, html) => onEditTeacherNotes?.(id, html, unitId),
+            onRegenerate: (id) => onRegenerateTeacherNote?.(id, unitId),
+            onDelete: (id) => onDeleteTeacherNotes?.(id, unitId)
+          });
+        }
+      }
+    });
+  });
+
+  // Hook accordion branch group toggles (Actividades, Recursos, Notas)
+  panel.querySelectorAll("[data-group-toggle]").forEach((header) => {
+    header.addEventListener("click", () => {
+      const groupKey = header.dataset.groupToggle;
+      const branch = header.closest(".cb-up-organigram-branch");
+      const itemsContainer = branch?.querySelector(`[data-group-items="${groupKey}"]`);
+      if (!itemsContainer) return;
+
+      const isNowHidden = !itemsContainer.hasAttribute("hidden") && itemsContainer.style.display !== "none";
+      if (isNowHidden) {
+        itemsContainer.setAttribute("hidden", "");
+        itemsContainer.style.display = "none";
+        header.setAttribute("aria-expanded", "false");
+      } else {
+        itemsContainer.removeAttribute("hidden");
+        itemsContainer.style.display = "flex";
+        header.setAttribute("aria-expanded", "true");
+      }
+      setCollapsedState(`group-${groupKey}`, isNowHidden);
+    });
+  });
+
+  panel.querySelectorAll("[data-unit-toggle]").forEach((header) => {
+    header.addEventListener("click", (e) => {
+      if (e.target.closest("[data-unit-action]")) return;
+      const unitId = header.dataset.unitToggle;
+      const card = header.closest(".cb-up-unit-card");
+      if (!card || !unitId) return;
+
+      const isNowCollapsed = card.classList.toggle("is-collapsed");
+      const sectionList = card.querySelector(".cb-up-section-list");
+      if (sectionList) {
+        sectionList.hidden = isNowCollapsed;
+      }
+      header.setAttribute("aria-expanded", isNowCollapsed ? "false" : "true");
+      setCollapsedState(`unit-card-${unitId}`, isNowCollapsed);
+
+      if (!isNowCollapsed && unitId !== session.activeUnitId) {
+        onOpenUnit?.(unitId);
+      }
+    });
+  });
 
   panel.querySelectorAll("[data-reading-panel-action='open']").forEach((button) => {
-    button.addEventListener("click", () => onOpenReadingsPanel?.());
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onOpenReadingsPanel?.();
+    });
   });
   panel.querySelectorAll("[data-reading-panel-action='remove']").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       const unitId = button.closest("[data-unit-id]")?.dataset.unitId || "";
       if (unitId) onRemoveReading?.(unitId);
     });
@@ -68,41 +411,61 @@ export function renderAcceptedPanel({
     });
   });
   panel.querySelectorAll("[data-unit-action='edit']").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       const id = button.closest("[data-unit-id]")?.dataset.unitId || "";
       if (id) onEditUnit?.(id);
     });
   });
   panel.querySelectorAll("[data-unit-action='remove']").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       const id = button.closest("[data-unit-id]")?.dataset.unitId || "";
       if (id) onRemoveUnit?.(id);
     });
   });
   panel.querySelectorAll("[data-activity-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       button.closest("details")?.removeAttribute("open");
-      const id = button.closest("[data-activity-id]")?.dataset.activityId || "";
+      const id = button.closest("[data-activity-id], [data-activity-card-id]")?.dataset.activityId || button.closest("[data-activity-card-id]")?.dataset.activityCardId || "";
       const unitId = button.closest("[data-unit-id]")?.dataset.unitId || "";
+      if (button.dataset.activityAction === "sya") {
+        const activity = units.find((unit) => unit.id === unitId)?.accepted?.activities?.find((item) => item.id === id);
+        if (activity) root?.dispatchEvent(new CustomEvent("cb:sya-edit", { detail: { unitId, category: activity.category || "", subtopic: activity.subtopic || activity.section || "" } }));
+      }
       if (button.dataset.activityAction === "edit") onEditActivity?.(id, unitId);
       if (button.dataset.activityAction === "regenerate") onRegenerateActivity?.(id, unitId);
+      if (button.dataset.activityAction === "convert-styles") onConvertActivityStyles?.(id, unitId);
       if (button.dataset.activityAction === "remove") onRemoveActivity?.(id, unitId);
       if (button.dataset.activityAction === "notes") onGenerateNotesForActivity?.(id, unitId);
+      if (button.dataset.activityAction === "add-resource") onGenerateResourcesForActivity?.(id, unitId);
     });
   });
   panel.querySelectorAll("[data-resource-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       button.closest("details")?.removeAttribute("open");
-      const id = button.closest("[data-resource-id]")?.dataset.resourceId || "";
+      const card = button.closest("[data-resource-id], [data-resource-card-id]");
+      const id = card?.dataset.resourceId || card?.dataset.resourceCardId || card?.dataset.sortableId || "";
       const unitId = button.closest("[data-unit-id]")?.dataset.unitId || "";
       if (button.dataset.resourceAction === "edit") onEditResource?.(id, unitId);
       if (button.dataset.resourceAction === "regenerate") onRegenerateResource?.(id, unitId);
       if (button.dataset.resourceAction === "notes") onGenerateNotesForResource?.(id, unitId);
-      if (button.dataset.resourceAction === "remove") onRemoveResource?.(id, unitId);
+      if (button.dataset.resourceAction === "remove") {
+        if (confirm("¿Eliminar este recurso permanentemente?")) {
+          if (typeof onRemoveResource === "function") {
+            onRemoveResource(id, unitId);
+          } else if (typeof window.handleRemoveResource === "function") {
+            window.handleRemoveResource(id, unitId);
+          }
+        }
+      }
     });
   });
   panel.querySelectorAll(".cb-card-menu > summary").forEach((summary) => {
-    summary.addEventListener("click", () => {
+    summary.addEventListener("click", (e) => {
+      e.stopPropagation();
       const activeMenu = summary.parentElement;
       panel.querySelectorAll(".cb-card-menu[open]").forEach((menu) => {
         if (menu !== activeMenu) menu.removeAttribute("open");
@@ -116,7 +479,8 @@ export function renderAcceptedPanel({
     panel.querySelectorAll(".cb-card-menu[open]").forEach((menu) => menu.removeAttribute("open"));
   };
   panel.querySelectorAll("[data-teacher-notes-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
       const card = button.closest("[data-teacher-notes-id]");
       const id = card?.dataset.teacherNotesId || "";
       const unitId = button.closest("[data-unit-id]")?.dataset.unitId || "";
@@ -155,6 +519,7 @@ export function renderAcceptedPanel({
 }
 
 function installApprovedContentActions(panel, { onEditReadingSection, onEditActivity, onEditResource } = {}) {
+  installScriptCopyButtons(panel);
   panel.querySelectorAll(".cb-approved-html, .cb-reading-content-section, .cb-bibliography-groups").forEach((content) => {
     if (content.querySelector(":scope > .cb-content-actions")) return;
     content.classList.add("cb-content-action-host");
@@ -239,49 +604,573 @@ function structuredContentText(activity) {
   return output.join("\n\n");
 }
 
-function renderUnitPanel(unit = {}, active = false) {
+const SUBTOPIC_CANONICAL_ORDER = [
+  "artes",
+  "ortografia",
+  "gramatica",
+  "expresionescrita",
+  "trazosdeletras",
+  "comprensionlectora",
+  "expresionoral",
+  "socioemocional",
+  "conocimientodelmedio",
+  "milocalidad",
+  "naturales",
+  "historia",
+  "geografia",
+  "civicaetica",
+  "habilidades",
+  "dictado",
+  "matematicas"
+];
+
+function sortActivitiesBySubtopicOrder(activities = []) {
+  if (!Array.isArray(activities)) return [];
+  if (activities.some((activity) => Number.isFinite(Number(activity.displayOrder)))) {
+    return [...activities].sort((a, b) => {
+      const orderA = Number.isFinite(Number(a.displayOrder)) ? Number(a.displayOrder) : Number.MAX_SAFE_INTEGER;
+      const orderB = Number.isFinite(Number(b.displayOrder)) ? Number(b.displayOrder) : Number.MAX_SAFE_INTEGER;
+      return orderA - orderB;
+    });
+  }
+  return [...activities].sort((a, b) => {
+    const keyA = String(a.subtopic || a.title || "").toLowerCase().replace(/[\s:_()-]+/g, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const keyB = String(b.subtopic || b.title || "").toLowerCase().replace(/[\s:_()-]+/g, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    let idxA = SUBTOPIC_CANONICAL_ORDER.findIndex((k) => keyA.includes(k));
+    let idxB = SUBTOPIC_CANONICAL_ORDER.findIndex((k) => keyB.includes(k));
+
+    if (idxA === -1) idxA = 999;
+    if (idxB === -1) idxB = 999;
+
+    return idxA - idxB;
+  });
+}
+
+function isProjectsActivity(activity = {}) {
+  return [activity.subtopic, activity.category, activity.section]
+    .some((value) => /(^|[^a-z])proyectos?([^a-z]|$)/i.test(String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()));
+}
+
+function bindItemDragAndDrop(panel, callbacks = {}) {
+  panel.__cbItemDragCallbacks = callbacks;
+  if (panel.dataset.cbItemDragBound === "true") return;
+  panel.dataset.cbItemDragBound = "true";
+  let draggedCard = null;
+
+  panel.addEventListener("dragstart", (event) => {
+    const card = event.target.closest?.(".cb-up-item-card[data-sortable-type]");
+    if (!card || event.target.closest("button, a, input, textarea, select") || card.dataset.sortableType === "reading") {
+      event.preventDefault();
+      return;
+    }
+    draggedCard = card;
+    card.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.dataset.sortableId || "");
+  });
+
+  panel.addEventListener("dragover", (event) => {
+    const target = event.target.closest?.(".cb-up-item-card[data-sortable-type]");
+    if (!draggedCard || !target || target === draggedCard || target.parentElement !== draggedCard.parentElement || target.dataset.sortableType !== draggedCard.dataset.sortableType) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    target.classList.add("is-drop-target");
+    const insertAfter = event.clientY >= target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+    target.parentElement.insertBefore(draggedCard, insertAfter ? target.nextSibling : target);
+  });
+
+  panel.addEventListener("dragleave", (event) => {
+    event.target.closest?.(".cb-up-item-card.is-drop-target")?.classList.remove("is-drop-target");
+  });
+
+  panel.addEventListener("drop", (event) => {
+    const target = event.target.closest?.(".cb-up-item-card[data-sortable-type]");
+    if (!draggedCard || !target || target.parentElement !== draggedCard.parentElement) return;
+    event.preventDefault();
+    const type = draggedCard.dataset.sortableType;
+    const group = draggedCard.parentElement;
+    const ids = Array.from(group.querySelectorAll(`:scope > .cb-up-item-card[data-sortable-type="${type}"]`))
+      .flatMap((card) => {
+        try { return JSON.parse(card.dataset.sortableIds || "[]"); } catch (_) { return [card.dataset.sortableId]; }
+      })
+      .filter(Boolean);
+    const unitId = draggedCard.dataset.unitId || "";
+    const currentCallbacks = panel.__cbItemDragCallbacks || {};
+    if (type === "activity") currentCallbacks.onReorderActivities?.(unitId, ids);
+    else if (type === "resource") currentCallbacks.onReorderResources?.(unitId, ids);
+    else if (type === "teacher-note") currentCallbacks.onReorderTeacherNotes?.(unitId, ids);
+    panel.__cbDraggedAt = Date.now();
+  });
+
+  panel.addEventListener("dragend", () => {
+    panel.querySelectorAll(".is-dragging, .is-drop-target").forEach((card) => card.classList.remove("is-dragging", "is-drop-target"));
+    draggedCard = null;
+  });
+
+  panel.addEventListener("click", (event) => {
+    if (Date.now() - Number(panel.__cbDraggedAt || 0) > 500) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    panel.__cbDraggedAt = 0;
+  }, true);
+}
+
+function renderUnitPanel(unit = {}, active = false, session = {}) {
   const accepted = unit.accepted || {};
-  const activities = Array.isArray(accepted.activities) ? accepted.activities : [];
+  const rawActivities = Array.isArray(accepted.activities) ? accepted.activities : [];
+  const activities = sortActivitiesBySubtopicOrder(rawActivities);
   const resources = Array.isArray(accepted.resources) ? accepted.resources : [];
   const notes = Array.isArray(accepted.teacherNotes) ? accepted.teacherNotes : [];
   const projectMode = isProjectSelection(unit.meta || {});
-  const content = [
-    accepted.reading ? renderSelectedReadingSection(accepted.reading, unit.id) : "",
-    activities.length ? renderCollapsibleSection({
-      key: `${unit.id}-activities`,
-      title: projectMode ? "Proyectos" : "Actividades",
-      body: activities.map((activity) => renderActivity(activity, projectMode, unit.meta?.category)).join(""),
-      extraClass: "cb-accepted-section"
-    }) : "",
-    resources.length ? renderCollapsibleSection({
-      key: `${unit.id}-resources`,
-      title: "Recursos",
-      body: resources.map((resource) => renderResource(resource)).join(""),
-      extraClass: "cb-accepted-section cb-resource-section"
-    }) : "",
-    notes.length ? renderCollapsibleSection({
-      key: `${unit.id}-teacher-notes`,
-      title: projectMode ? "Notas del proyecto" : "Notas globales del maestro",
-      body: notes.map((item, index) => renderTeacherNotesBlock(item, index)).join(""),
-      extraClass: "cb-accepted-section"
-    }) : ""
-  ].filter(Boolean).join("");
+  const namedProjectActivities = activities.filter(isProjectsActivity);
+  const projectActivities = projectMode && !namedProjectActivities.length ? activities : namedProjectActivities;
+  const projectActivitySet = new Set(projectActivities);
+  const remainingActivities = activities.filter((activity) => !projectActivitySet.has(activity));
+  const heading = buildUnitHeading(unit);
+  const unitId = unit.id || "";
+  const isCollapsed = getCollapsedState(`unit-card-${unitId}`, !active);
+  const activitiesCollapsed = getCollapsedState(`group-activities-${unitId}`, false);
+  const resourcesCollapsed = getCollapsedState(`group-resources-${unitId}`, false);
+  const notesCollapsed = getCollapsedState(`group-notes-${unitId}`, false);
 
-  return `<div class="cb-unit-panel-wrap${active ? " is-active" : ""}" data-unit-id="${escapeHtml(unit.id || "")}">
-    ${renderCollapsibleSection({
-      key: `unit-${unit.id}`,
-      title: buildUnitHeading(unit),
-      body: content || `<div class="cb-unit-awaiting">El contenido aparecerá aquí cuando lo apruebes.</div>`,
-      actions: `<div class="cb-unit-header-actions" aria-label="Acciones de la unidad">
-        <button type="button" data-unit-action="edit" aria-label="Editar unidad" title="Editar unidad"><i class="fas fa-pen" aria-hidden="true"></i></button>
-        <button type="button" data-unit-action="remove" aria-label="Eliminar unidad" title="Eliminar unidad"><i class="fas fa-trash" aria-hidden="true"></i></button>
-      </div>`,
-      extraClass: "cb-unit-summary-card cb-unit-summary-card--lavender cb-unit-group",
-      openByDefault: active
-    })}
-  </div>`;
+  const fichaCount = resources.filter((r) => getResourceBadgeMeta(r).type === "ficha").length;
+  const visibleActivityNotesCount = groupActivitiesForPanel(activities).length;
+  const orphanNotesCount = new Set(notes.filter((note) => {
+    const title = String(note.title || "").toLowerCase();
+    return !title.includes("recortable") && !title.includes("cutout")
+      && !activities.some((activity) => normalize(activity.subtopic) === normalize(note.subtopic));
+  }).map((note) => normalize(note.subtopic || note.title || note.id))).size;
+  const totalNotesCount = visibleActivityNotesCount + (fichaCount > 0 ? 1 : 0) + orphanNotesCount;
+  const visibleActivityGroups = groupActivitiesForPanel(remainingActivities);
+  const activitiesBranch = `
+    <div class="cb-up-organigram-branch cb-up-organigram-branch--activities">
+      <div class="cb-up-group-header" data-group-toggle="activities-${escapeHtml(unitId)}" role="button" tabindex="0" aria-expanded="${activitiesCollapsed ? "false" : "true"}">
+        <div class="cb-up-group-header-left">
+          <span class="cb-up-group-title">Actividades</span>
+          <span class="cb-up-group-count">${visibleActivityGroups.length}</span>
+        </div>
+        <i class="fas fa-chevron-down cb-up-group-chevron" aria-hidden="true"></i>
+      </div>
+      <div class="cb-up-group-items" data-group-items="activities-${escapeHtml(unitId)}"${activitiesCollapsed ? ' hidden style="display:none;"' : ""}>
+        ${visibleActivityGroups.length ? visibleActivityGroups.map((group) => renderActivityItemCard(group[0], unit, projectMode, activities.indexOf(group[0]), group)).join("") : '<div class="cb-empty-hint">Sin actividades aprobadas aún.</div>'}
+      </div>
+    </div>
+  `;
+  const readingBranch = `
+    <div class="cb-up-organigram-branch cb-up-organigram-branch--reading">
+      ${accepted.reading ? renderReadingItemCard(accepted.reading, unit.id) : `
+        <div class="cb-up-item-card cb-up-item-card--empty" data-reading-panel-action="open">
+          <span class="cb-up-empty-title">Asignar o generar lectura base</span>
+          <span class="cb-up-badge cb-up-badge--accent">+ Asignar</span>
+        </div>
+      `}
+    </div>
+  `;
+  const projectActivityBranches = projectActivities.length ? `
+    <div class="cb-up-organigram-branch cb-up-organigram-branch--project">
+      ${projectActivities.map((activity) => renderActivityItemCard(activity, unit, projectMode, activities.indexOf(activity))).join("")}
+    </div>
+  ` : "";
+
+  return `
+    <article class="cb-up-unit-card${active ? " is-active" : ""}${isCollapsed ? " is-collapsed" : ""}" data-unit-id="${escapeHtml(unitId)}">
+      <header class="cb-up-unit-header" data-unit-toggle="${escapeHtml(unitId)}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}">
+        <div class="cb-up-unit-title-group">
+          <h3 class="cb-up-unit-title">${escapeHtml(heading)}</h3>
+        </div>
+        <div class="cb-up-unit-controls">
+          <button type="button" class="cb-icon-btn" data-unit-action="edit" title="Editar unidad" aria-label="Editar unidad"><i class="fas fa-pen"></i></button>
+          <button type="button" class="cb-icon-btn cb-icon-btn--danger" data-unit-action="remove" title="Eliminar unidad" aria-label="Eliminar unidad"><i class="fas fa-trash"></i></button>
+        </div>
+      </header>
+
+      <div class="cb-up-section-list"${isCollapsed ? " hidden" : ""}>
+        <!-- El proyecto es una rama hermana de la lectura y ocupa el primer lugar. -->
+        ${projectActivityBranches + readingBranch + (remainingActivities.length ? activitiesBranch : "")}
+
+        <!-- 3. Recursos Didácticos (Acordeón con sangría jerárquica) -->
+        <div class="cb-up-organigram-branch cb-up-organigram-branch--resources">
+          <div class="cb-up-group-header" data-group-toggle="resources-${escapeHtml(unitId)}" role="button" tabindex="0" aria-expanded="${resourcesCollapsed ? "false" : "true"}">
+            <div class="cb-up-group-header-left">
+              <span class="cb-up-group-title">Recursos Didácticos</span>
+              <span class="cb-up-group-count">${resources.length}</span>
+            </div>
+            <i class="fas fa-chevron-down cb-up-group-chevron" aria-hidden="true"></i>
+          </div>
+          <div class="cb-up-group-items" data-group-items="resources-${escapeHtml(unitId)}"${resourcesCollapsed ? ' hidden style="display:none;"' : ""}>
+            ${resources.length ? (() => {
+              const sorted = [...resources].sort((a, b) => {
+                if (resources.every((item) => Number.isFinite(Number(item.order)))) return Number(a.order) - Number(b.order);
+                const actA = findResourceActivity(a, unit);
+                const actB = findResourceActivity(b, unit);
+                const orderA = actA ? activities.indexOf(actA) : 999;
+                const orderB = actB ? activities.indexOf(actB) : 999;
+                if (orderA !== orderB) return orderA - orderB;
+                return (a.order ?? 0) - (b.order ?? 0);
+              });
+              const groups = new Map();
+              sorted.forEach((resource) => {
+                const key = `${normalize(resource.subtopic)}|${getResourceBadgeMeta(resource).type}`;
+                if (!groups.has(key)) groups.set(key, resource);
+              });
+              return [...groups.values()].map((resource, idx) => renderResourceItemCard(resource, unit, projectMode, idx)).join("");
+            })() : `
+              <div class="cb-resource-empty-state" role="status">
+                <span class="cb-resource-empty-icon"><i class="fas fa-layer-group" aria-hidden="true"></i></span>
+                <div><strong>Aún no hay recursos</strong><p>Las fichas, anexos y materiales de apoyo aparecerán aquí al generarlos.</p></div>
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- 4. Notas del Maestro (Acordeón con sangría jerárquica) -->
+        <div class="cb-up-organigram-branch cb-up-organigram-branch--notes">
+          <div class="cb-up-group-header" data-group-toggle="notes-${escapeHtml(unitId)}" role="button" tabindex="0" aria-expanded="${notesCollapsed ? "false" : "true"}">
+            <div class="cb-up-group-header-left">
+              <span class="cb-up-group-title">Notas del Maestro</span>
+              <span class="cb-up-group-count">${totalNotesCount}</span>
+            </div>
+            <i class="fas fa-chevron-down cb-up-group-chevron" aria-hidden="true"></i>
+          </div>
+          <div class="cb-up-group-items" data-group-items="notes-${escapeHtml(unitId)}"${notesCollapsed ? ' hidden style="display:none;"' : ""}>
+            ${renderTeacherNotesList(unit, activities, resources, projectMode)}
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
+function renderTeacherNotesList(unit = {}, activities = [], resources = [], projectMode = false) {
+  const notesCards = [];
+
+  // 1. Notas del maestro por cada subtema
+  groupActivitiesForPanel(activities).forEach((activityGroup, idx) => {
+    const activity = activityGroup[0];
+    const subtopicTitle = getActivityToggleLabel(activity, projectMode, unit.meta?.category);
+    const iconInfo = getActivityIconInfo(activity, projectMode, unit.meta?.category);
+    const note = (activity.notes && activity.notes[0]) ||
+      (unit.accepted?.teacherNotes || []).find((n) => n.activityId === activity.id || (n.subtopic && normalize(n.subtopic) === normalize(subtopicTitle)));
+
+    notesCards.push(`
+      <article class="cb-approved-card cb-approved-card--collapsible cb-teacher-notes-card cb-up-item-card" draggable="true" data-sortable-type="activity" data-sortable-id="${escapeHtml(activity.id || String(idx))}" data-sortable-ids="${escapeHtml(JSON.stringify(activityGroup.map((item) => item.id).filter(Boolean)))}" data-teacher-notes-card-id="${escapeHtml(note?.id || `subtopic-${activity.id || idx}`)}" data-activity-id="${escapeHtml(activity.id || String(idx))}" ${activity.mathGroup ? `data-math-group="${escapeHtml(activity.mathGroup)}"` : ""} data-unit-id="${escapeHtml(unit.id || "")}">
+        <div class="cb-up-item-body">
+          <div class="cb-up-item-header-row">
+            <i class="${iconInfo.iconClass} cb-session-document-icon" style="color: ${iconInfo.color};" aria-hidden="true"></i>
+            <p class="cb-up-item-title">NDM: ${escapeHtml(subtopicTitle)}</p>
+          </div>
+        </div>
+      </article>
+    `);
+  });
+
+  // 2. Fichas de trabajo agrupadas en UN SOLO subtema (con pestañas por página en el subpanel)
+  const fichaResources = resources.filter((r) => getResourceBadgeMeta(r).type === "ficha");
+  if (fichaResources.length > 0) {
+    const primaryFicha = fichaResources[0];
+    const cardTitle = fichaResources.length > 1
+      ? "NDM: Fichas de trabajo"
+      : `NDM: ${formatFichaDisplayTitle(primaryFicha, unit, 0)}`;
+
+    notesCards.push(`
+      <article class="cb-approved-card cb-approved-card--collapsible cb-teacher-notes-card cb-up-item-card cb-teacher-notes-card--ficha" draggable="true" data-sortable-type="resource" data-sortable-id="${escapeHtml(primaryFicha.id || "")}" data-teacher-notes-card-id="fichas-group" data-is-fichas-group="true" data-resource-id="${escapeHtml(primaryFicha.id || "")}" data-unit-id="${escapeHtml(unit.id || "")}">
+        <div class="cb-up-item-body">
+          <div class="cb-up-item-header-row">
+            <i class="fas fa-pen-nib cb-session-document-icon" style="color: #2563eb;" aria-hidden="true"></i>
+            <p class="cb-up-item-title">${escapeHtml(cardTitle)}</p>
+          </div>
+        </div>
+      </article>
+    `);
+  }
+
+  {
+    const globalNotes = (unit.accepted?.teacherNotes || []).filter((note) => {
+      const title = String(note.title || "").toLowerCase();
+      if (title.includes("recortable") || title.includes("cutout")) return false;
+      if (note.resourceId) {
+        const res = (unit.accepted?.resources || []).find((r) => r.id === note.resourceId);
+        if (res && getResourceBadgeMeta(res).type === "recortable") return false;
+      }
+      if (activities.some((activity) => normalize(activity.subtopic) === normalize(note.subtopic))) return false;
+      return true;
+    });
+    if (globalNotes.length) {
+      const uniqueSubtopics = new Set();
+      notesCards.push(...globalNotes.filter((note) => {
+        const key = normalize(note.subtopic || note.title || note.id);
+        if (uniqueSubtopics.has(key)) return false;
+        uniqueSubtopics.add(key);
+        return true;
+      }).map((note, idx) => {
+        const correspondingActivity = (unit.accepted?.activities || []).find(a => a.id === note.activityId) || unit.accepted?.activities?.[idx];
+        let cleanNoteTitle = "";
+        if (correspondingActivity) {
+          cleanNoteTitle = getActivityToggleLabel(correspondingActivity, projectMode, unit.meta?.category);
+        } else {
+          cleanNoteTitle = String(note.title || "")
+            .replace(/^NDM:\s*/i, "")
+            .replace(/^Nota(?:s)?\s+(?:del\s+maestro|para\s+el\s+docente):\s*/i, "")
+            .replace(/^(?:Orientaciones\s+(?:metodol[oó]gicas|docentes|pedag[oó]gicas)|Notas\s+del\s+maestro)(?:\s+por\s+actividad)?\s*[:\-–—]?\s*/i, "")
+            .replace(/^Actividad(?:es)?(?:\s*\d+)?\s*[:\-–—]\s*/i, "")
+            .trim() || `Orientación ${idx + 1}`;
+        }
+        return `
+        <article class="cb-approved-card cb-approved-card--collapsible cb-teacher-notes-card cb-up-item-card" draggable="true" data-sortable-type="teacher-note" data-sortable-id="${escapeHtml(note.id || String(idx))}" data-teacher-notes-card-id="${escapeHtml(note.id || String(idx))}" data-unit-id="${escapeHtml(unit.id || "")}">
+          <div class="cb-up-item-body">
+            <div class="cb-up-item-header-row">
+              <i class="fas fa-chalkboard-user cb-session-document-icon" style="color: #0284c7;" aria-hidden="true"></i>
+              <p class="cb-up-item-title">NDM: ${escapeHtml(cleanNoteTitle)}</p>
+            </div>
+          </div>
+        </article>
+      `;
+      }));
+    }
+  }
+
+  return notesCards.length ? notesCards.join("") : `<div class="cb-empty-hint">Sin notas del maestro configuradas aún.</div>`;
+}
+
+export function getActivityIconInfo(activity = {}, projectMode = false, unitCategory = "") {
+  const rawSubtopic = String(activity.subtopic || "").toLowerCase();
+  const rawCategory = String(activity.category || unitCategory || "").toLowerCase();
+  const rawTitle = String(activity.title || "").toLowerCase();
+  const rawSection = String(activity.section || "").toLowerCase();
+  const combined = `${rawSubtopic} ${rawCategory} ${rawTitle} ${rawSection}`;
+
+  // 1. Habilidades -> icono de cerebro morado
+  if (combined.includes("habilidad") || combined.includes("cerebro") || combined.includes("neuro") || combined.includes("cognitiv")) {
+    return { iconClass: "fas fa-brain", color: "#9333ea" };
+  }
+
+  // 2. Proyecto -> color morado
+  if (projectMode || combined.includes("proyecto")) {
+    return { iconClass: "fas fa-file-alt", color: "#9333ea" };
+  }
+
+  // Artes -> icono de paleta de colores
+  if (combined.includes("artes") || combined.includes("arte") || combined.includes("pintur") || combined.includes("dibujo")) {
+    return { iconClass: "fas fa-palette", color: "#f59e0b" };
+  }
+
+  // Ortografía -> icono de ortografía (spell-check)
+  if (combined.includes("ortograf") || combined.includes("ortográf")) {
+    return { iconClass: "fas fa-spell-check", color: "#0284c7" };
+  }
+
+  // Gramática -> icono de pluma / gramática
+  if (combined.includes("gramatic") || combined.includes("gramátic")) {
+    return { iconClass: "fas fa-pen-nib", color: "#2563eb" };
+  }
+
+  // Expresión escrita -> icono de edición/escritura
+  if (combined.includes("expresion escrita") || combined.includes("expresión escrita") || combined.includes("redaccion") || combined.includes("escrita")) {
+    return { iconClass: "fas fa-pen-to-square", color: "#0369a1" };
+  }
+
+  // Comprensión lectora -> icono de lector
+  if (combined.includes("comprension") || combined.includes("comprensión") || combined.includes("lectora")) {
+    return { iconClass: "fas fa-book-reader", color: "#0ea5e9" };
+  }
+
+  // Expresión oral -> icono de diálogo/micrófono
+  if (combined.includes("expresion oral") || combined.includes("expresión oral") || combined.includes("oral")) {
+    return { iconClass: "fas fa-comments", color: "#8b5cf6" };
+  }
+
+  // Dictado -> icono de lápiz/caligrafía
+  if (combined.includes("dictado")) {
+    return { iconClass: "fas fa-pen-fancy", color: "#0d9488" };
+  }
+
+  // 3. Matemáticas -> color rosa magenta
+  if (combined.includes("matematic") || combined.includes("matemátic") || combined.includes("calcul") || combined.includes("numer") || combined.includes("pensamiento matem")) {
+    return { iconClass: "fas fa-calculator", color: "#d946ef" };
+  }
+
+  // 4. Geografía -> color verde
+  if (combined.includes("geograf") || combined.includes("geográf") || combined.includes("espacio") || combined.includes("localidad")) {
+    return { iconClass: "fas fa-earth-americas", color: "#16a34a" };
+  }
+
+  // 5. Historia -> color verde
+  if (combined.includes("histori") || combined.includes("tiempo") || combined.includes("pasado")) {
+    return { iconClass: "fas fa-landmark", color: "#16a34a" };
+  }
+
+  // 6. Ciencias Naturales -> color verde
+  if (combined.includes("natural") || combined.includes("medio") || combined.includes("biolog") || combined.includes("ciencias experimentales")) {
+    return { iconClass: "fas fa-flask", color: "#16a34a" };
+  }
+
+  // Default Lenguaje / Comunicación
+  return { iconClass: "fas fa-file-alt", color: "#0ea5e9" };
+}
+
+function renderReadingItemCard(reading = {}, unitId = "") {
+  return `
+    <div class="cb-up-item-card" draggable="true" data-sortable-type="reading" data-sortable-id="${escapeHtml(reading.id || unitId)}" data-reading-card-id="${escapeHtml(reading.id || unitId)}" data-unit-id="${escapeHtml(unitId)}">
+      <div class="cb-up-item-body">
+        <div class="cb-up-item-header-row">
+          <i class="fas fa-book-open cb-session-document-icon" style="color: #0284c7;" aria-hidden="true"></i>
+          <p class="cb-up-item-title">${escapeHtml(reading.title || "Lectura base")}</p>
+        </div>
+      </div>
+      <div class="cb-up-item-actions">
+        ${renderReadingActionMenu(unitId)}
+      </div>
+    </div>
+  `;
+}
+
+function groupActivitiesForPanel(activities = []) {
+  const groups = [];
+  const bySubtopic = new Map();
+  (Array.isArray(activities) ? activities : []).forEach((activity) => {
+    const key = normalize(activity.subtopic || activity.section || activity.id);
+    if (!bySubtopic.has(key)) {
+      const group = [];
+      bySubtopic.set(key, group);
+      groups.push(group);
+    }
+    bySubtopic.get(key).push(activity);
+  });
+  bySubtopic.forEach((group) => group.sort((a, b) => Number(a.pageOrder ?? a.mathIndex ?? 0) - Number(b.pageOrder ?? b.mathIndex ?? 0)));
+  return groups;
+}
+
+function renderActivityItemCard(activity = {}, unit = {}, projectMode = false, index = 0, group = [activity]) {
+  const subtopicTitle = getActivityToggleLabel(activity, projectMode, unit.meta?.category);
+  const iconInfo = getActivityIconInfo(activity, projectMode, unit.meta?.category);
+
+  const isEmpty = !activity.html;
+  return `
+    <div class="cb-up-item-card ${isEmpty ? 'cb-up-item-card--empty' : ''} ${activity.mathGroup ? 'cb-up-item-card--math-group' : ''}" draggable="true" data-sortable-type="activity" data-sortable-id="${escapeHtml(activity.id || String(index))}" data-sortable-ids="${escapeHtml(JSON.stringify(group.map((item) => item.id).filter(Boolean)))}" data-activity-card-id="${escapeHtml(activity.id || String(index))}" ${activity.mathGroup ? `data-math-group="${escapeHtml(activity.mathGroup)}" data-math-activity-count="${group.length}"` : ""} data-unit-id="${escapeHtml(unit.id || "")}">
+      <div class="cb-up-item-body">
+        <div class="cb-up-item-header-row">
+          <i class="${iconInfo.iconClass} cb-session-document-icon" style="color: ${iconInfo.color};" aria-hidden="true"></i>
+          <p class="cb-up-item-title">${escapeHtml(subtopicTitle)}${activity.mathGroup && group.length > 1 ? ` <span class="cb-up-item-count">${group.length} actividades</span>` : ""}</p>
+        </div>
+      </div>
+      <div class="cb-up-item-actions">
+        ${renderCardActionMenu("activity", projectMode, activity)}
+      </div>
+    </div>
+  `;
+}
+
+export function formatResourceCode(resource = {}, unit = {}, index = 0) {
+  const type = normalizeResourceType(resource);
+  const unitNum = String(unit?.meta?.unit || "1").replace(/\D+/g, "") || "1";
+
+  if (type === "video") {
+    return "Guion de Video";
+  }
+
+  const label = type === "ficha" ? "Ficha"
+    : type === "anexo" ? "Anexo"
+    : type === "recortable" ? "Recortable"
+    : "Recurso";
+
+  // Identificar posición secuencial entre los recursos del mismo tipo en la unidad
+  const sameTypeResources = (unit.accepted?.resources || []).filter(r => normalizeResourceType(r) === type);
+  let typeIndex = resource.id ? sameTypeResources.findIndex(r => r.id === resource.id) : -1;
+  if (typeIndex < 0) typeIndex = sameTypeResources.indexOf(resource);
+  if (typeIndex < 0 && resource.code) typeIndex = sameTypeResources.findIndex(r => r.code === resource.code);
+  if (typeIndex === -1) {
+    typeIndex = index >= 0 ? index : 0;
+  }
+  const sequentialLetter = String.fromCharCode(97 + (typeIndex % 26));
+
+  return `${label} ${unitNum}${sequentialLetter}`;
+}
+
+export function formatFichaDisplayTitle(resource = {}, unit = {}, index = 0) {
+  const code = formatResourceCode(resource, unit, index);
+  const rawTitle = resource.title || resource.subtopic || resource.context || "Trabajo autónomo";
+  const cleanTitle = String(rawTitle)
+    .replace(/^(?:Ficha(?:\s+de\s+(?:refuerzo|trabajo))?(?:\s+[0-9]+[a-z]?)?)\s*[:\-–—]\s*/i, "")
+    .replace(/^Actividad(?:es)?(?:\s*\d+)?\s*[:\-–—]\s*/i, "")
+    .trim();
+  return cleanTitle ? `${code}: ${cleanTitle}` : code;
+}
+
+export function findResourceActivity(resource = {}, unit = {}) {
+  const activities = unit.accepted?.activities || [];
+  if (!activities.length) return null;
+
+  if (resource.activityId) {
+    const act = activities.find((a) => String(a.id) === String(resource.activityId) || String(a.sectionId) === String(resource.activityId));
+    if (act) return act;
+  }
+  if (resource.targetActivityId) {
+    const act = activities.find((a) => String(a.id) === String(resource.targetActivityId));
+    if (act) return act;
+  }
+  if (resource.subtopic) {
+    const norm = normalize(resource.subtopic);
+    const act = activities.find((a) => a.subtopic && normalize(a.subtopic) === norm);
+    if (act) return act;
+  }
+  const idxMatch = String(resource.id || resource.code || "").match(/(?:ficha|anexo|recortable|video|res)[-_](\d+)[-_](\d+)/i);
+  if (idxMatch) {
+    const actIdx = parseInt(idxMatch[2], 10) - 1;
+    if (activities[actIdx]) return activities[actIdx];
+  }
+  return null;
+}
+
+function renderResourceItemCard(resource = {}, unit = {}, projectMode = false, index = 0) {
+  const meta = getResourceBadgeMeta(resource);
+  const code = formatResourceCode(resource, unit, index);
+  let displayTitle = "";
+  if (meta.type === "ficha") {
+    displayTitle = formatFichaDisplayTitle(resource, unit, index);
+  } else {
+    const activity = findResourceActivity(resource, unit);
+    const subtopicTitle = activity
+      ? getActivityToggleLabel(activity, projectMode, unit.meta?.category)
+      : (resource.subtopic || resource.context || "");
+    const cleanTitle = cleanResourceSubtopicTitle(resource.title || "");
+    const cleanSubtopic = cleanResourceSubtopicTitle(subtopicTitle || "");
+    displayTitle = cleanSubtopic
+      ? `${code}: ${cleanSubtopic}`
+      : (cleanTitle ? `${code}: ${cleanTitle}` : code);
+  }
+
+  return `
+    <div class="cb-up-item-card" draggable="true" data-sortable-type="resource" data-sortable-id="${escapeHtml(resource.id || "")}" data-resource-card-id="${escapeHtml(resource.id || "")}" data-unit-id="${escapeHtml(unit.id || "")}">
+      <div class="cb-up-item-body">
+        <div class="cb-up-item-header-row">
+          <i class="fas ${meta.icon} cb-session-document-icon" style="color: ${meta.color};" aria-hidden="true"></i>
+          <p class="cb-up-item-title">${escapeHtml(displayTitle)}</p>
+        </div>
+      </div>
+      <div class="cb-up-item-actions">
+        <button type="button" class="cb-card-delete-direct" data-resource-action="remove" title="Eliminar recurso" aria-label="Eliminar recurso" style="background:transparent; border:none; color:var(--cb-up-muted, #94a3b8); cursor:pointer; padding:4px 6px; font-size:12px; border-radius:4px; transition:color 0.15s, background 0.15s;">
+          <i class="fas fa-trash" aria-hidden="true"></i>
+        </button>
+        ${renderCardActionMenu("resource", false, resource)}
+      </div>
+    </div>
+  `;
+}
+
+function renderReadingActionMenu(unitId = "") {
+  return `
+    <details class="cb-card-menu">
+      <summary class="cb-card-menu-toggle" aria-label="Opciones de lectura" title="Más opciones">
+        <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
+      </summary>
+      <div class="cb-card-menu-panel">
+        <button type="button" data-reading-panel-action="open"><i class="fas fa-book-open" aria-hidden="true"></i><span>Cambiar lectura</span></button>
+        <button type="button" class="cb-card-menu-item--danger" data-reading-panel-action="remove"><i class="fas fa-trash" aria-hidden="true"></i><span>Eliminar</span></button>
+      </div>
+    </details>
+  `;
+}
 
 function renderUnitHistory(session = {}) {
   const units = Array.isArray(session?.units) ? session.units.filter((unit) => hasApprovedUnitContent(unit)) : [];
@@ -342,235 +1231,6 @@ function renderCollapsibleSection({ key = "", title = "", kicker = "", toggleLab
   `;
 }
 
-function renderSelectedReadingSection(reading = {}, unitId = "") {
-  const sections = reading.sections || {};
-  const synonymRows = Array.isArray(sections.synonyms) ? sections.synonyms : [];
-  const questions = Array.isArray(sections.questions) ? sections.questions : reading.questions || [];
-  const questionsHtml = String(sections.questionsHtml || "").trim();
-  const readingHtml = sections.narrativeHtml || reading.html || "";
-  const hasEmbeddedSynonyms = hasEmbeddedReadingSection(readingHtml, "synonyms");
-  const hasEmbeddedQuestions = hasEmbeddedReadingSection(readingHtml, "questions");
-
-  return renderCollapsibleSection({
-    key: `${unitId}-reading-selected`,
-    title: reading.title || "Lectura aprobada",
-    kicker: "Lectura",
-    toggleLabel: "Lectura",
-    extraClass: "cb-approved-card",
-    openByDefault: false,
-    actions: `<div class="cb-unit-header-actions" aria-label="Acciones de la lectura">
-      <button type="button" data-reading-panel-action="open" aria-label="Cambiar lectura" title="Cambiar lectura"><i class="fas fa-book-open" aria-hidden="true"></i></button>
-      <button type="button" data-reading-panel-action="remove" aria-label="Eliminar lectura" title="Eliminar lectura"><i class="fas fa-trash" aria-hidden="true"></i></button>
-    </div>`,
-    body: `
-      ${renderReadingContentTitle(reading.title, readingHtml)}
-      <div class="cb-approved-html" data-reading-part="narrative">${readingHtml}</div>
-      ${renderSourceLinks(reading.citations)}
-      ${hasEmbeddedSynonyms ? "" : `<section class="cb-reading-content-section" data-reading-part="synonyms" aria-labelledby="cb-reading-synonyms-title">
-        <h3 id="cb-reading-synonyms-title">Tabla de sinónimos</h3>
-        ${synonymRows.length ? renderSynonymsTable(synonymRows) : (sections.synonymsHtml ? `<div class="cb-reading-synonyms">${sections.synonymsHtml}</div>` : `<div class="cb-empty">Sin tabla de sinónimos guardada.</div>`)}
-      </section>`}
-      ${hasEmbeddedQuestions ? "" : `<section class="cb-reading-content-section" data-reading-part="questions" aria-labelledby="cb-reading-questions-title">
-        <h3 id="cb-reading-questions-title">Preguntas de comprensión</h3>
-        ${questions.length ? renderReadingQuestions(questions) : (questionsHtml ? `<div class="cb-reading-questions">${questionsHtml}</div>` : `<div class="cb-empty">Sin preguntas de comprensión guardadas.</div>`)}
-      </section>`}
-    `
-  });
-}
-
-function renderReadingContentTitle(title = "", html = "") {
-  let safeTitle = String(title || "").replace(/\s+/g, " ").trim();
-  if (!safeTitle || /^lectura sin t[ií]tulo$/i.test(safeTitle)) safeTitle = inferReadingContentTitle(html);
-  if (!safeTitle) return "";
-  const source = String(html || "");
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
-    const headings = Array.from(doc.querySelectorAll("h1, h2, h3, [data-reading-title]"));
-    if (headings.some((heading) => normalize(heading.textContent) === normalize(safeTitle))) return "";
-  } else if (normalize(source.replace(/<[^>]+>/g, " ")).includes(normalize(safeTitle))) {
-    return "";
-  }
-  return `<h2 class="cb-reading-content-title">${escapeHtml(safeTitle)}</h2>`;
-}
-
-function inferReadingContentTitle(html = "") {
-  const source = String(html || "");
-  let text = source.replace(/<[^>]+>/g, " ");
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
-    text = doc.body.textContent || "";
-  }
-  text = text.replace(/\s+/g, " ").trim();
-  const sentence = String(text.match(/^.{8,90}?[.!?](?:\s|$)/)?.[0] || "").replace(/[.!?]+$/, "").trim();
-  return sentence || text.split(" ").filter(Boolean).slice(0, 8).join(" ");
-}
-
-function hasEmbeddedReadingSection(html = "", type = "") {
-  const source = String(html || "").trim();
-  if (!source) return false;
-  const labelPattern = type === "synonyms"
-    ? /^(tabla de sin[oó]nimos|sin[oó]nimos|glosario|vocabulario)$/i
-    : /^preguntas de comprensi[oó]n$/i;
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
-    const selector = type === "synonyms"
-      ? ".lectura-tabla-sinonimos, .sinonimos, .tabla-sinonimos, .glosario, [data-reading-section='synonyms']"
-      : ".cb-reading-questions, .preguntas, .preguntas-lectura, [data-reading-section='questions']";
-    if (doc.querySelector(selector)) return true;
-    return Array.from(doc.querySelectorAll("h1, h2, h3, h4, h5, h6, strong"))
-      .some((node) => labelPattern.test(String(node.textContent || "").replace(/\s+/g, " ").trim()));
-  }
-  const pattern = type === "synonyms"
-    ? /tabla de sin[oó]nimos|(?:class|data-reading-section)=["'][^"']*(?:sinonimos|sinónimos|glosario|vocabulario)|lectura-tabla-sinonimos/i
-    : /preguntas de comprensi[oó]n|(?:class|data-reading-section)=["'][^"']*(?:preguntas|questions|comprension|comprensión)/i;
-  return pattern.test(source);
-}
-
-function renderReadingOption(reading = {}) {
-  const questionsCount = Array.isArray(reading.questions) ? reading.questions.length : 0;
-  const synonymsCount = Array.isArray(reading.sections?.synonyms) ? reading.sections.synonyms.length : 0;
-  return `
-    <article class="cb-reading-option cb-reading-option--panel" data-reading-id="${escapeHtml(reading.id)}">
-      <div>
-        <p class="cb-panel-kicker">${escapeHtml(reading.sourceLabel || reading.collection || "Lectura")}</p>
-        <h3>${escapeHtml(reading.title || "Lectura sin título")}</h3>
-        <span>${escapeHtml([reading.meta?.nivel, reading.meta?.grado, reading.meta?.trimestre ? `T${reading.meta.trimestre}` : "", reading.meta?.unidad ? `U${reading.meta.unidad}` : ""].filter(Boolean).join(" · "))}</span>
-        <p>${escapeHtml(String(reading.text || "").slice(0, 160))}</p>
-        <span>${escapeHtml([
-          questionsCount ? `${questionsCount} preguntas` : "Sin preguntas",
-          synonymsCount ? `${synonymsCount} sinónimos` : ""
-        ].filter(Boolean).join(" · "))}</span>
-      </div>
-      <button type="button" data-reading-action="use">Usar</button>
-    </article>
-  `;
-}
-
-function filterReadings(readings = [], filter = "") {
-  const needle = normalize(filter);
-  if (!needle) return readings;
-  return readings.filter((reading) => normalize([
-    reading.title,
-    reading.text,
-    reading.collection,
-    reading.sourceLabel,
-    reading.meta?.nivel,
-    reading.meta?.grado,
-    reading.meta?.trimestre,
-    reading.meta?.unidad
-  ].join(" ")).includes(needle));
-}
-
-function renderSyaSummary(meta = {}, sya = {}) {
-  const focus = getFocusedSya(meta, sya);
-  const grouped = getSyaGroupedByCategory(meta, sya);
-  if (!grouped.length) return `<div class="cb-empty">Secuencia sin campos visibles para esta selección.</div>`;
-  const focusCategory = normalize(focus?.category || "");
-  const focusSubtopic = normalize(focus?.subtopic || "");
-  const hasSpecificFocus = Boolean(focusSubtopic);
-  const filteredGroups = hasSpecificFocus
-    ? grouped
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => {
-            const sameCategory = !focusCategory || normalize(group.category || "") === focusCategory;
-            const sameSubtopic = normalize(item.subtopic || "") === focusSubtopic;
-            return !(sameCategory && sameSubtopic);
-          })
-        }))
-        .filter((group) => group.items.length)
-    : grouped;
-  if (hasSpecificFocus) {
-    return `
-      <section class="cb-sya-focus">
-        <p class="cb-panel-kicker">S&A activa</p>
-        <h4>${escapeHtml(focus.category ? `${focus.category} · ${formatSyaKey(focus.subtopic)}` : formatSyaKey(focus.subtopic))}</h4>
-        <dl class="cb-sya-summary cb-sya-summary--focus">
-          ${renderSyaFieldEntries(focus.fields)}
-        </dl>
-      </section>
-      ${filteredGroups.length ? `
-        <div class="cb-sya-groups">
-          ${filteredGroups.map((group) => `
-            <section class="cb-sya-group">
-              <h4>${escapeHtml(group.category)}</h4>
-              ${group.items.map((item) => `
-                <div class="cb-sya-subtopic">
-                  <strong>${escapeHtml(formatSyaKey(item.subtopic))}</strong>
-                  <dl class="cb-sya-summary">
-                    ${renderSyaFieldEntries(item.fields)}
-                  </dl>
-                </div>
-              `).join("")}
-            </section>
-          `).join("")}
-        </div>
-      ` : ""}
-    `;
-  }
-  return `
-    <div class="cb-sya-groups">
-      ${filteredGroups.map((group) => `
-        <section class="cb-sya-group">
-          <h4>${escapeHtml(group.category)}</h4>
-          ${group.items.map((item) => `
-            <div class="cb-sya-subtopic">
-              <strong>${escapeHtml(formatSyaKey(item.subtopic))}</strong>
-              <dl class="cb-sya-summary">
-                ${renderSyaFieldEntries(item.fields)}
-              </dl>
-            </div>
-          `).join("")}
-        </section>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderSyaFieldEntries(fields = {}) {
-  const ordered = [
-    ["T", fields.T],
-    ["AE", fields.AE],
-    ["C", fields.C],
-    ["P", fields.P]
-  ].filter(([, value]) => String(value || "").trim());
-  return ordered.map(([label, value]) => `
-    <div>
-      <dt>${escapeHtml(formatSyaFieldLabel(label))}</dt>
-      <dd>${escapeHtml(String(value || ""))}</dd>
-    </div>
-  `).join("");
-}
-
-function renderActivity(activity = {}, projectMode = false, unitSection = "") {
-  const subtopicTitle = getActivityToggleLabel(activity, projectMode, unitSection);
-  const collapseKey = `activity-${activity.id || subtopicTitle}`;
-  const collapsed = getCollapsedState(`approved-card-${collapseKey}`, true);
-  return `
-    <article class="cb-approved-card cb-approved-card--collapsible" data-activity-id="${escapeHtml(activity.id)}" data-approved-card-shell="${escapeHtml(collapseKey)}" data-card-collapsed="${collapsed ? "true" : "false"}">
-      <div class="cb-approved-card-head">
-        <button type="button" class="cb-approved-card-toggle" data-approved-card-toggle aria-expanded="${collapsed ? "false" : "true"}">
-          <strong>${escapeHtml(subtopicTitle)}</strong>
-          <i class="fas fa-chevron-down" aria-hidden="true"></i>
-        </button>
-        ${renderCardActionMenu("activity", projectMode)}
-      </div>
-      <div class="cb-approved-card-body">
-        <div class="cb-approved-html">${activity.html || ""}</div>
-        ${renderSourceLinks(activity.citations)}
-        ${(activity.notes || []).map((note) => `<div class="cb-note-inline"><strong>Notas del maestro</strong>${note.html || ""}</div>`).join("")}
-      </div>
-    </article>
-  `;
-}
-
-function getActivityToggleLabel(activity = {}, projectMode = false, unitSection = "") {
-  const candidates = [activity.subtopic, activity.title, activity.section];
-  const subtopic = candidates.map(normalizeActivitySubtopicTitle).find(Boolean);
-  return formatSyaKey(subtopic || activity.category || unitSection || (projectMode ? "Proyecto" : "Actividad"));
-}
-
-
 function renderTeacherNotesBlock(notes = {}, index = 0) {
   const safeId = escapeHtml(notes.id || String(index));
   const collapseKey = `teacher-notes-${notes.id || index}`;
@@ -580,7 +1240,10 @@ function renderTeacherNotesBlock(notes = {}, index = 0) {
     <article class="cb-approved-card cb-approved-card--collapsible cb-teacher-notes-card" data-teacher-notes-id="${safeId}" data-approved-card-shell="${escapeHtml(collapseKey)}" data-card-collapsed="${collapsed ? "true" : "false"}">
       <div class="cb-teacher-notes-card-head">
         <button type="button" class="cb-approved-card-toggle" data-approved-card-toggle aria-expanded="${collapsed ? "false" : "true"}">
-          <strong>Notas del maestro</strong>
+          <div class="cb-card-toggle-headline">
+            <span class="cb-up-badge cb-up-badge--notes">Notas</span>
+            <strong>Notas del maestro</strong>
+          </div>
           <i class="fas fa-chevron-down" aria-hidden="true"></i>
         </button>
         <div>
@@ -597,6 +1260,16 @@ function renderTeacherNotesBlock(notes = {}, index = 0) {
       </div>
     </article>
   `;
+}
+
+function getActivityToggleLabel(activity = {}, projectMode = false, unitSection = "") {
+  const candidates = [activity.subtopic, activity.section, activity.title];
+  const subtopic = candidates.map(normalizeActivitySubtopicTitle).find(Boolean);
+  const rawLabel = formatSyaKey(subtopic || activity.category || unitSection || (projectMode ? "Proyecto" : "Actividad"));
+  return String(rawLabel || "")
+    .replace(/^Actividad(?:es)?(?:\s*\d+)?\s*[:\-–—]\s*/i, "")
+    .replace(/^(?:Orientaciones\s+(?:metodol[oó]gicas|docentes|pedag[oó]gicas)|Notas\s+del\s+maestro)(?:\s+por\s+actividad)?\s*[:\-–—]?\s*/i, "")
+    .trim() || (projectMode ? "Proyecto" : "Actividad");
 }
 
 function formatTeacherNotesHtml(value = "") {
@@ -640,23 +1313,47 @@ function formatTeacherNotesHtml(value = "") {
   return html;
 }
 
+function getResourceBadgeMeta(resource = {}) {
+  // Prefer the explicit resource label/code over a generic provider type.
+  const raw = [resource.code, resource.title, resource.type, resource.context].filter(Boolean).join(" ").toLowerCase();
+  if (raw.includes("ficha") || raw.includes("worksheet")) {
+    return { type: "ficha", label: "Ficha", icon: "fa-pen-nib", color: "#2563eb", badgeClass: "cb-up-badge--worksheet" };
+  }
+  if (raw.includes("anexo") || raw.includes("annex")) {
+    return { type: "anexo", label: "Anexo", icon: "fa-image", color: "#d97706", badgeClass: "cb-up-badge--annex" };
+  }
+  if (raw.includes("recortable") || raw.includes("cutout")) {
+    return { type: "recortable", label: "Recortable", icon: "fa-scissors", color: "#9333ea", badgeClass: "cb-up-badge--cutout" };
+  }
+  if (raw.includes("video") || raw.includes("guion") || raw.includes("guión")) {
+    return { type: "video", label: "Guión", icon: "fa-film", color: "#ef4444", badgeClass: "cb-up-badge--video" };
+  }
+  return { type: "recurso", label: "Recurso", icon: "fa-file-lines", color: "#0ea5e9", badgeClass: "cb-up-badge--resource" };
+}
+
 function renderResource(resource = {}) {
-  const resourceTitle = String(resource.title || resource.code || resource.context || resource.type || "Recurso").trim();
+  const meta = getResourceBadgeMeta(resource);
+  const cleanTitle = cleanResourceSubtopicTitle(resource.title || "");
+  const resourceTitle = meta.type === "ficha"
+    ? formatFichaDisplayTitle(resource, {}, 0)
+    : (cleanTitle ? `${resource.code || "Recurso"}: ${cleanTitle}` : String(resource.title || resource.code || resource.context || resource.type || "Recurso").trim());
+  const context = resource.context || resource.subtopic || "";
   const collapseKey = `resource-${resource.id || resource.code || resource.title || "item"}`;
   const collapsed = getCollapsedState(`approved-card-${collapseKey}`, true);
   return `
     <article class="cb-approved-card cb-approved-card--collapsible cb-resource-card" data-resource-id="${escapeHtml(resource.id)}" data-approved-card-shell="${escapeHtml(collapseKey)}" data-card-collapsed="${collapsed ? "true" : "false"}">
       <div class="cb-approved-card-head">
         <button type="button" class="cb-approved-card-toggle" data-approved-card-toggle aria-expanded="${collapsed ? "false" : "true"}">
-          <strong>${escapeHtml(resourceTitle)}</strong>
+          <div class="cb-card-toggle-headline">
+            <span class="cb-badge ${meta.badgeClass}"><i class="fas ${meta.icon}" aria-hidden="true"></i> ${meta.label}</span>
+            <strong>${escapeHtml(resourceTitle)}</strong>
+          </div>
           <i class="fas fa-chevron-down" aria-hidden="true"></i>
         </button>
-        ${renderCardActionMenu("resource")}
+        ${renderCardActionMenu("resource", false, resource)}
       </div>
       <div class="cb-approved-card-body">
-        <div class="cb-resource-meta">
-          <span>${escapeHtml(resource.context || resource.type || "Recurso")}</span>
-        </div>
+        ${context ? `<div class="cb-resource-context-tag"><i class="fas fa-link" aria-hidden="true"></i> <span>${escapeHtml(context)}</span></div>` : ""}
         <div class="cb-approved-html">${resource.html || ""}</div>
         ${renderSourceLinks(resource.citations)}
         ${(resource.notes || []).map((note) => `<div class="cb-note-inline"><strong>Notas del recurso</strong>${note.html || ""}</div>`).join("")}
@@ -716,18 +1413,22 @@ function safeHttpUrl(value = "") {
   }
 }
 
-function renderCardActionMenu(kind = "activity", projectMode = false) {
+function renderCardActionMenu(kind = "activity", projectMode = false, resource = null) {
   const dataAttribute = kind === "resource" ? "data-resource-action" : "data-activity-action";
   const subject = kind === "resource" ? "recurso" : projectMode ? "proyecto" : "actividad";
+  const isCutout = kind === "resource" && resource && getResourceBadgeMeta(resource).type === "recortable";
   return `
     <details class="cb-card-menu">
       <summary class="cb-card-menu-toggle" aria-label="Opciones de ${subject}" title="Más opciones">
         <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
       </summary>
       <div class="cb-card-menu-panel">
+        ${kind === "activity" ? '<button type="button" data-activity-action="sya"><i class="fas fa-list-check" aria-hidden="true"></i><span>SYA</span></button>' : ""}
+        ${kind === "activity" ? '<button type="button" data-activity-action="add-resource"><i class="fas fa-paperclip" aria-hidden="true"></i><span>Añadir recurso</span></button>' : ""}
+        ${kind === "activity" ? `<button type="button" data-activity-action="convert-styles"><i class="fas fa-swatchbook" aria-hidden="true"></i><span>${resource?.artifact?.exerciseStylePreviousHtml ? "Restaurar estilos anteriores" : "Unificar estilos"}</span></button>` : ""}
         <button type="button" ${dataAttribute}="edit"><i class="fas fa-pencil-alt" aria-hidden="true"></i><span>Editar</span></button>
         <button type="button" ${dataAttribute}="regenerate"><i class="fas fa-rotate-right" aria-hidden="true"></i><span>Regenerar</span></button>
-        <button type="button" ${dataAttribute}="notes"><i class="fas fa-pen-nib" aria-hidden="true"></i><span>Generar notas</span></button>
+        ${!isCutout ? `<button type="button" ${dataAttribute}="notes"><i class="fas fa-pen-nib" aria-hidden="true"></i><span>Generar notas</span></button>` : ""}
         <button type="button" class="cb-card-menu-item--danger" ${dataAttribute}="remove"><i class="fas fa-trash" aria-hidden="true"></i><span>Eliminar</span></button>
       </div>
     </details>
@@ -754,12 +1455,15 @@ function positionCardMenu(menu) {
   menuPanel.style.top = `${Math.round(top)}px`;
 }
 
-function normalizeResourceType(resource = {}) {
-  const value = String(resource.type || resource.context || resource.title || resource.code || "").toLowerCase();
-  if (value.includes("ficha")) return "ficha";
-  if (value.includes("anexo")) return "anexo";
-  if (value.includes("recortable")) return "recortable";
-  if (value.includes("video") || value.includes("guion") || value.includes("guión")) return "video";
+export function normalizeResourceType(value = "") {
+  if (typeof value === "object" && value !== null) {
+    value = [value.code, value.title, value.context, value.type].filter(Boolean).join(" ");
+  }
+  const text = String(value || "").toLowerCase().trim();
+  if (text.includes("ficha") || text.includes("worksheet")) return "ficha";
+  if (text.includes("anexo") || text.includes("annex")) return "anexo";
+  if (text.includes("recortable") || text.includes("cutout")) return "recortable";
+  if (text.includes("video") || text.includes("guion") || text.includes("guión") || text.includes("video-script")) return "video";
   return "";
 }
 
@@ -813,7 +1517,10 @@ function renderReadingQuestions(questions = []) {
 function formatSyaKey(key = "") {
   const value = String(key || "").trim();
   const labels = {
-    Gramatica: "Gramática",
+    Ortografía: "Convenciones lingüísticas: Ortografía",
+    Ortografia: "Convenciones lingüísticas: Ortografía",
+    Gramatica: "Convenciones lingüísticas: Gramática",
+    Gramática: "Convenciones lingüísticas: Gramática",
     ExpresionEscrita: "Expresión escrita",
     TrazosDeLetras: "Trazos de letras",
     ComprensionLectora: "Comprensión lectora",
@@ -870,4 +1577,159 @@ function hasEditedSyaVersion(session = {}) {
   } catch (_) {
     return false;
   }
+}
+
+export function renderAutomationSpinner(panel, progressInfo = null) {
+  const label = progressInfo?.label || "Orquestando agentes MCP, actividades y recursos pedagógicos...";
+  let container = panel.querySelector("#cbAutomationSpinnerPanel");
+  if (!container) {
+    panel.innerHTML = `
+      <div class="cb-automation-spinner-panel cb-compact-automation-card" id="cbAutomationSpinnerPanel">
+        <div class="cb-compact-card-header">
+          <div class="cb-compact-badge">
+            <span class="cb-compact-beacon"></span>
+            <span class="cb-compact-badge-text">Generando unidad</span>
+          </div>
+          <span class="cb-compact-percentage" id="cbAutomationPercentage">0%</span>
+        </div>
+        <div class="cb-compact-agent-row">
+          <span class="cb-compact-agent-indicator" id="cbCompactAgentName">
+            <i class="fas fa-microchip" aria-hidden="true"></i>
+            <span>Orquestador MCP</span>
+          </span>
+          <span class="cb-compact-task-count" id="cbCompactTaskCount">Iniciando...</span>
+        </div>
+        <div class="cb-compact-track">
+          <div class="cb-compact-bar" id="cbAutomationProgressBar" style="width: 0%"></div>
+        </div>
+        <p class="cb-compact-status-text" id="cbAutomationStatusText">${escapeHtml(label)}</p>
+        <button type="button" class="cb-compact-open-modal-btn" id="cbOpenProductionModalBtn">
+          <i class="fas fa-expand-alt" aria-hidden="true"></i>
+          <span>Ver progreso en vivo</span>
+        </button>
+      </div>
+    `;
+    const openBtn = panel.querySelector("#cbOpenProductionModalBtn");
+    if (openBtn) {
+      openBtn.addEventListener("click", () => {
+        window.dispatchEvent(new CustomEvent("cb:open-production-modal"));
+      });
+    }
+  } else {
+    const statusText = container.querySelector("#cbAutomationStatusText");
+    if (statusText && label) statusText.textContent = label;
+  }
+}
+
+export async function startAnimeSpinner(container) {
+  if (!container) return;
+  const ringMain = container.querySelector(".cb-orbital-ring--main");
+  const ringDashed = container.querySelector(".cb-orbital-ring--dashed");
+  const satellites = container.querySelector(".cb-orbital-satellites");
+  const core = container.querySelector(".cb-orbital-core");
+  const glow = container.querySelector(".cb-orbital-glow");
+  const beacon = container.querySelector(".cb-orbital-beacon");
+
+  let anime = window.anime;
+  if (!anime) {
+    try {
+      const mod = await import("../vendor/animejs/anime.esm.min.js");
+      anime = mod.default || mod;
+    } catch (_) {}
+  }
+  if (!anime) return;
+
+  try {
+    if (ringMain) {
+      anime({
+        targets: ringMain,
+        rotate: "1turn",
+        duration: 3200,
+        loop: true,
+        easing: "linear"
+      });
+    }
+    if (ringDashed) {
+      anime({
+        targets: ringDashed,
+        rotate: "-1turn",
+        duration: 4400,
+        loop: true,
+        easing: "linear"
+      });
+    }
+    if (satellites) {
+      anime({
+        targets: satellites,
+        rotate: "1turn",
+        duration: 6000,
+        loop: true,
+        easing: "linear"
+      });
+    }
+    if (core) {
+      anime({
+        targets: core,
+        scale: [0.93, 1.07],
+        direction: "alternate",
+        loop: true,
+        duration: 1600,
+        easing: "easeInOutSine"
+      });
+    }
+    if (glow) {
+      anime({
+        targets: glow,
+        opacity: [0.2, 0.8],
+        scale: [0.85, 1.25],
+        direction: "alternate",
+        loop: true,
+        duration: 2000,
+        easing: "easeInOutQuad"
+      });
+    }
+    if (beacon) {
+      anime({
+        targets: beacon,
+        scale: [0.8, 1.4],
+        opacity: [0.5, 1],
+        direction: "alternate",
+        loop: true,
+        duration: 750,
+        easing: "easeInOutQuad"
+      });
+    }
+  } catch (_) {}
+}
+
+export function renderReadingContentTitle(title = "", readingHtml = "") {
+  let safeTitle = String(title || "").replace(/\s+/g, " ").trim();
+  if (!safeTitle || /^lectura sin t[ií]tulo$/i.test(safeTitle)) safeTitle = inferReadingContentTitle(readingHtml);
+  if (!safeTitle) return "";
+  const source = String(readingHtml || "");
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
+    const headings = Array.from(doc.querySelectorAll("h1, h2, h3, [data-reading-title]"));
+    if (headings.some((heading) => normalize(heading.textContent) === normalize(safeTitle))) return "";
+  } else if (normalize(source.replace(/<[^>]+>/g, " ")).includes(normalize(safeTitle))) {
+    return "";
+  }
+  return `<h2 class="cb-reading-content-title">${escapeHtml(safeTitle)}</h2>`;
+}
+
+export function inferReadingContentTitle(readingHtml = "") {
+  const source = String(readingHtml || "");
+  let text = source.replace(/<[^>]+>/g, " ");
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
+    text = doc.body.textContent || "";
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  const sentence = String(text.match(/^.{8,90}?[.!?](?:\s|$)/)?.[0] || "").replace(/[.!?]+$/, "").trim();
+  return sentence || text.split(" ").filter(Boolean).slice(0, 8).join(" ");
+}
+
+export function renderReadingBodyWithInferredTitle(reading = {}) {
+  const readingHtml = String(reading.html || reading.text || "").trim();
+  return `${renderReadingContentTitle(reading.title, readingHtml)}<div class="cb-approved-html">${readingHtml}</div>`;
 }

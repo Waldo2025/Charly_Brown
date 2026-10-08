@@ -3,12 +3,12 @@
  * Conforme a las especificaciones: Buscador ⌘K, Asistente IA, Centro de Notificaciones y Perfil de Autor.
  */
 
-import { showModal, closeActiveModal, showToast } from "./modals.js";
+import { showModal, closeActiveModal, showToast } from "./modals.js?v=20260923r1";
 import { openCommandPalette } from "./command-palette.js";
 import { logOutUser } from "../services/marcie-auth-guard.js";
-import { generateWithGemini, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
-import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
-import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260922r3";
+import { generateWithGemini, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js?v=20260923r4";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260923r4";
+import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260923r27";
 import { getActiveMarciePrompt } from "../services/marcie-prompt-settings.js";
 
 const escapeHtml = (unsafe) => {
@@ -775,7 +775,7 @@ Redacta o ajusta el artículo según su enfoque y audiencia. La voz debe sentirs
             contentHtml: `
               <div class="space-y-3 text-xs">
                 <div class="bg-teal-50 border border-teal-200 rounded-lg p-3">
-                  <div class="font-bold text-teal-800">Calidad: ${review.readabilityScore || 90} / 100</div>
+                  <div class="font-bold text-teal-800">${review.reviewStatus === "pending" ? "Revisión pendiente" : `Calidad: ${review.readabilityScore || 90} / 100`}</div>
                   <p class="text-teal-700">${review.summary}</p>
                 </div>
                 ${(review.issues || []).map((i) => `

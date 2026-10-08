@@ -1,10 +1,18 @@
 const { GoogleGenAI } = require("@google/genai");
 const { PROJECT_ID } = require("./common.js");
 
-const DEFAULT_TEXT_MODEL = "gemini-3.8-flash";
+const DEFAULT_TEXT_MODEL = "gemini-3.5-flash-lite";
 const DEFAULT_LITE_MODEL = "gemini-3.5-flash-lite";
+const MARCIE_FALLBACK_MODELS = Object.freeze(["gemini-3.8-flash", "gemini-3.5-flash"]);
+const ALLOWED_TEXT_MODELS = Object.freeze([
+  DEFAULT_TEXT_MODEL,
+  ...MARCIE_FALLBACK_MODELS,
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.1-pro-preview"
+]);
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
-const DEFAULT_LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
 const DEFAULT_VEO_MODEL = "veo-3.1-generate-001";
 const DEFAULT_VEO_FAST_MODEL = "veo-3.1-fast-generate-001";
 const AVAILABLE_VEO_MODELS = Object.freeze([
@@ -19,9 +27,9 @@ const AVAILABLE_VEO_MODELS = Object.freeze([
 const MODEL_ALIASES = Object.freeze({
   "gemini-2.5-flash": DEFAULT_TEXT_MODEL,
   "gemini-3-flash-preview": DEFAULT_TEXT_MODEL,
-  "gemini-3.5-flash": DEFAULT_TEXT_MODEL,
-  "gemini-3.6-flash": DEFAULT_TEXT_MODEL,
-  "gemini-3.7-flash": DEFAULT_TEXT_MODEL,
+  "gemini-3.5-flash": "gemini-3.5-flash",
+  "gemini-3.6-flash": "gemini-3.8-flash",
+  "gemini-3.7-flash": "gemini-3.8-flash",
   "gemini-flash-latest": DEFAULT_TEXT_MODEL,
   "gemini-3-pro-preview": "gemini-3.1-pro-preview",
   "gemini-2.5-flash-lite": DEFAULT_LITE_MODEL,
@@ -30,7 +38,6 @@ const MODEL_ALIASES = Object.freeze({
   "gemini-2.5-flash-image": DEFAULT_IMAGE_MODEL,
   "gemini-2.0-flash-preview-image-generation": "gemini-2.5-flash-image",
   "gemini-2.0-flash-image-generation-preview": "gemini-2.5-flash-image",
-  "gemini-2.5-flash-native-audio-preview-12-2025": DEFAULT_LIVE_MODEL,
   "veo-2.0-generate-001": DEFAULT_VEO_MODEL,
   "veo-3.0-generate-001": DEFAULT_VEO_MODEL,
   "veo-3.0-fast-generate-001": DEFAULT_VEO_FAST_MODEL,
@@ -78,12 +85,29 @@ function normalizeModel(value = "", fallback = DEFAULT_TEXT_MODEL) {
   return MODEL_ALIASES[clean] || clean || fallback;
 }
 
-function createVertexClient({ location = "global" } = {}) {
-  return new GoogleGenAI({
+function normalizeTextModel(value = "", fallback = DEFAULT_TEXT_MODEL) {
+  const normalized = normalizeModel(value, fallback);
+  return ALLOWED_TEXT_MODELS.includes(normalized) ? normalized : fallback;
+}
+
+function createVertexClient({ location = "global", httpOptions = {} } = {}) {
+  return require("./research/budget.js").guardClient(new GoogleGenAI({
     vertexai: true,
     project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || PROJECT_ID,
-    location
-  });
+    location,
+    // The SDK retries transient errors automatically. Keep the provider retry
+    // bounded so the application can switch models without multiplying bursts.
+    httpOptions: {
+      retryOptions: {
+        attempts: 2,
+        initialDelay: 1,
+        maxDelay: 8,
+        expBase: 2,
+        jitter: 1
+      },
+      ...httpOptions
+    }
+  }));
 }
 
 function sanitizeVertexSchema(schema) {
@@ -96,6 +120,16 @@ function sanitizeVertexSchema(schema) {
   ]);
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedKeywords.has(key)) continue;
+    // Gemini exige enums de texto; un enum numérico (type:"integer", enum:[1]) devuelve 400
+    // TYPE_STRING. Se descarta el enum en tipos no-string (el type fija el valor) y se
+    // normalizan a texto los enums de tipo string.
+    if (key === "enum") {
+      if (!Array.isArray(value)) continue;
+      const stringType = schema.type === undefined || String(schema.type).toLowerCase() === "string";
+      if (!stringType) continue;
+      sanitized[key] = value.map((entry) => (typeof entry === "string" ? entry : String(entry)));
+      continue;
+    }
     if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
       const sanitizedProps = {};
       for (const [propKey, propVal] of Object.entries(value)) {
@@ -150,6 +184,14 @@ function buildVertexGenerateRequest({ model, payload = {} } = {}) {
     delete config.top_k;
     delete config.candidateCount;
     delete config.candidate_count;
+    if (config.thinkingConfig && typeof config.thinkingConfig === "object") {
+      config.thinkingConfig = { ...config.thinkingConfig };
+      delete config.thinkingConfig.thinkingBudget;
+      delete config.thinkingConfig.thinking_budget;
+      if (!Object.keys(config.thinkingConfig).length) delete config.thinkingConfig;
+    }
+    delete config.thinkingBudget;
+    delete config.thinking_budget;
   }
   return {
     model: normalizedModel,
@@ -194,13 +236,15 @@ function buildVertexCompatibilityPayload(payload = {}) {
 module.exports = {
   DEFAULT_TEXT_MODEL,
   DEFAULT_LITE_MODEL,
+  MARCIE_FALLBACK_MODELS,
+  ALLOWED_TEXT_MODELS,
   DEFAULT_IMAGE_MODEL,
-  DEFAULT_LIVE_MODEL,
   DEFAULT_VEO_MODEL,
   DEFAULT_VEO_FAST_MODEL,
   AVAILABLE_VEO_MODELS,
   MODEL_ALIASES,
   normalizeModel,
+  normalizeTextModel,
   normalizeVeoModel,
   createVertexClient,
   buildVertexGenerateRequest,

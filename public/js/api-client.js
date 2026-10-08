@@ -85,7 +85,7 @@ export function canUseSameOriginApi() {
 function shouldForceSameOriginApiPath(path = "") {
   if (isLocalHostRuntime()) return false;
   const clean = String(path || "").trim();
-  return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/");
+  return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/") || clean === "/api/schroeder" || clean.startsWith("/api/schroeder/");
 }
 
 function shouldForceRemotePodcasterAudioApiPath(path = "") {
@@ -209,6 +209,9 @@ export function buildVeoApiUrl(path = "") {
   const input = String(path || "").trim();
   if (!input) return getVeoApiBase();
   if (/^https?:\/\//i.test(input)) return input;
+  if (input.includes("/gemini/")) {
+    return buildGeminiApiUrl(input);
+  }
   return buildApiUrlFromBase(getVeoApiBase(), input);
 }
 
@@ -267,7 +270,15 @@ function extractErrorText(value, fallback = "", seen = new Set()) {
   }
   if (seen.has(value)) return String(fallback || "").trim();
   seen.add(value);
-  for (const candidate of [value?.error, value?.message, value?.detail, value?.reason, value?.code]) {
+  const candidates = [value?.message, value?.error, value?.detail, value?.reason, value?.code];
+  if (typeof value?.error === "string" && !/^\d+$/.test(value.error.trim()) && value.error.trim() !== "internal_error") {
+    candidates.unshift(value.error);
+  }
+  for (const candidate of candidates) {
+    const text = extractErrorText(candidate, "", seen);
+    if (text && !/^\d+$/.test(text) && text !== "internal_error") return text;
+  }
+  for (const candidate of candidates) {
     const text = extractErrorText(candidate, "", seen);
     if (text) return text;
   }
@@ -321,7 +332,7 @@ export async function authFetch(url, options = {}) {
 }
 
 export async function authFetchJson(url, options = {}) {
-  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
+  const { auth = true, preferRemote = false, sameOrigin = false, allowFallback = true, ...requestOptions } = options || {};
   if (!sameOrigin && !hasAvailableApiBase()) {
     const error = new Error("Backend de producción no configurado.");
     error.code = "API_UNAVAILABLE";
@@ -360,7 +371,9 @@ export async function authFetchJson(url, options = {}) {
 
   const parseJsonSafe = async (response) => response.json().catch(() => ({}));
   const buildHttpError = (response, data) => {
-    const detail = extractErrorText(data, `HTTP ${response.status}`);
+    const detail = extractErrorText(data, response.status === 502
+      ? "El servicio de análisis de audio no está disponible temporalmente. Intenta de nuevo en unos segundos."
+      : `HTTP ${response.status}`);
     const error = new Error(detail);
     error.status = Number(response.status || 0);
     error.detail = data;
@@ -377,6 +390,7 @@ export async function authFetchJson(url, options = {}) {
   try {
     response = await fetch(finalUrl, requestInit);
   } catch (err) {
+    if (!allowFallback) throw err;
     const fallbackUrl = getAlternateLocalApiUrl(finalUrl);
     if (fallbackUrl) {
       response = await fetch(fallbackUrl, requestInit).catch(() => null);
@@ -390,7 +404,7 @@ export async function authFetchJson(url, options = {}) {
       }
     }
   }
-  if (!response.ok && response.status === 404) {
+  if (allowFallback && !response.ok && response.status === 404) {
     const fallbackUrl = getAlternateLocalApiUrl(finalUrl);
     if (fallbackUrl) {
       const fallbackResponse = await fetch(fallbackUrl, requestInit).catch(() => null);

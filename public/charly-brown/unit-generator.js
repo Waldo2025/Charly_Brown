@@ -2,13 +2,8 @@ import { generateWithGemini } from "./gemini-client.js";
 import { buildActivityContractPrompt, getProjectMethodology, getProjectPhases, isProjectSelection, isTracingLettersSelection, normalizeActivityHtml, validateActivityHtml } from "./unit-contracts.js";
 import { stripHtml } from "./ui-components.js";
 import { describeSyaSelection, getFocusedSya, getSyaGroupedByCategory, hasAllSelection } from "./sya-service.js";
-
-const NATURAL_EDITOR_PROMPT = `Actúa como editor de libros escolares mexicanos. Reescribe solo donde haga falta para que el texto suene a un docente con experiencia: claro, concreto, cercano y profesional.
-- Elimina introducciones genéricas, conclusiones de relleno y frases como "es importante destacar", "en el mundo actual", "sumérgete" o "exploremos juntos".
-- Evita estructuras mecánicamente simétricas, listas repetitivas y el mismo ritmo en todas las oraciones.
-- Conserva exactamente los hechos, respuestas, citas, propósito pedagógico, nivel escolar, etiquetas y estructura HTML.
-- No inventes experiencias personales, moralejas, emojis, encabezados ni falsa autoría humana.
-Devuelve únicamente el HTML final, sin comentarios ni bloques Markdown.`;
+import { getInternalPrompts } from "./prompts-service.js";
+import { buildVocabularyPromptDirective } from "./vocabulary-service.js";
 
 export function buildActivityReadingContext(reading = null) {
   if (!reading) return { title: "", narrative: "Sin lectura aprobada.", supportingMaterial: "Sin material complementario." };
@@ -28,6 +23,7 @@ export function buildActivityReadingContext(reading = null) {
 }
 
 export function buildReadingPrompt({ meta = {}, userText = "", readingStage = "reading", reading = null } = {}) {
+  const internalPrompts = getInternalPrompts();
   const base = `
 Nivel: ${meta.level || "Primaria"}
 Grado: ${meta.grade || ""}
@@ -42,7 +38,7 @@ ${base}
 LECTURA:
 ${stripHtml(reading?.html || reading?.text || "")}
 
-Devuelve solo HTML con una tabla de 6 a 10 palabras realmente presentes en la lectura. Usa las columnas Palabra y Sinónimo simple. No repitas la lectura ni agregues preguntas.
+${internalPrompts.synonymsProfile || ""}
 `.trim();
   if (readingStage === "comprehension") return `
 Prepara únicamente las preguntas de comprensión para la lectura siguiente.
@@ -51,17 +47,18 @@ ${base}
 LECTURA:
 ${stripHtml(reading?.html || reading?.text || "")}
 
-Devuelve solo HTML con una lista numerada de 5 preguntas variadas y la respuesta esperada de cada una. No repitas la lectura ni la tabla de sinónimos.
+${internalPrompts.comprehensionProfile || ""}
 `.trim();
   return `
-Genera únicamente la lectura narrativa para un libro escolar.
+Genera la lectura narrativa para un libro escolar.
 ${base}
+${internalPrompts.readingProfile || ""}
 
-Devuelve un solo bloque HTML con título y párrafos completos. No incluyas todavía sinónimos ni preguntas de comprensión; se trabajarán en las siguientes etapas. No cortes la lectura a media oración.
+Devuelve un solo bloque HTML con el título y los párrafos narrativos completos. No generes ni incrustes ilustraciones, SVG, canvas o imágenes en este HTML; al aprobar la lectura se adjuntará una imagen raster creada por el modelo de imagen de Gemini. No incluyas sinónimos ni preguntas de comprensión; se trabajarán en etapas posteriores. No cortes la lectura a media oración.
 `.trim();
 }
 
-export function buildActivitiesPrompt({ session = {}, userText = "", resourceSelections = {} } = {}) {
+export function buildActivitiesPrompt({ session = {}, userText = "", resourceSelections = {}, resourceCodes = {} } = {}) {
   const meta = session.meta || {};
   const reading = session.accepted?.reading || session.reading || null;
   const readingContext = buildActivityReadingContext(reading);
@@ -69,16 +66,28 @@ export function buildActivitiesPrompt({ session = {}, userText = "", resourceSel
   const focusedSya = getFocusedSya(meta, sya || {});
   const groupedSya = getSyaGroupedByCategory(meta, sya || {});
   const projectRules = buildProjectRules(meta);
-  const resourceBlock = buildResourceBlock(resourceSelections, session);
+  const internalPrompts = getInternalPrompts();
+  const vocabularyDirective = buildVocabularyPromptDirective({ target: "student" });
+  const resourceBlock = buildResourceBlock(resourceSelections, session, resourceCodes);
   const contract = buildActivityContractPrompt({
     grade: meta.grade,
     category: meta.category,
     subtopic: meta.subtopic,
     difficulty: meta.difficulty,
-    relateToReading: meta.relateToReading
+    relateToReading: meta.relateToReading,
+    mathSingleActivity: meta.mathSingleActivity === true
   });
   return `
 ${contract}
+
+Directrices configurables del contrato de actividad:
+${internalPrompts.activityContractProfile || ""}
+
+Directrices editoriales y perfil de actividades:
+${internalPrompts.activityProfile || ""}
+${meta.mathSingleActivity ? "INSTRUCCIÓN PRIORITARIA DE ESTA TAREA AUTOMATIZADA: devuelve exactamente UN ejercicio matemático autónomo en un bloque .activity; el lote tiene seis ejercicios hermanos dentro del mismo subtema y cada uno se genera por separado." : ""}
+
+${vocabularyDirective ? `Vocabulario preferente para el alumno:\n${vocabularyDirective}` : ""}
 
 Datos de la unidad:
 - Tipo: ${meta.mode}
@@ -92,6 +101,8 @@ Datos de la unidad:
 
 Fuente principal y obligatoria, lectura narrativa completa:
 ${readingContext.title ? `${readingContext.title}\n` : ""}${readingContext.narrative}
+
+Si la lectura incluye una ilustración, úsala como apoyo visual de consulta solo en las actividades para las que resulte pertinente. No inventes que existe una imagen si la lectura no la incluye.
 
 Material complementario de la lectura (solo como apoyo):
 ${readingContext.supportingMaterial}
@@ -114,7 +125,7 @@ Regla de recursos:
 - Si incluyes recursos, menciona el material dentro de la instrucción de la activity, por ejemplo: "Usa la Ficha 1a..." o "Apóyate en el Recortable 2b...".
 - Los anexos son recursos visuales y complementarios.
 - Las fichas son actividades complementarias; pueden relacionarse con la lectura o con la secuencia y alcance.
-- Cada Ficha debe usar internamente la misma estructura HTML de una activity: <div class="activity">, consigna imperativa dentro de <strong>, <ol class="steps steps-numbered"> con <li> y respuestas esperadas dentro de <div class="answer"><span style="color:magenta;">Respuesta: ...</span></div>. No diseñes la ficha como una tabla o como párrafos sueltos.
+- Cada Ficha debe usar internamente la misma estructura HTML de una activity: <div class="activity">, consigna imperativa dentro de <strong>, <ol class="steps steps-numbered"> con <li> y soluciones dentro de <div class="answer"><span style="color:magenta;">...</span></div>. Muestra directamente la respuesta en magenta, sin las etiquetas “Respuesta” o “Respuesta esperada”. No diseñes la ficha como una tabla o como párrafos sueltos.
 - Si el recurso activado es Recortable, la activity debe invitar a usarlo de forma dinámica dentro del ejercicio, integrándolo como parte del trabajo práctico y no como una simple mención.
 - Si el recurso activado es Recortable, la activity debe dejar un espacio visible debajo para que el alumno pegue o acomode el recortable en su trabajo.
 - Incluye una indicación clara como "Pega aquí tu recortable" o equivalente, sin volver mecánica la actividad.
@@ -150,6 +161,8 @@ export function buildRefineActivitiesPrompt({ session = {}, currentHtml = "", di
   const focusedSya = getFocusedSya(meta, sya || {});
   const groupedSya = getSyaGroupedByCategory(meta, sya || {});
   const projectRules = buildProjectRules(meta);
+  const internalPrompts = getInternalPrompts();
+  const vocabularyDirective = buildVocabularyPromptDirective({ target: "student" });
   const currentActivityCount = countActivityBlocks(currentHtml);
   const contract = buildActivityContractPrompt({
     grade: meta.grade,
@@ -175,7 +188,14 @@ export function buildRefineActivitiesPrompt({ session = {}, currentHtml = "", di
   return `
 ${contract}
 
+Directrices configurables del contrato de actividad:
+${internalPrompts.activityContractProfile || ""}
+
+Directrices editoriales y perfil de actividades:
+${internalPrompts.activityProfile || ""}
+
 Tu tarea NO es crear una unidad nueva. Debes refinar la propuesta actual.
+${internalPrompts.refinementProfile || ""}
 
 Datos de la unidad:
 - Tipo: ${meta.mode}
@@ -220,6 +240,7 @@ Devuelve solo el HTML final refinado.
 }
 
 export function buildChatPrompt({ session = {}, userText = "" } = {}) {
+  const internalPrompts = getInternalPrompts();
   const meta = session.meta || {};
   const reading = session.accepted?.reading || session.reading || null;
   const sya = session.accepted?.sya || session.sya || null;
@@ -230,6 +251,7 @@ export function buildChatPrompt({ session = {}, userText = "" } = {}) {
 
   return `
 Eres Charly Brown, un editor conversacional para crear unidades de Primaria.
+${internalPrompts.chatProfile || ""}
 Responde al usuario siguiendo el hilo de la conversación. No generes HTML de activities ni propuestas formales a menos que el usuario lo pida explícitamente.
 Si el usuario pregunta, explica o guía. Si pide cambiar una preferencia, confirma el ajuste. Si falta contexto, pide solo el dato necesario.
 
@@ -321,17 +343,26 @@ export async function generateReading({ session = {}, userText = "", model = "ge
   return { title: extractTitle(html) || reading?.title || fallbackTitle, html, prompt, readingStage, styleReview: { applied: html !== draftHtml, voice: "docente-mexicano-natural" } };
 }
 
-export async function generateActivities({ session = {}, userText = "", model = "gemini-3.8-flash", resourceSelections = {} } = {}) {
-  const activityContext = { subtopic: session.meta?.subtopic, section: session.meta?.category };
+export async function generateActivities({ session = {}, userText = "", model = "gemini-3.8-flash", resourceSelections = {}, resourceCodes = {} } = {}) {
+  const activityContext = {
+    subtopic: session.meta?.subtopic,
+    section: session.meta?.category,
+    isMath: /matem[aá]t|saberes y pensamiento/i.test(`${session.meta?.category || ""} ${session.meta?.subtopic || ""}`),
+    mathSingleActivity: session.meta?.mathSingleActivity === true
+  };
   const isTracingLetters = isTracingLettersSelection(activityContext);
-  const prompt = buildActivitiesPrompt({ session, userText, resourceSelections });
+  const prompt = buildActivitiesPrompt({ session, userText, resourceSelections, resourceCodes });
   const rawHtml = await generateWithGemini({ model, prompt });
   let html = normalizeActivityHtml(rawHtml);
   let validation = validateGeneratedActivity(html, activityContext, resourceSelections);
   if (!validation.ok) {
     const structureReminder = isTracingLetters
       ? "- Devuelve exactamente cuatro bloques .activity, cada uno con instrucción directa, .trace-model y .answer en magenta.\n- No uses ol, ul, li, pasos ni subinstrucciones internas."
-      : "- Devuelve al menos un bloque <div class=\"activity\"> completo y válido.\n- Conserva la estructura .activity, ol.steps.steps-numbered y .answer.";
+      : activityContext.isMath && !activityContext.mathSingleActivity
+        ? "- Devuelve exactamente seis bloques .activity independientes, cada uno con título h3, consigna principal en negritas, su propia lista ol.steps.steps-numbered con pasos y respuesta .answer en magenta."
+        : activityContext.isMath
+          ? "- Devuelve exactamente un h2 general y un bloque .activity sin h3 adicional; inicia directamente con la consigna y no repitas el título."
+        : "- Devuelve al menos un bloque <div class=\"activity\"> completo y válido.\n- Conserva la estructura .activity, ol.steps.steps-numbered y .answer.";
     const retryPrompt = `${prompt}\n\nREINTENTO OBLIGATORIO:\n${structureReminder}\n- Corrige estos incumplimientos: ${(validation.errors || []).join(" | ")}\n- Si además hay recursos seleccionados, inclúyelos como bloques adicionales, pero no elimines las activities.\n- No devuelvas únicamente fichas, anexos, recortables o videos.`;
     html = normalizeActivityHtml(await generateWithGemini({ model, prompt: retryPrompt }));
     validation = validateGeneratedActivity(html, activityContext, resourceSelections);
@@ -346,19 +377,25 @@ export async function generateActivities({ session = {}, userText = "", model = 
   };
 }
 
-function buildResourceBlock(resourceSelections = {}, session = {}) {
+function buildResourceBlock(resourceSelections = {}, session = {}, resourceCodes = {}) {
   const labels = [
-    ["fichas", "Fichas"],
-    ["anexos", "Anexos"],
-    ["recortables", "Recortables"],
-    ["videos", "Video"]
+    ["fichas", "Fichas", "worksheet"],
+    ["anexos", "Anexos", "annex"],
+    ["recortables", "Recortables", "cutout"],
+    ["videos", "Video", "videoScript"]
   ];
+  const internalPrompts = getInternalPrompts();
+  const vocabularyDirective = buildVocabularyPromptDirective({ target: "student" });
   const counts = buildResourceTypeCounts(session);
   const active = labels
     .filter(([key]) => Boolean(resourceSelections[key]))
-    .map(([key, label]) => `- ${label} (${buildResourceCode(session.meta || {}, key, counts[key] || 0)})`);
+    .map(([key, label, promptKey]) => {
+      const code = resourceCodes[key] || buildResourceCode(session.meta || {}, key, counts[key] || 0);
+      const guidelines = internalPrompts[promptKey] ? `\n  Directrices editoriales específicas para ${label}:\n  ${internalPrompts[promptKey]}` : "";
+      return `- ${label} (${code})${guidelines}${vocabularyDirective ? `\n  Vocabulario y claridad para el alumno:\n  ${vocabularyDirective}` : ""}`;
+    });
   if (!active.length) return "- Sin recursos adicionales seleccionados.";
-  return active.join("\n");
+  return active.join("\n\n");
 }
 
 function validateGeneratedActivity(html = "", activityContext = {}, resourceSelections = {}) {
@@ -373,8 +410,25 @@ function validateGeneratedActivity(html = "", activityContext = {}, resourceSele
   ].filter(([key]) => Boolean(resourceSelections[key])).map(([, type]) => type);
   const missing = expectedTypes.filter((type) => !generatedTypes.has(type));
   const worksheetErrors = resourceSelections.fichas ? validateWorksheetResourceStructure(html) : [];
-  const errors = [...(activityValidation.errors || []), ...missing.map((type) => `Falta el recurso ${type} como bloque independiente con data-resource-type="${type}".`), ...worksheetErrors];
+  const mathErrors = activityContext.isMath ? validateMathActivitySet(activityHtml, activityContext.mathSingleActivity ? 1 : 6) : [];
+  const errors = [...(activityValidation.errors || []), ...mathErrors, ...missing.map((type) => `Falta el recurso ${type} como bloque independiente con data-resource-type="${type}".`), ...worksheetErrors];
   return { ...activityValidation, ok: errors.length === 0, errors, missingResources: missing };
+}
+
+function validateMathActivitySet(html = "", expectedCount = 6) {
+  if (typeof DOMParser === "undefined") return [];
+  const doc = new DOMParser().parseFromString(`<main>${String(html || "")}</main>`, "text/html");
+  const activities = Array.from(doc.querySelectorAll("main .activity"));
+  const errors = [];
+  if (activities.length !== expectedCount) errors.push(`Matemáticas requiere exactamente ${expectedCount} actividades completas en este bloque; se encontraron ${activities.length}.`);
+  activities.forEach((activity, index) => {
+    if (expectedCount > 1 && !activity.querySelector(":scope > h3, :scope > h4")) errors.push(`La actividad matemática ${index + 1} no tiene título propio.`);
+    if (expectedCount === 1 && activity.querySelector(":scope > h3, :scope > h4")) errors.push("La actividad matemática individual repite el título con un subtítulo innecesario.");
+    if (!activity.querySelector(":scope > p strong")) errors.push(`La actividad matemática ${index + 1} no tiene consigna principal.`);
+    if (!activity.querySelector("ol.steps-numbered li, ol.steps li")) errors.push(`La actividad matemática ${index + 1} no tiene pasos.`);
+    if (!activity.querySelector(".answer")) errors.push(`La actividad matemática ${index + 1} no incluye una respuesta esperada.`);
+  });
+  return errors;
 }
 
 function validateWorksheetResourceStructure(html = "") {
@@ -471,7 +525,8 @@ export async function reviewGeneratedContent({ html = "", model = "gemini-3.8-fl
   const source = String(html || "").trim();
   if (!source) return source;
   try {
-    const reviewed = await generateWithGemini({ model, prompt: `${NATURAL_EDITOR_PROMPT}\n\nHTML A REVISAR:\n${source}`, thinkingLevel: "MEDIUM" });
+    const editorPrompt = getInternalPrompts().contentReview || "Actúa como editor escolar. Conserva los hechos y la estructura; devuelve únicamente el HTML revisado.";
+    const reviewed = await generateWithGemini({ model, prompt: `${editorPrompt}\n\nHTML A REVISAR:\n${source}`, thinkingLevel: "MEDIUM" });
     return String(reviewed || "").replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim() || source;
   } catch (_) {
     return source;

@@ -1,12 +1,12 @@
-import { showModal, closeActiveModal, showToast } from "./modals.js";
+import { showModal, closeActiveModal, showToast } from "./modals.js?v=20260923r1";
 import { getCurrentUser } from "../services/marcie-firebase.js";
 import {
   readEditorialSettings, saveCalendarItem,
   seedAidaEditorialCalendar, subscribeEditorialCalendar, subscribeEditorialNotifications, subscribeTrendSnapshots
 } from "../services/marcie-editorial-store.js";
-import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260922r3";
+import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260923r27";
 import { cancelScheduledPublication, createWordPressDraft, reconcilePublicationStatus, schedulePublication, reschedulePublication } from "../services/marcie-wordpress-service.js";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260924r4";
 import { isEditorialEditor } from "../services/marcie-auth-guard.js";
 
 const TZ = "America/Cancun";
@@ -78,7 +78,12 @@ function trendOpportunityCard(trend = {}, index = 0) {
   const momentumLabels = { breakout: "Despegando", rising: "En crecimiento", emerging: "Emergente", steady: "Conversación estable" };
   const freshnessLabels = { immediate: "Ahora", recent: "Reciente", monthly: "Este mes" };
   const signals = Array.isArray(trend.signals) ? trend.signals : [];
-  return `<article class="radar-rank-row radar-trend-card ${index === 0 ? "is-first" : ""}" style="--trend-share:${Math.max(0, Math.min(100, Number(trend.trendingPercent || 0)))}%"><div class="radar-rank-position"><span>${String(trend.rank || index + 1).padStart(2, "0")}</span></div><div class="radar-rank-main"><div class="radar-rank-meta"><span class="radar-confidence is-high"><i aria-hidden="true">↗</i>${esc(momentumLabels[trend.momentum] || "Tendencia detectada")}</span><span>${esc(freshnessLabels[trend.freshness] || "Reciente")}</span><span>TrendScore ${esc(trend.trendScore || 0)}</span></div><h3>${esc(trend.topic || trend.title || "Tendencia sin título")}</h3><p>${esc(trend.summary || "Sin resumen disponible.")}</p>${trend.whyNow ? `<p class="radar-why-now"><b>Por qué ahora:</b> ${esc(trend.whyNow)}</p>` : ""}<div class="radar-factor-list">${factorItems.map(([label, value]) => `<span><small>${esc(label)}</small><b>${esc(Math.round(Number(value)))}</b></span>`).join("")}</div></div><div class="radar-rank-share"><span class="radar-share-label">Trending share</span><strong>${esc(Number(trend.trendingPercent || 0).toFixed(1))}%</strong><small>cuota comparativa</small><div class="radar-share-track" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, Number(trend.trendingPercent || 0)))}%"></span></div><div class="radar-topic-actions"><button type="button" data-trend-current-session="${index}" aria-label="Crear un artículo sobre este tema en la sesión actual"><i aria-hidden="true">✎</i><span>Crear artículo aquí</span></button><button type="button" data-trend-new-session="${index}" aria-label="Crear un artículo sobre este tema en una sesión nueva"><i aria-hidden="true">＋</i><span>Crear en nueva sesión</span></button></div></div><details class="radar-rank-evidence"><summary><span>Señales que impulsan este tema</span><small>${signals.length} señales</small><i aria-hidden="true">⌄</i></summary><div class="radar-signal-panel"><ul class="radar-signal-list">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("") || "<li>Sin señales detalladas.</li>"}</ul></div></details></article>`;
+  const share = Math.max(0, Math.min(100, Number(trend.trendingPercent || 0)));
+  return `<article class="radar-rank-row radar-trend-card ${index === 0 ? "is-first" : ""}">
+    <div class="radar-rank-position"><span>${String(trend.rank || index + 1).padStart(2, "0")}</span></div>
+    <div class="radar-rank-main"><div class="radar-rank-meta"><span class="radar-confidence is-high"><i aria-hidden="true">↗</i>${esc(momentumLabels[trend.momentum] || "Tendencia detectada")}</span><span>${esc(freshnessLabels[trend.freshness] || "Reciente")}</span><span>TrendScore ${esc(trend.trendScore || 0)}</span></div><h3>${esc(trend.topic || trend.title || "Tendencia sin título")}</h3><p>${esc(trend.summary || "Sin resumen disponible.")}</p>${trend.whyNow ? `<p class="radar-why-now"><b>Por qué ahora:</b> ${esc(trend.whyNow)}</p>` : ""}<div class="radar-factor-list">${factorItems.map(([label, value]) => `<span><small>${esc(label)}</small><b>${esc(Math.round(Number(value)))}</b></span>`).join("")}</div></div>
+    <div class="radar-rank-share"><span class="radar-share-label">Trending share</span><strong>${esc(share.toFixed(1))}%</strong><small>cuota comparativa</small><progress class="radar-share-track" value="${share}" max="100" aria-label="Porcentaje de tendencia"></progress><div class="radar-topic-actions"><button type="button" data-trend-current-session="${index}" aria-label="Crear un artículo sobre este tema en la sesión actual"><i aria-hidden="true">✎</i><span>Crear artículo aquí</span></button><button type="button" data-trend-new-session="${index}" aria-label="Crear un artículo sobre este tema en una sesión nueva"><i aria-hidden="true">＋</i><span>Crear en nueva sesión</span></button></div></div>
+    <details class="radar-rank-evidence"><summary><span>Señales que impulsan este tema</span><small>${signals.length} señales</small><i aria-hidden="true">⌄</i></summary><div class="radar-signal-panel"><ul class="radar-signal-list">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("") || "<li>Sin señales detalladas.</li>"}</ul></div></details></article>`;
 }
 
 function sessionTrendInsightHtml(options = {}) {
@@ -354,6 +359,14 @@ function enableDraggableCard(element) {
   let startY = 0;
   let initialLeft = 0;
   let initialTop = 0;
+  let positionAnimation = null;
+  const positionCard = (left, top) => {
+    const computed = getComputedStyle(element);
+    const baseLeft = window.innerWidth - parseFloat(computed.right || "0") - element.offsetWidth;
+    const baseTop = parseFloat(computed.top || "0");
+    positionAnimation?.cancel();
+    positionAnimation = element.animate([{ translate: `${left - baseLeft}px ${top - baseTop}px` }], { duration: 1, fill: "forwards" });
+  };
 
   const onPointerDown = (e) => {
     if (e.target.closest("button, a, input, textarea, select, [data-trend-notification-dismiss]")) return;
@@ -367,14 +380,8 @@ function enableDraggableCard(element) {
     initialLeft = rect.left;
     initialTop = rect.top;
 
-    element.style.left = `${initialLeft}px`;
-    element.style.top = `${initialTop}px`;
-    element.style.right = "auto";
-    element.style.bottom = "auto";
-    element.style.margin = "0";
-    element.style.transition = "none";
     element.classList.add("is-dragging");
-    document.body.style.userSelect = "none";
+    document.body.classList.add("marcie-no-select");
 
     try {
       element.setPointerCapture(e.pointerId);
@@ -388,21 +395,20 @@ function enableDraggableCard(element) {
       const newLeft = Math.max(8, Math.min(window.innerWidth - element.offsetWidth - 8, initialLeft + dx));
       const newTop = Math.max(8, Math.min(window.innerHeight - element.offsetHeight - 8, initialTop + dy));
 
-      element.style.left = `${newLeft}px`;
-      element.style.top = `${newTop}px`;
+      positionCard(newLeft, newTop);
     };
 
     const onPointerUp = (upEvent) => {
       if (!isDragging) return;
       isDragging = false;
       element.classList.remove("is-dragging");
-      element.style.transition = "";
-      document.body.style.userSelect = "";
+      document.body.classList.remove("marcie-no-select");
 
       // Guardar posición final en localStorage
       try {
-        const finalLeft = parseFloat(element.style.left) || 0;
-        const finalTop  = parseFloat(element.style.top)  || 0;
+        const finalRect = element.getBoundingClientRect();
+        const finalLeft = finalRect.left;
+        const finalTop = finalRect.top;
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ left: finalLeft, top: finalTop }));
       } catch (_) {}
 
@@ -421,6 +427,7 @@ function enableDraggableCard(element) {
   };
 
   element.addEventListener("pointerdown", onPointerDown);
+  return positionCard;
 }
 
 function showTrendWinnerNotification(trend = {}, options = {}, { statusLabel = "Último radar guardado" } = {}) {
@@ -434,7 +441,7 @@ function showTrendWinnerNotification(trend = {}, options = {}, { statusLabel = "
   card.setAttribute("aria-label", "Tendencia editorial ganadora");
   card.innerHTML = `<button type="button" class="radar-winner-notification-close" data-trend-notification-dismiss aria-label="Cerrar tendencia ganadora">×</button><div class="radar-winner-top"><span class="radar-winner-badge"><i aria-hidden="true">↗</i> Trending #1</span><span class="radar-winner-confidence"><i aria-hidden="true"></i> ${esc(statusLabel)}</span></div><div class="radar-winner-content"><div><span class="radar-winner-eyebrow">Tema con mayor oportunidad editorial</span><h2>${esc(trend.topic || trend.title)}</h2><p>${esc(trend.summary || "Conversación educativa con el mayor impulso detectado en esta búsqueda.")}</p></div><div class="radar-winner-score"><strong>${esc(Number(trend.trendingPercent || 0).toFixed(1))}%</strong><span>Trending share</span><small>TrendScore ${esc(trend.trendScore || 0)}/100</small></div></div><div class="radar-winner-footer"><button type="button" class="radar-winner-notification-link" data-trend-notification-open>Ver radar completo</button><div class="radar-winner-actions"><button type="button" data-trend-notification-refresh><span aria-hidden="true">↻</span> Actualizar tendencias</button><button type="button" data-trend-notification-current>Crear artículo aquí</button><button type="button" data-trend-notification-new>Crear en nueva sesión <i aria-hidden="true">→</i></button></div></div>`;
   (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(card);
-  enableDraggableCard(card);
+  const positionCard = enableDraggableCard(card);
 
   // Restaurar posición guardada (doble rAF para asegurar que offsetWidth esté calculado)
   requestAnimationFrame(() => {
@@ -444,11 +451,7 @@ function showTrendWinnerNotification(trend = {}, options = {}, { statusLabel = "
         if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
           const maxLeft = window.innerWidth  - card.offsetWidth  - 8;
           const maxTop  = window.innerHeight - card.offsetHeight - 8;
-          card.style.left   = `${Math.max(8, Math.min(maxLeft, saved.left))}px`;
-          card.style.top    = `${Math.max(8, Math.min(maxTop,  saved.top))}px`;
-          card.style.right  = "auto";
-          card.style.bottom = "auto";
-          card.style.margin = "0";
+          positionCard(Math.max(8, Math.min(maxLeft, saved.left)), Math.max(8, Math.min(maxTop, saved.top)));
         }
       } catch (_) {}
       card.classList.add("is-visible");

@@ -1,4 +1,71 @@
-# Design QA · Estado de generación y fuentes APA de Marcie
+# Design QA · Schroeder Sound Lab
+
+**Source visual truth**
+
+- Referencia de biblioteca/reproductor: `/var/folders/0_/76qxtcb13lg_dcrp5c9y1lnr0000gn/T/TemporaryItems/NSIRD_screencaptureui_IWtvc4/Captura de pantalla 2026-09-27 a la(s) 4.37.41 p.m..png` (`820 × 470`).
+- Referencia de dirección visual: `/var/folders/0_/76qxtcb13lg_dcrp5c9y1lnr0000gn/T/TemporaryItems/NSIRD_screencaptureui_4QDDL2/Captura de pantalla 2026-09-27 a la(s) 4.16.31 p.m..png`.
+- La referencia se usó como jerarquía de producto, no como solicitud de clonación: biblioteca oscura, filas musicales, reproducción y acciones agrupadas.
+
+**Rendered implementation**
+
+- URL local: `http://127.0.0.1:8765/schroederSoundLab.html`.
+- Vista principal: `/private/tmp/schroeder-desktop.png`.
+- Modal de creación: `/private/tmp/schroeder-modal.png`.
+- Biblioteca y reproductor activos: `/private/tmp/schroeder-library-player.png`.
+- Comparación conjunta: `/private/tmp/schroeder-design-comparison.png`.
+- Viewport y captura: `1440 × 1000` CSS px, device scale factor `1`, capturas `1440 × 1000`; comparación `1600 × 1200`.
+- Estado: tema oscuro, escritorio, tres columnas; modal de canción; biblioteca con tres canciones simuladas y footer reproductor activo.
+
+## Full-view comparison evidence
+
+La comparación conjunta confirmó que la implementación reemplaza la tarjeta pesada y sus acciones visibles por filas compactas de miniatura, título y menú; el reproductor se separa en un footer persistente. La composición conserva el centro como superficie dominante para el chat y mantiene desplazamiento independiente en las tres columnas.
+
+## Focused-region comparison evidence
+
+- Biblioteca: miniatura real a la izquierda, título truncable, subtítulo mínimo y menú vertical a la derecha.
+- Reproductor: miniatura, play/pausa, nombre, tiempos, progreso y menú; se adapta a los tokens de los tres temas.
+- Modal: jerarquía clara, propuestas de géneros en chips, campos alineados y sin interferencia con el chat.
+- Logo: PNG transparente generado para el estudio, renderizado nítido en header y miniaturas.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Inter local, pesos 600–700, jerarquía compacta y truncamiento en filas; no se observó desbordamiento.
+- Spacing and layout rhythm: grid `248 / flexible / 410`, separadores de 1 px, filas de 60 px y footer de 70 px; el chat conserva la mayor superficie.
+- Colors and visual tokens: superficies neutras, bordes discretos y acento verde consistente en iconos, foco, progreso y estados; sin gradientes decorativos.
+- Image quality and asset fidelity: logo PNG `768 × 512` con alfa, sin SVG improvisado, emoji ni placeholder; recorte y escala se verificaron en header y miniaturas.
+- Copy and content: títulos y subtítulos mínimos; las acciones permanecen en tooltips y menús en lugar de sumar texto visible.
+
+## Primary interactions and runtime verification
+
+- Abrir modal de creación y verificar su layout.
+- Cambiar tema desde icono y conservar preferencia.
+- Mostrar biblioteca compacta, hover de reproducción y footer activo.
+- Menús contextuales, edición, descarga, eliminación confirmada y alta en Podcaster.
+- Grabación vocal con permiso explícito, límite de 60 segundos, formatos permitidos y limpieza de pistas.
+- Consola del navegador revisada en la captura activa: `0` errores.
+- Pruebas específicas: `9/9 passed`.
+
+## Findings and comparison history
+
+### Iteration 1
+
+- [P1] La biblioteca original mostraba un reproductor nativo grande y botones de acción siempre visibles.
+  - Fix: filas compactas con acciones en menú y reproductor propio en footer.
+- [P2] El chat perdía espacio por controles expuestos.
+  - Fix: configuración trasladada a modal e iconos compactos en header/toolbar.
+- [P2] Las acciones creativas no tenían señalización ni tooltips consistentes.
+  - Fix: tooltips accesibles, spotlights periódicos y recorrido animado en el borde del compositor.
+
+### Iteration 2
+
+- Evidencia posterior: `/private/tmp/schroeder-library-player.png` y `/private/tmp/schroeder-modal.png`.
+- No quedan diferencias P0, P1 o P2 accionables. La menor densidad de la lista frente a la captura es intencional y responde a la solicitud explícita de simplificarla.
+
+final result: passed
+
+---
+
+# Reporte histórico · Estado de generación y fuentes APA de Marcie
 
 **Source visual truth**
 
@@ -56,4 +123,4 @@ La región de “Fuentes consultadas” se verificó en la aplicación autentica
 - Evidencia posterior: el navegador mostró ambas referencias en filas independientes y el estado de generación centrado, legible y coherente con Marcie.
 - No quedan diferencias P0, P1 o P2 accionables.
 
-final result: passed
+historic result: passed

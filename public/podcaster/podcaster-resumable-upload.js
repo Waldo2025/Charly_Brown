@@ -1,4 +1,4 @@
-import { authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
+import { authFetch, authFetchJson, buildApiUrl, isLoopbackApiBase } from "../js/api-client-podcaster.js?v=2026-10-01.scene-upload-1";
 
 export function dataUrlToFile(dataUrl = "", fileName = "asset") {
   const source = String(dataUrl || "").trim();
@@ -38,10 +38,32 @@ export async function uploadPodcasterAsset(file, options = {}) {
   if (!(file instanceof Blob) || !Number(file.size || 0)) throw new Error("No se recibió un archivo válido.");
   const fileName = String(options.fileName || file.name || "asset").trim() || "asset";
   const contentType = String(options.contentType || file.type || "application/octet-stream").trim().toLowerCase();
+  const kind = String(options.kind || "").trim();
+  const createUrl = buildApiUrl("/api/podcaster/uploads/create");
+  const localApi = isLoopbackApiBase(createUrl)
+    || (createUrl.startsWith("/") && isLoopbackApiBase(window.location.origin));
+  if (localApi && ["scene-image", "scene-video", "scene-audio"].includes(kind)) {
+    const response = await authFetch("/api/podcaster/scene-media/upload", {
+      method: "POST",
+      body: file,
+      signal: options.signal,
+      headers: {
+        "Content-Type": contentType,
+        "X-Session-Id": String(options.sessionId || "").trim(),
+        "X-Row-Id": String(options.rowId || "row").trim(),
+        "X-File-Name": encodeURIComponent(fileName),
+        "X-Mime-Type": contentType
+      }
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(String(result?.error || `HTTP ${response.status}`)), { status: response.status });
+    options.onProgress?.(file.size, file.size);
+    return { uploadId: "", media: result.media || null, idempotent: false };
+  }
   const created = await authFetchJson("/api/podcaster/uploads/create", {
     method: "POST",
     body: {
-      kind: String(options.kind || "").trim(),
+      kind,
       sessionId: String(options.sessionId || "").trim(),
       rowId: String(options.rowId || "row").trim(),
       fileName,

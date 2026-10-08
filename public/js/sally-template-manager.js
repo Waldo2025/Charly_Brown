@@ -1,9 +1,11 @@
 import {sanitizeHtml} from "./security-utils.js";
 import {fillTemplate} from "./sally-template.js";
+import {renderSafePreview} from "./sally-safe-preview.js";
 
 export function installTemplateManager({state,el,store,toast}){
   const modal=el("sallyTemplateModal");let rows=[],selected=null,dirty=false,busy=false,opener;
   modal.querySelector(".sally-template-editor").append(el("sallyTemplatesPanel"));
+  el("sallyTemplatesPanel").hidden=false;
   modal.querySelector(".sally-template-library-select").append(el("sallyTemplateList").closest("label"));
   const valuesLabel=el("sallyTemplateValues").closest("label");valuesLabel.hidden=true;
   const fields=document.createElement("div");fields.className="sally-template-fields";valuesLabel.before(fields);
@@ -23,8 +25,7 @@ export function installTemplateManager({state,el,store,toast}){
   }
   function preview(){
     let html=sanitizeHtml(el("sallyTemplateHtml").value);try{html=fillTemplate(html,JSON.parse(el("sallyTemplateValues").value));}catch{}
-    // No scripts, forms, navigation, or network access in the preview.
-    el("sallyTemplatePreview").srcdoc=`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"><style>body{font:15px/1.6 system-ui;padding:16px;overflow-wrap:anywhere}</style>${html}`;
+    renderSafePreview(el("sallyTemplatePreview"),html);
   }
   function load(template){selected=template;dirty=false;el("sallyTemplateName").value=template?.name||"";el("sallyTemplateHtml").value=template?.html||"";el("sallyTemplateValues").value="{}";
     const owned=!template||template.ownerId===state.user.uid;

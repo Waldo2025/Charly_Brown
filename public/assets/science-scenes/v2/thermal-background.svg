@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Mesa de transferencia de calor</title><desc id="desc">Banco térmico de laboratorio con gradientes cálidos y fríos.</desc>
+  <defs><linearGradient id="bg" x2="1"><stop stop-color="#d7f2f2"/><stop offset=".48" stop-color="#fff2dc"/><stop offset="1" stop-color="#ffd0a7"/></linearGradient><linearGradient id="table" y2="1"><stop stop-color="#8ca9b3"/><stop offset="1" stop-color="#526b7b"/></linearGradient></defs>
+  <rect width="1600" height="900" fill="url(#bg)"/><path d="M0 630h1600v270H0z" fill="url(#table)"/><path d="M0 635h1600" stroke="#3e596b" stroke-width="12"/>
+  <g fill="none" stroke-width="18" opacity=".6"><path d="M190 170h260v200H190z" stroke="#4baab0"/><path d="M1340 120h120v250h-120z" stroke="#e07965"/><path d="M255 215h130M255 275h130" stroke="#4baab0"/></g>
+  <g stroke-linecap="round" fill="none" opacity=".55"><path d="M620 220q40-75 80 0t80 0t80 0t80 0" stroke="#f08a5d" stroke-width="16"/><path d="M620 290q40-75 80 0t80 0t80 0t80 0" stroke="#5aaec2" stroke-width="16"/></g>
+  <rect x="520" y="680" width="560" height="90" rx="20" fill="#d6e7e7" opacity=".75"/><path d="M590 770v100M1010 770v100" stroke="#344e61" stroke-width="24"/>
+</svg>

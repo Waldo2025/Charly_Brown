@@ -1,3 +1,5 @@
+import { claimSavings, savingsMessage } from "../js/savings-client.js";
+
 export function createPodcasterSessionRailApi(deps = {}) {
   const {
     state,
@@ -572,9 +574,18 @@ export function createPodcasterSessionRailApi(deps = {}) {
     });
   }
 
-  function createAndOpenSession() {
-    playbackController.stop({ keepStatus: true });
+  async function createAndOpenSession() {
     const session = createSession({ title: "Nueva sesión" });
+    try {
+      if (session.podcastStudioUiState?.composerGenerationMode === "video") await claimSavings("videoSessions", session.id);
+      await claimSavings("podcasterSessions", session.id);
+    } catch (error) {
+      const message = savingsMessage(error);
+      setGenerationStatus(message, "");
+      addChatMessage("system", message);
+      return;
+    }
+    playbackController.stop({ keepStatus: true });
     state.sessions.unshift(session);
     state.activeSessionId = session.id;
     expandSession(session.id);

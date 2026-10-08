@@ -4,10 +4,16 @@ const { createHash } = require("node:crypto");
 const { cleanMoodleHtml } = require("./html-policy.js");
 const { collectTabbedCourse } = require("./course-reader.js");
 const {inspectQuiz:readQuiz,createDescription}=require("./quiz-adapter.js");
+const {createOrUpdateCourse,createGenericModule,importUsersCsv,createMetaLink}=require("./moodle-admin.js");
+const {createComputerUse}=require("./computer-use.js");
+const {executeBrowserWorkflow}=require("./browser-workflow.js");
 
 function sameCourse(a,b){if(!a||!b)return false;const x=new URL(a),y=new URL(b);return x.origin===y.origin&&x.pathname===y.pathname&&x.searchParams.get("id")===y.searchParams.get("id");}
 function resourceHash(html,visible){return createHash("sha256").update(JSON.stringify({html,visible})).digest("hex");}
 
+// Firebase Web apiKey, public by design: the same value the browser bundle ships in
+// public/js/firebase-web-config.js. It only identifies the project; the caller's ID token
+// is what authorizes these Identity Toolkit and Firestore REST reads.
 const FIREBASE_API_KEY = "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0";
 const FIREBASE_PROJECT_ID = "charly-brown";
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
@@ -18,6 +24,10 @@ const ALLOWED_OPERATIONS = new Set([
   "upload_asset",
   "create_quiz",
   "create_quiz_description",
+  "create_or_update_course",
+  "create_moodle_module",
+  "create_meta_link",
+  "browser_workflow",
   "reorder_item",
   "verify_result"
 ]);
@@ -105,13 +115,35 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
   let modelUrl = "";
   let targetUrl = "";
   let courseView = "model";
+  let viewport = {...VIEWPORT};
   let captureTimer = null;
   let paused = false;
   let cancelled = false;
   let approvedPlanHash = "";
+  let cdpSession = null;
+  let screencastHandler = null;
+  let screencastSpec = null;
+  let authStateFile = "";
+  let authPersistTimer = null;
   const completedOperations = new Set();
+  const computerUse=createComputerUse();
+  const requestedViewport=value=>({width:Math.max(320,Math.min(1920,Math.round(Number(value?.width)||viewport.width))),height:Math.max(360,Math.min(1400,Math.round(Number(value?.height)||viewport.height)))});
 
   const emit = (type, payload = {}) => sendEvent({ type, payload, at: new Date().toISOString() });
+  const cookieMatchesOrigin=(cookie,origin)=>{try{const host=new URL(origin).hostname,domain=String(cookie.domain||"").replace(/^\./,"");return Boolean(domain&&(host===domain||host.endsWith("."+domain)));}catch{return false;}};
+  const persistAuthState=async()=>{
+    if(!context||!authStateFile||!allowedOrigin)return;
+    const cookies=(await context.cookies().catch(()=>[])).filter(cookie=>cookieMatchesOrigin(cookie,allowedOrigin));
+    const temporary=`${authStateFile}.${process.pid}.${Date.now()}.tmp`;
+    await fs.mkdir(path.dirname(authStateFile),{recursive:true,mode:0o700});
+    await fs.writeFile(temporary,JSON.stringify({version:1,origin:allowedOrigin,cookies,updatedAt:new Date().toISOString()}),{mode:0o600});
+    await fs.rename(temporary,authStateFile);await fs.chmod(authStateFile,0o600).catch(()=>{});
+  };
+  const scheduleAuthPersist=()=>{clearTimeout(authPersistTimer);authPersistTimer=setTimeout(()=>void persistAuthState().catch(()=>{}),500);};
+  const restoreAuthState=async()=>{
+    if(!context||!authStateFile)return;
+    try{const saved=JSON.parse(await fs.readFile(authStateFile,"utf8"));if(saved.origin!==allowedOrigin)return;const cookies=(saved.cookies||[]).filter(cookie=>cookieMatchesOrigin(cookie,allowedOrigin));if(cookies.length)await context.addCookies(cookies);}catch(error){if(error.code!=="ENOENT")await fs.unlink(authStateFile).catch(()=>{});}
+  };
   const requireSession = (actor) => {
     if (!page || !context || actor.uid !== ownerUid) throw new Error("No existe una sesión Moodle activa para este usuario.");
   };
@@ -121,10 +153,10 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     const capture=(async()=>{
     const visiblePage=streamPage||page;
     if (!visiblePage || visiblePage.isClosed()) return null;
-    const image = await visiblePage.screenshot({ type: "jpeg", quality: Date.now()<manualUntil?50:65,timeout:2500, mask:[visiblePage.locator("input[type='password']")] }).catch(() => null);
+    const image = await visiblePage.screenshot({ type: "jpeg", quality: Date.now()<manualUntil?72:82,scale:"device",timeout:2500, mask:[visiblePage.locator("input[type='password']")] }).catch(() => null);
     if (!image) return null;
     lastCaptureAt=Date.now();
-    const state = { image: `data:image/jpeg;base64,${image.toString("base64")}`, capturedAt:Date.now(), url: visiblePage.url(), title: await visiblePage.title().catch(() => "Moodle"), viewport: VIEWPORT, reason };
+    const state = { image: `data:image/jpeg;base64,${image.toString("base64")}`, capturedAt:Date.now(), url: visiblePage.url(), title: await visiblePage.title().catch(() => "Moodle"), viewport, reason };
     emit("snapshot", state);
     return state;
     })();
@@ -133,6 +165,27 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
   const startCapture = () => {
     clearInterval(captureTimer);
     captureTimer = setInterval(() => {if(Date.now()<manualUntil||Date.now()-lastCaptureAt>1400)void snapshot("interval");},300);
+  };
+  const stopScreencast = async ({resumeSnapshots=false,preserveSpec=false}={}) => {
+    if(!cdpSession)return;
+    if(screencastHandler)cdpSession.off("Page.screencastFrame",screencastHandler);
+    await cdpSession.send("Page.stopScreencast").catch(()=>{});
+    await cdpSession.detach().catch(()=>{});cdpSession=null;screencastHandler=null;if(!preserveSpec)screencastSpec=null;if(resumeSnapshots&&page&&!page.isClosed())startCapture();
+  };
+  const startScreencast = async ({fps=10,quality=74,onFrame}={}) => {
+    if(!context||!page||page.isClosed())throw Error("No existe una sesión Moodle activa.");
+    await stopScreencast();clearInterval(captureTimer);captureTimer=null;
+    screencastSpec={fps,quality,onFrame};
+    cdpSession=await context.newCDPSession(page);let lastFrame=0,lastTitleAt=0,title="Moodle";
+    screencastHandler=async event=>{
+      await cdpSession?.send("Page.screencastFrameAck",{sessionId:event.sessionId}).catch(()=>{});
+      const now=Date.now();if(now-lastFrame<Math.max(50,1000/Math.max(1,Math.min(20,fps))))return;lastFrame=now;
+      if(now-lastTitleAt>1000){lastTitleAt=now;title=await page.title().catch(()=>title);}
+      onFrame?.(Buffer.from(event.data,"base64"),{url:page.url(),title,viewport,capturedAt:now});
+    };
+    cdpSession.on("Page.screencastFrame",screencastHandler);
+    await cdpSession.send("Page.startScreencast",{format:"jpeg",quality:Math.max(50,Math.min(85,quality)),maxWidth:Math.round(viewport.width*1.25),maxHeight:Math.round(viewport.height*1.25),everyNthFrame:1});
+    return {onFrame,stop:stopScreencast,viewport:{...viewport}};
   };
   const audit = (action, actor, extra = {}) => emit("audit", { action, actor: { uid: actor.uid, email: actor.email, role: actor.role }, ...extra });
 
@@ -147,8 +200,10 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
 
   async function start(payload, actor) {
     const target = safeUrl(payload.url);
+    const nextViewport=requestedViewport(payload.viewport);
     // Reopening the viewer must not restart Chromium: Moodle uses session cookies.
     if(context && page && !page.isClosed() && actor.uid===ownerUid && target.origin===allowedOrigin){
+      if(nextViewport.width!==viewport.width||nextViewport.height!==viewport.height){viewport=nextViewport;await page.setViewportSize(viewport);}
       if(Object.prototype.hasOwnProperty.call(payload,"modelUrl"))modelUrl=payload.modelUrl?safeUrl(payload.modelUrl,allowedOrigin).href:"";
       if(payload.targetUrl)targetUrl=safeUrl(payload.targetUrl,allowedOrigin).href;
       return navigate({...payload,action:"open"},actor);
@@ -160,13 +215,16 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     modelUrl = payload.modelUrl ? safeUrl(payload.modelUrl, allowedOrigin).href : payload.courseView==="target"?"":target.href;
     targetUrl = payload.targetUrl ? safeUrl(payload.targetUrl, allowedOrigin).href : "";
     courseView = payload.courseView === "target" ? "target" : "model";
+    viewport=nextViewport;
     const profileKey = createHash("sha256").update(`${actor.uid}:${allowedOrigin}`).digest("hex").slice(0, 24);
     const userDataDir = path.join(getPath("userData"), "sally-brown", profileKey);
+    authStateFile=path.join(getPath("authState"),`${profileKey}.json`);
     await fs.mkdir(userDataDir, { recursive: true });
     context = await playwright.chromium.launchPersistentContext(userDataDir, {
-      headless: true, viewport: VIEWPORT, acceptDownloads: true,
+      headless: true, viewport, deviceScaleFactor:1.25, acceptDownloads: true,
       locale: "es-MX", serviceWorkers: "block"
     });
+    await restoreAuthState();
     if (requestAllowed) await context.route("**/*", async route => {
       try { if (await requestAllowed(route.request().url())) await route.continue(); else await route.abort("blockedbyclient"); }
       catch (_) { await route.abort("blockedbyclient"); }
@@ -174,7 +232,7 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     page = context.pages()[0] || await context.newPage();
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
-        try { safeUrl(frame.url(), allowedOrigin); } catch (error) { emit("error", { message: error.message }); void page.goBack().catch(() => {}); }
+        try { safeUrl(frame.url(), allowedOrigin);scheduleAuthPersist(); } catch (error) { emit("error", { message: error.message }); void page.goBack().catch(() => {}); }
       }
     });
     await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -185,12 +243,26 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
 
   async function close(_payload, actor, internal = false) {
     clearInterval(captureTimer); captureTimer = null;
+    clearTimeout(authPersistTimer);authPersistTimer=null;
+    await stopScreencast();
+    await persistAuthState().catch(()=>{});
     if (context) await context.close().catch(() => {});
     approvedPlanHash = ""; completedOperations.clear();
     context = null; page = null; streamPage=null; paused = false; cancelled = false;
     if (!internal) audit("browser.closed", actor);
-    ownerUid = ""; allowedOrigin = "";
+    ownerUid = ""; allowedOrigin = "";authStateFile="";
     return { closed: true };
+  }
+
+  async function resize(payload,actor){
+    requireSession(actor);
+    const next=requestedViewport(payload.viewport);
+    if(next.width===viewport.width&&next.height===viewport.height)return {viewport:{...viewport},unchanged:true};
+    const activeSpec=screencastSpec;
+    if(activeSpec)await stopScreencast({preserveSpec:true});
+    viewport=next;await page.setViewportSize(viewport);
+    if(activeSpec)await startScreencast(activeSpec);
+    return snapshot("resize");
   }
 
   async function navigate(payload, actor) {
@@ -206,7 +278,7 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     return snapshot("navigation");
   }
 
-  async function input(payload, actor) {
+  async function applyInput(payload,actor,{capture=true}={}) {
     requireSession(actor);
     manualUntil=Date.now()+4000;
     const events=payload.kind==="batch"?payload.events:[payload];
@@ -220,8 +292,10 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     }
     paused = true;
     emit("status", { state: "paused", reason: "manual-control" });
-    return snapshot("manual-input");
+    return capture?snapshot("manual-input"):{accepted:true,at:Date.now()};
   }
+  async function input(payload,actor){return applyInput(payload,actor,{capture:true});}
+  async function realtimeInput(payload,actor){return applyInput(payload,actor,{capture:false});}
 
   async function inspect(_payload, actor) {
     requireSession(actor);
@@ -241,7 +315,7 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     }
     const courseUrl=courseView==="target"?targetUrl:modelUrl;
     const inventory=await collectTabbedCourse(page,courseUrl||page.url(),{
-      cancelled:()=>cancelled,progress:message=>emit("status",{state:"inspecting",message}),snapshot:()=>snapshot("reading-tab")
+      cancelled:()=>cancelled,progress:message=>emit("status",{state:"inspecting",message}),snapshot:()=>snapshot("reading-tab"),scope:String(_payload.scope||"").slice(0,120)
     });
     if (!inventory.sections.length) {
       await snapshot("course-unavailable");
@@ -323,7 +397,7 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
       return {text:(content.textContent||"").trim().slice(0,6000),tag:content.tagName,
         activityId:activity?.getAttribute("data-id")||activity?.id||"",
         styles:{font:s.fontFamily,size:s.fontSize,color:s.color,lineHeight:s.lineHeight,weight:s.fontWeight}};
-    },{region,viewport:VIEWPORT});
+    },{region,viewport});
     paused=true;
     return {...result,region,url:page.url(),title:await page.title(),capturedAt:new Date().toISOString()};
   }
@@ -571,14 +645,40 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
     return { action: "uploaded", title: asset.title || asset.name || path.basename(filePath) };
   }
 
+  async function privateAttachment(objectPath,actor){
+    if(!String(objectPath).startsWith(`sallyBrown/${actor.uid}/`))throw Error("El archivo no pertenece al usuario autenticado.");
+    const url=`https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/${encodeURIComponent(objectPath)}?alt=media`;
+    const response=await fetch(url,{headers:{authorization:`Bearer ${actor.idToken}`},redirect:"error",signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw Error("No se pudo recuperar el archivo privado aprobado.");
+    const chunks=[];let size=0;
+    for await(const chunk of response.body){size+=chunk.length;if(size>30*1024*1024)throw Error("El adjunto supera 30 MB.");chunks.push(chunk);}
+    const safeName=path.basename(objectPath).replace(/[^a-zA-Z0-9._-]+/g,"_");
+    const file=path.join(getPath("temp"),`sally-workflow-${Date.now()}-${safeName}`);await fs.writeFile(file,Buffer.concat(chunks),{flag:"wx",mode:0o600});return file;
+  }
+
+  async function describePage(payload,actor){
+    requireSession(actor);await reauthorize(actor.idToken);
+    const url=safeUrl(payload.url||page.url(),allowedOrigin);await page.goto(url.href,{waitUntil:"domcontentloaded",timeout:45000});
+    if(await page.locator('input[type="password"], iframe[src*="captcha" i]').count())throw Error("Completa la autenticación o CAPTCHA manualmente antes de continuar.");
+    const description=await page.locator("#region-main, main, [role='main']").first().evaluate(root=>{
+      const text=node=>String(node?.textContent||"").replace(/\s+/g," ").trim().slice(0,300);
+      const controls=[...root.querySelectorAll("button,a[href],input:not([type='hidden']):not([type='password']),select,textarea")].slice(0,300).map(node=>({
+        tag:node.tagName.toLowerCase(),role:node.getAttribute("role")||"",label:text(node.labels?.[0])||node.getAttribute("aria-label")||node.getAttribute("placeholder")||text(node),type:node.getAttribute("type")||"",name:node.getAttribute("name")||"",disabled:Boolean(node.disabled)
+      })).filter(item=>item.label&&!/password|token|secret|captcha|contraseña/i.test(`${item.label} ${item.name}`));
+      return {heading:text(root.querySelector("h1")),text:text(root).slice(0,8000),controls};
+    });
+    await snapshot("inspection");return {url:page.url(),title:await page.title(),...description};
+  }
+
   async function execute(payload, actor) {
     requireSession(actor);
     const plan = Array.isArray(payload.plan) ? payload.plan : [];
     const hash = createHash("sha256").update(JSON.stringify(plan)).digest("hex");
     if (!approvedPlanHash || hash !== approvedPlanHash) throw new Error("El plan cambió y requiere una nueva aprobación.");
-    const destination = safeUrl(payload.targetUrl || targetUrl, allowedOrigin);
-    if (sameCourse(destination.href,modelUrl)) throw new Error("El curso modelo es de referencia. Selecciona otro curso destino.");
-    if (plan.some(op => op.type !== "inspect_course" && safeUrl(op.target, allowedOrigin).href !== destination.href))
+    const destination = safeUrl(payload.targetUrl || targetUrl || page.url(), allowedOrigin);
+    if (modelUrl&&sameCourse(destination.href,modelUrl)) throw new Error("El curso modelo es de referencia. Selecciona otro curso destino.");
+    const administrative=new Set(["create_or_update_course","create_meta_link"]);
+    if (plan.some(op => op.type !== "inspect_course" && !administrative.has(op.type) && safeUrl(op.target, allowedOrigin).href !== destination.href))
       throw new Error("El destino cambió después de aprobar el plan.");
     targetUrl = destination.href;
     paused = false; cancelled = false;
@@ -593,7 +693,7 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
       if (id && completedOperations.has(id)) { results.push({ id, status: "skipped" }); continue; }
       emit("operation", { id, type: operation.type, status: "running" });
       await reauthorize(actor.idToken);
-      if (operation.type !== "inspect_course") {
+      if (operation.type !== "inspect_course"&&!administrative.has(operation.type)) {
         if (!targetUrl) throw new Error("Falta el curso destino.");
         if (courseView !== "target") {
           await page.goto(targetUrl, {waitUntil:"domcontentloaded"});
@@ -606,6 +706,14 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
       else if (operation.type === "create_or_update_resource") result = await createOrUpdateResource(operation);
       else if (operation.type === "upload_asset") result = await uploadAsset(operation);
       else if (operation.type === "create_quiz") result = await createQuiz(operation);
+      else if(operation.type==="create_or_update_course")result=await createOrUpdateCourse(page,allowedOrigin,operation);
+      else if(operation.type==="create_moodle_module")result=await createGenericModule(page,operation,{openActivityChooser,chooseActivity,submitVisibleForm,assistField:computerUse.available?details=>computerUse.assistField(page,details):null});
+      else if(operation.type==="create_meta_link")result=await createMetaLink(page,allowedOrigin,operation);
+      else if(operation.type==="browser_workflow"){
+        const temporary=[];
+        try{result=await executeBrowserWorkflow(page,allowedOrigin,operation,{resolveUpload:async objectPath=>{const file=await privateAttachment(objectPath,actor);temporary.push(file);return file;}});}
+        finally{await Promise.all(temporary.map(file=>fs.unlink(file).catch(()=>{})));}
+      }
       else if (operation.type === "create_quiz_description") {
         if(!(process.env.SALLY_CERTIFIED_COURSES||"").split(",").includes(targetUrl))throw Error("Curso no certificado para edición de preguntas.");
         result=await createDescription(page,operation,{courseUrl:targetUrl,authorize:()=>reauthorize(actor.idToken),fillHtml:async html=>{
@@ -624,8 +732,12 @@ function createSallyBrownController({ sendEvent, getPath = () => require("node:o
   }
 
   return {
-    authorize, availability, start, close, navigate, input, inspect, selection, approve, execute, checkpoint,
+    authorize, availability, start, close, navigate, resize, input, realtimeInput, inspect, selection, approve, execute, checkpoint,startScreencast,stopScreencast,
+    importUsersCsv:async(payload,actor)=>{requireSession(actor);if(!payload?.csv)throw Error("Falta el CSV aprobado.");const file=path.join(getPath("temp"),`sally-users-${Date.now()}.csv`);await fs.writeFile(file,payload.csv,{flag:"wx",mode:0o600});try{return await importUsersCsv(page,allowedOrigin,payload.csv,file);}finally{await fs.unlink(file).catch(()=>{});}},
+    findUsers:async(payload,actor)=>{requireSession(actor);await reauthorize(actor.idToken);await page.goto(new URL("/admin/user.php",allowedOrigin).href,{waitUntil:"domcontentloaded",timeout:30000});const query=String(payload.query||"").trim();if(query){const field=page.locator("input[name='search'], input[type='search']").first();if(await field.count()){await field.fill(query);await field.press("Enter");await page.waitForLoadState("domcontentloaded").catch(()=>{});}}const users=await page.locator("table tbody tr").evaluateAll(rows=>rows.slice(0,50).map(row=>({text:(row.textContent||"").replace(/\s+/g," ").trim()})));return {query,users};},
+    inspectRoles:async(_payload,actor)=>{requireSession(actor);await reauthorize(actor.idToken);await page.goto(new URL("/admin/roles/manage.php",allowedOrigin).href,{waitUntil:"domcontentloaded",timeout:30000});const roles=await page.locator("table tbody tr").evaluateAll(rows=>rows.map(row=>({text:(row.textContent||"").replace(/\s+/g," ").trim()})).filter(row=>row.text));return {roles};},
     observe:async(_payload,actor)=>{requireSession(actor);return snapshot("agent-observation");},
+    describePage,
     inspectQuiz:async(payload,actor)=>{requireSession(actor);safeUrl(payload.url,allowedOrigin);await reauthorize(actor.idToken);const result=await readQuiz(page,payload);await snapshot("inspection");return result;},
     readModule:async(payload,actor)=>{requireSession(actor);const u=safeUrl(payload.url,allowedOrigin);if(!/^\/mod\/[a-z]+\/view\.php$/.test(u.pathname))throw Error("Ruta de recurso no permitida.");await reauthorize(actor.idToken);await page.goto(u.href,{waitUntil:"domcontentloaded",timeout:30000});
       if(await page.locator('input[type="password"]').count())throw Error("Inicia sesión en Moodle para leer el recurso.");

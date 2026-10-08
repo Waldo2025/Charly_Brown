@@ -39,7 +39,7 @@ for (const [name, css] of [["preview", previewCss], ["export", exportCss]]) {
 }
 
 test("preview y ZIP invalidan la caché de los estilos compactos", () => {
-  assert.match(page, /scienceActivities\.css\?v=20260815-segmented-switch-v44/);
+  assert.match(page, /scienceActivities\.css\?v=20260924-production-agents-v1/);
   assert.match(source, /science-assessment-export\.css\?v=20260815-segmented-switch-v34/g);
 });
 

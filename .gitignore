@@ -96,6 +96,7 @@ scripts/.tmp-*/
 # Local QA scratch files and personal exports
 tmp/
 output/
+.sally-browser-profiles/
 
 # macOS / generated clutter
 .DS_Store

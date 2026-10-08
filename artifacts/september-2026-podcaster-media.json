@@ -1,0 +1,3059 @@
+{
+  "rows": [
+    {
+      "id": "session_3gp8dair",
+      "user": "wlopez@asc.education",
+      "title": "La entrevista Español 1 bloque 2",
+      "readyAudioJobs": 39,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 14,
+      "extraReadyAudioJobs": 25,
+      "audioKinds": {
+        "Narrador": 39
+      },
+      "rowReferenceImageSlots": 12,
+      "rowReferenceImageListItems": 12,
+      "rowReferenceImageListRows": 12,
+      "editedReferenceImages": 1,
+      "recordedReferenceEdits": 1,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_a7ba2h8x",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_dqfxisop",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_so1kk9yx",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_3fj393qy",
+      "user": "rmora@asc.education",
+      "title": "La narrativa contemporánea, Español 2, Bloque 2, Tema 1",
+      "readyAudioJobs": 43,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 31,
+      "audioKinds": {
+        "Narrador": 43
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 3,
+      "recordedReferenceEdits": 7,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_gz5hj4w2",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_4qlubc0i",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-14T18:50:10.222Z"
+        },
+        {
+          "rowId": "row_or9g242m",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-14T18:50:10.222Z"
+        }
+      ]
+    },
+    {
+      "id": "session_fr49vh6w",
+      "user": "wlopez@asc.education",
+      "title": "La monografía Español 1 Tema 2",
+      "readyAudioJobs": 36,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 24,
+      "audioKinds": {
+        "Narrador": 36
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 6,
+      "recordedReferenceEdits": 6,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_gbqaiwm3",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-17T14:00:32.110Z"
+        },
+        {
+          "rowId": "row_6w2slq76",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_v4y932a1",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-17T14:13:17.383Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-17T14:00:32.110Z"
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_uml4sxmu",
+      "user": "wlopez@asc.education",
+      "title": "La narrativa contemporánea experimenta con",
+      "readyAudioJobs": 1,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 1,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 1
+      },
+      "rowReferenceImageSlots": 1,
+      "rowReferenceImageListItems": 1,
+      "rowReferenceImageListRows": 1,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_bywo2yks",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_if4k1pmr",
+      "user": "wlopez@asc.education",
+      "title": "leer, analizar, escribir y compartir textos narrativos Español 1 Tema 3",
+      "readyAudioJobs": 39,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 27,
+      "audioKinds": {
+        "Narrador": 39
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 8,
+      "recordedReferenceEdits": 10,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_rzujqbdc",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-17T15:23:35.301Z"
+        },
+        {
+          "rowId": "row_umecllm6",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T17:51:39.358Z"
+        },
+        {
+          "rowId": "row_hlasxhth",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T17:59:31.395Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-17T15:23:35.301Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T17:51:39.358Z"
+        }
+      ]
+    },
+    {
+      "id": "session_uba5k0ip",
+      "user": "rmora@asc.education",
+      "title": "La historieta como forma narrativa, Español 2",
+      "readyAudioJobs": 15,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 3,
+      "audioKinds": {
+        "Narrador": 15
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_31nyna4m",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_k2zn5b8g",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_8vgnn7h2",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_lkzeji8d",
+      "user": "rmora@asc.education",
+      "title": "Analizar canciones como textos líricos y productos culturales",
+      "readyAudioJobs": 32,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 20,
+      "audioKinds": {
+        "Narrador": 32
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 12,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_8k4cp81h",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T16:34:53.829Z"
+        },
+        {
+          "rowId": "row_jfxgkvk2",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T16:47:53.485Z"
+        },
+        {
+          "rowId": "row_lyox26s4",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T16:53:56.755Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T16:34:53.829Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-18T16:47:53.485Z"
+        }
+      ]
+    },
+    {
+      "id": "session_mky7z3p5",
+      "user": "wlopez@asc.education",
+      "title": "creación y lectura en voz alta de poemas Español 1 Tema 4",
+      "readyAudioJobs": 38,
+      "failedAudioJobs": 1,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 26,
+      "audioKinds": {
+        "Narrador": 38
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 9,
+      "recordedReferenceEdits": 12,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_hk2z0gne",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T14:36:55.066Z"
+        },
+        {
+          "rowId": "row_t1z406qw",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T14:49:22.770Z"
+        },
+        {
+          "rowId": "row_5blcrlwd",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T15:00:43.548Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T14:36:55.066Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T14:49:22.770Z"
+        }
+      ]
+    },
+    {
+      "id": "session_ys3mrk9v",
+      "user": "rmora@asc.education",
+      "title": "La lectura dramatizada de una obra de teatro",
+      "readyAudioJobs": 32,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 20,
+      "audioKinds": {
+        "Narrador": 32
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 12,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_bch6fx0d",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T15:51:29.624Z"
+        },
+        {
+          "rowId": "row_7826rnjn",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T16:07:49.440Z"
+        },
+        {
+          "rowId": "row_onverut6",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T16:17:37.803Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T15:51:29.624Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T16:07:49.440Z"
+        }
+      ]
+    },
+    {
+      "id": "session_lfiu63j4",
+      "user": "rmora@asc.education",
+      "title": "Analizar manifestaciones poéticas dentro de un movimiento literario",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 9,
+      "recordedReferenceEdits": 9,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_zafykymm",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T18:27:40.096Z"
+        },
+        {
+          "rowId": "row_9x3acpit",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_453vhe8e",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T18:40:26.732Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-21T18:27:40.096Z"
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_7xj1taha",
+      "user": "rmora@asc.education",
+      "title": "Las obras literarias del Renacimiento",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 10,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_ka2kfld9",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T17:13:20.788Z"
+        },
+        {
+          "rowId": "row_bph65vyl",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T17:18:04.050Z"
+        },
+        {
+          "rowId": "row_ggfsun4c",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T17:22:08.804Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T17:13:20.788Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T17:18:04.050Z"
+        }
+      ]
+    },
+    {
+      "id": "session_lhe58bi9",
+      "user": "rmora@asc.education",
+      "title": "Comprender la función de los textos introductorios",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 10,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_zscgje2p",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T18:40:31.017Z"
+        },
+        {
+          "rowId": "row_aaarop9m",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T18:44:19.814Z"
+        },
+        {
+          "rowId": "row_6aatw6h0",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T18:50:08.316Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T18:40:31.017Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T18:44:19.814Z"
+        }
+      ]
+    },
+    {
+      "id": "session_id3xuppb",
+      "user": "rmora@asc.education",
+      "title": "Panel de discusión: argumentar para comprender",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 15,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_7jak3t1a",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T19:38:12.147Z"
+        },
+        {
+          "rowId": "row_zzz6vq59",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T19:53:17.773Z"
+        },
+        {
+          "rowId": "row_1phd5l1j",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T20:00:13.580Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T19:38:12.147Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-22T19:53:17.773Z"
+        }
+      ]
+    },
+    {
+      "id": "session_ruumx9sg",
+      "user": "rmora@asc.education",
+      "title": "Funciones: relaciones que cambian",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 10,
+      "recordedReferenceEdits": 10,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_9cpc57m3",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-23T17:42:19.998Z"
+        },
+        {
+          "rowId": "row_4odr9sv7",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-23T17:45:44.612Z"
+        },
+        {
+          "rowId": "row_qfjbgyq6",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-23T17:50:46.708Z"
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-23T17:42:19.998Z"
+        },
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-23T17:45:44.612Z"
+        }
+      ]
+    },
+    {
+      "id": "session_ajc35j2v",
+      "user": "wlopez@asc.education",
+      "title": "Comprender y calcular la probabilidad de eventos aleatorios",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_o2lnilnf",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_loeb17cf",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_y4tyeco0",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_g86a2ez7",
+      "user": "rmora@asc.education",
+      "title": "Sucesiones y expresiones equivalentes: descubre el patrón",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 1,
+      "recordedReferenceEdits": 1,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_fjoboy22",
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-24T18:08:46.626Z"
+        },
+        {
+          "rowId": "row_w7xwiwx3",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_gjytigcs",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "referenceRevision",
+            "referenceEditId",
+            "referenceEditHistory",
+            "createdAt",
+            "width",
+            "height",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": "2026-09-24T18:08:46.626Z"
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_0k1k0dv1",
+      "user": "rmora@asc.education",
+      "title": "Porcentajes y proporciones: relaciones que están en todas partes",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_l1hscm7p",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_57stpa8h",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_27yjwkfv",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_x6zple76",
+      "user": "rmora@asc.education",
+      "title": "Polígonos: formas, ángulos y estructuras",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_tq9gy1ph",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_fex3abpt",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_5wzj2ak2",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_967o3z99",
+      "user": "rmora@asc.education",
+      "title": "Pendiente y razón de cambio: cómo cambia una recta",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_257uc1zp",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_udqh4b9m",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_psm3qpt3",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_k6s1v6lb",
+      "user": "rmora@asc.education",
+      "title": "Sistemas de ecuaciones: modelar para resolver",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_fptn1eao",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_a8ej3r07",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_lza5fwb7",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_3qy0o5a6",
+      "user": "rmora@asc.education",
+      "title": "Ecuaciones cuadráticas: modelar para encontrar soluciones",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_sw58addu",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_a92tv0su",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_mflsralu",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_cm186i38",
+      "user": "rmora@asc.education",
+      "title": "Ecuaciones cuadráticas: de la parábola a la solución",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_uamh9ee8",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_1vc3r4e9",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_rgp3iwsk",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_zw9r60sw",
+      "user": "rmora@asc.education",
+      "title": "Parábolas: del modelo a la gráfica",
+      "readyAudioJobs": 12,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 12,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 12
+      },
+      "rowReferenceImageSlots": 10,
+      "rowReferenceImageListItems": 10,
+      "rowReferenceImageListRows": 10,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_z9dk3eld",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_alhxfxxf",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_9by7z4w0",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "session_dgcv8avs",
+      "user": "wlopez@asc.education",
+      "title": "¡Mira a tu alrededor! Podemos",
+      "readyAudioJobs": 14,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 14,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {
+        "Narrador": 14
+      },
+      "rowReferenceImageSlots": 14,
+      "rowReferenceImageListItems": 14,
+      "rowReferenceImageListRows": 14,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "row_ow5omf15",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_80w4pym4",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "row_kqid7x4d",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "localMediaCacheKey",
+            "updatedAt",
+            "localDataUrl"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "hLYPCxeqPj0m0wJkakNS",
+      "user": "wlopez@asc.education",
+      "title": "Nueva sesión",
+      "readyAudioJobs": 0,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 0,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {},
+      "rowReferenceImageSlots": 2,
+      "rowReferenceImageListItems": 2,
+      "rowReferenceImageListRows": 2,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "scene-1",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "scene-2",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    },
+    {
+      "id": "v8Kl45ENB4xhaPZdN08P",
+      "user": "wlopez@asc.education",
+      "title": "Nueva sesión",
+      "readyAudioJobs": 0,
+      "failedAudioJobs": 0,
+      "distinctRowsWithReadyAudio": 0,
+      "extraReadyAudioJobs": 0,
+      "audioKinds": {},
+      "rowReferenceImageSlots": 2,
+      "rowReferenceImageListItems": 2,
+      "rowReferenceImageListRows": 2,
+      "editedReferenceImages": 0,
+      "recordedReferenceEdits": 0,
+      "referencesUpdatedAfterCut": 0,
+      "imageSample": [
+        {
+          "rowId": "scene-1",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "rowId": "scene-2",
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ],
+      "primaryImageSample": [
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        },
+        {
+          "fields": [
+            "name",
+            "dataUrl",
+            "downloadUrl",
+            "storagePath",
+            "mimeType",
+            "type",
+            "updatedAt"
+          ],
+          "source": "",
+          "kind": "",
+          "editType": "",
+          "generatedAt": "",
+          "createdAt": ""
+        }
+      ]
+    }
+  ]
+}

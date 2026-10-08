@@ -13,7 +13,7 @@
     <link rel="stylesheet" data-cache-href="header.css">
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-    <link rel="stylesheet" data-cache-href="PigPenCreator.css?ui=20260917-presets-v105">
+    <link rel="stylesheet" data-cache-href="PigPenCreator.css?ui=20261002-manual-plantilla-v106">
 </head>
 <body data-page="PigPenCreator.html" class="cb-main-layout er-shell">
     <div id="pigpenBootSpinner" class="pigpen-boot-spinner" aria-live="polite" aria-label="Cargando PigPen Escape Room Creator">
@@ -438,10 +438,16 @@
                                 </div>
 
                                 <div class="er-brief-footer">
-                                    <button type="submit" id="btnGenerarBottom" class="er-button er-brief-generate-button" aria-label="Generar escape room">
-                                        <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
-                                        <span>Generar escape room</span>
-                                    </button>
+                                    <div class="er-brief-submit-actions">
+                                        <button type="submit" id="btnGenerarBottom" class="er-button er-brief-generate-button" aria-label="Generar escape room">
+                                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                            <span>Generar escape room</span>
+                                        </button>
+                                        <button type="button" id="btnCrearPlantilla" class="er-button er-button-secondary er-brief-template-button" aria-label="Crear plantilla vacía del escape room">
+                                            <i class="fas fa-file-circle-plus" aria-hidden="true"></i>
+                                            <span>Crear Plantilla</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
                         </aside>
@@ -720,16 +726,17 @@
                             <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
                         </select>
                     </label>
-                    <p class="er-field-help" id="erObjectiveModelHelp">Planifica, materializa y repara únicamente las salas pendientes.</p>
+                    <p class="er-field-help" id="erObjectiveModelHelp">Planifica, materializa y repara únicamente las salas pendientes. El modelo del plan gratuito de AI Studio es el que se usa por defecto, con ahorro activado o desactivado; un modelo de cobro solo se usa si lo eliges aquí.</p>
                     </div>
                     <div class="er-model-role-card">
                     <label class="er-field">
                         <span>Modelo de imágenes</span>
                         <select id="imagenModeloSelect" aria-describedby="erImageModelHelp">
+                            <option value="cloudflare-flux-1-schnell">Cloudflare Flux 1 Schnell · plan gratuito, sin costo</option>
                             <option value="gemini-3.1-flash-image" selected>Gemini 3.1 Flash Image</option>
                         </select>
                     </label>
-                    <p class="er-field-help" id="erImageModelHelp">Crea solo los recursos visuales que todavía falten.</p>
+                    <p class="er-field-help" id="erImageModelHelp">Crea solo los recursos visuales que todavía falten. Cuando el proxy confirma la bolsa gratuita de Cloudflare, se usa ese proveedor por defecto; un modelo de cobro solo se usa si lo eliges aquí.</p>
                     </div>
                     </div>
                     <p id="geminiModelCatalogStatus" class="er-field-help" role="status" aria-live="polite">Los modelos disponibles se consultarán al abrir esta configuración.</p>
@@ -1078,7 +1085,7 @@
         <div class="modal-footer"><button type="button" class="er-button er-button-ghost" data-bs-dismiss="modal">Cerrar</button><button type="button" class="er-button" id="erTransferOpenDestination" hidden>Abrir en destino</button><button type="submit" class="er-button" id="erTransferSubmit">Confirmar</button></div>
       </form></div>
     </div>
-    <script type="module" src="js/PigPenCreator.js?v=20260917-schema-caching-v364"></script>
+    <script type="module" src="js/PigPenCreator.js?v=20261006-account-presets-v380"></script>
     <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

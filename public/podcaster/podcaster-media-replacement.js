@@ -3,7 +3,9 @@ import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://w
 import { getStorage, ref, getMetadata } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
 import { buildApiUrl, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
-import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
+import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-10-01.scene-replacement-2";
+import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
+import { normalizeAssetStoragePath } from "./podcaster-authorized-asset-resolver.js?v=2026-10-05.gs-path-normalize-1";
 import { optimizeRasterImage } from "../js/escape-room-image-optimizer.mjs?v=2026-1.0.10.546";
 
 function escapeHtml(unsafe = "") {
@@ -56,11 +58,6 @@ function renderMediaCreationDate(element, media = {}) {
     });
 }
 
-function encodeHttpHeaderValue(value = "", fallback = "") {
-    const clean = String(value || fallback || "").trim() || String(fallback || "").trim();
-    return encodeURIComponent(clean);
-}
-
 function replaceFileExtension(fileName = "", extension = "webp") {
     const safeName = String(fileName || "scene-media").trim() || "scene-media";
     const stem = safeName.replace(/\.[^.]+$/, "") || "scene-media";
@@ -88,6 +85,25 @@ async function prepareSceneImageForUpload(file) {
     });
 }
 
+async function uploadSceneReplacementAsset(file, options = {}) {
+    try {
+        return await uploadPodcasterAsset(file, options);
+    } catch (error) {
+        const sessionMissing = Number(error?.status || 0) === 404
+            || /podcaster_session_not_found/.test(String(error?.message || ""));
+        if (!sessionMissing) throw error;
+
+        // A collaborator can open a locally hydrated shared session before its
+        // cloud document is present. Persist it first so the upload endpoint can
+        // authorize and place replacement images and stop-motion frames.
+        const sessionId = String(options.sessionId || "").trim();
+        if (!sessionId) throw error;
+        const runtime = requirePodcasterGenerationRuntime();
+        await runtime.saveSessionToCloud(sessionId, { render: false, silent: true });
+        return uploadPodcasterAsset(file, options);
+    }
+}
+
 let db;
 let pond = null;
 let currentEditingRowId = null;
@@ -107,6 +123,12 @@ let stopMotionBeatAnalysisPending = false;
 const STOP_MOTION_MAX_FRAMES = 60;
 const SCENE_MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
+// La biblioteca se consulta al abrir el selector; si un video termina con el
+// modal abierto hay que volver a consultarla sin cerrarlo.
+const LIBRARY_RETRY_DELAYS_MS = [1200, 2500, 5000];
+let selectorLibraryContext = { rowId: "", sessionSlug: "", revision: 0 };
+let selectorGeneratedListenerAttached = false;
+
 let els = {};
 
 function getActivePodcasterSession() {
@@ -117,7 +139,11 @@ function getActivePodcasterSession() {
 
 function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
     const rawUrl = String(downloadUrl || "").trim();
-    const cleanStoragePath = String(storagePath || "").trim();
+    // `gs://<bucket>/<ruta>` es como llegan los archivos generados. La API de
+    // assets lo recorta antes de firmar, y el controlador sólo autoriza URLs
+    // cuyo storagePath empiece con `podcaster/sessions/`; dejar el esquema en
+    // la URL persistida apaga esa autorización y produce 400/404 al cargar.
+    const cleanStoragePath = normalizeAssetStoragePath(storagePath);
     if (rawUrl && !/^(?:blob|data):/i.test(rawUrl)) return rawUrl;
     if (!cleanStoragePath) return "";
     return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
@@ -125,7 +151,7 @@ function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
 
 function resolveReplacementPreviewUrl(downloadUrl = "", storagePath = "") {
     const rawUrl = String(downloadUrl || "").trim();
-    const cleanStoragePath = String(storagePath || "").trim();
+    const cleanStoragePath = normalizeAssetStoragePath(storagePath);
     if (cleanStoragePath) {
         return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
     }
@@ -296,6 +322,10 @@ function initFirebase() {
 function initElements() {
     els = {
         modal: document.getElementById('podcastSceneVideoSelectorModal'),
+        formatTab: document.getElementById('sceneReplacementFormatTab'),
+        sourceTab: document.getElementById('sceneReplacementSourceTab'),
+        formatPanel: document.getElementById('sceneReplacementFormatPanel'),
+        sourcePanel: document.getElementById('sceneReplacementSourcePanel'),
         uploadTabBtn: document.getElementById('sceneVideoTabUploadBtn'),
         libraryTabBtn: document.getElementById('sceneVideoTabGeneratedBtn'),
         othersTabBtn: document.getElementById('sceneVideoTabOthersBtn'),
@@ -303,6 +333,8 @@ function initElements() {
         uploadStatus: document.getElementById('sceneMediaUploadStatus'),
         uploadError: document.getElementById('sceneMediaUploadError'),
         videoUploadHelp: document.getElementById('sceneVideoUploadHelp'),
+        referenceImageOptions: document.getElementById('sceneReferenceImageOptions'),
+        referenceImageGrid: document.getElementById('sceneReferenceImageGrid'),
         libraryContainer: document.getElementById('sceneVideoSelectorLibraryContainer'),
         confirmBtn: document.getElementById('confirmSceneMediaReplacementBtn'),
         movementSettings: document.getElementById('image-movement-settings'),
@@ -336,6 +368,18 @@ function isStopMotionMode() {
 
 function isVideoReplacementMode() {
     return replacementImageMode === "video";
+}
+
+function setReplacementSectionTab(section = "format") {
+    const showFormat = section !== "source";
+    if (els.formatPanel) els.formatPanel.hidden = !showFormat;
+    if (els.sourcePanel) els.sourcePanel.hidden = showFormat;
+    [[els.formatTab, showFormat], [els.sourceTab, !showFormat]].forEach(([button, selected]) => {
+        if (!button) return;
+        button.classList.toggle("is-active", selected);
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+    });
 }
 
 function resolveSceneVideoFileKind(file = null) {
@@ -517,7 +561,7 @@ async function resolveStopMotionBackgroundAudio() {
         && item?.muted !== true
     )) || sourceItems.find((item) => item?.muted !== true) || null;
     const media = segment || config;
-    const storagePath = String(media?.storagePath || "").trim();
+    const storagePath = normalizeAssetStoragePath(media?.storagePath);
     const directSource = String(
         media?.sourceUrl
         || media?.downloadUrl
@@ -608,6 +652,18 @@ function normalizeStopMotionFramesForPersistence() {
     }));
 }
 
+// Las duraciones relativas que el usuario ajustó en el chip viajan como peso por
+// foto. Al reordenar en la charola el peso se mueve con su imagen, así confirmar
+// el reemplazo no borra el ritmo editado a mano.
+function normalizeStopMotionFrameWeightsForPersistence() {
+    const weights = getReadyStopMotionFrames().slice(0, STOP_MOTION_MAX_FRAMES)
+        .map((frame) => Number(frame?.weight));
+    if (weights.length < 2 || !weights.every((weight) => Number.isFinite(weight) && weight > 0)) return null;
+    const sum = weights.reduce((total, value) => total + value, 0);
+    if (!(sum > 0)) return null;
+    return weights.map((weight) => weight / sum);
+}
+
 function updateStopMotionConfirmState() {
     if (!els.confirmBtn || !isStopMotionMode()) return;
     const readyCount = getReadyStopMotionFrames().length;
@@ -694,7 +750,7 @@ function resetStopMotionSelection() {
 function normalizeExistingSceneMedia(rowId = "", session = null) {
     const key = String(rowId || "").trim();
     const activeSession = session || getActivePodcasterSession();
-    const clip = activeSession?.dialogueVideoMap?.[key] || null;
+    const clip = resolvePersistedSceneClip(key, activeSession);
     if (!clip || typeof clip !== "object") return null;
     const downloadUrl = String(
         clip.downloadUrl
@@ -718,6 +774,67 @@ function normalizeExistingSceneMedia(rowId = "", session = null) {
         downloadUrl,
         storagePath
     };
+}
+
+function getSceneReferenceImages(session, rowId) {
+    const fromApi = window.PodcasterMediaReferenceApi?.getRowReferenceImageList?.(session, rowId);
+    if (Array.isArray(fromApi)) return fromApi;
+    const list = session?.rowReferenceImageListMap?.[rowId];
+    return Array.isArray(list) && list.length ? list : session?.rowReferenceImageMap?.[rowId] ? [session.rowReferenceImageMap[rowId]] : [];
+}
+
+function renderSceneReferenceImages(rowId = "", session = null) {
+    const container = els.referenceImageOptions;
+    const grid = els.referenceImageGrid;
+    if (!container || !grid) return;
+    grid.replaceChildren();
+    const references = getSceneReferenceImages(session || getActivePodcasterSession(), rowId);
+    container.hidden = replacementImageMode !== "single" || !references.length;
+    if (container.hidden) return;
+    references.forEach((reference, index) => {
+        const preview = String(window.PodcasterMediaReferenceApi?.resolveReferenceImagePreviewUrl?.(reference)
+            || reference?.downloadUrl || reference?.dataUrl || "").trim();
+        const card = document.createElement("div");
+        card.className = "pme-reference-image-card";
+        const image = document.createElement("img");
+        image.alt = String(reference?.name || `Referencia ${index + 1}`);
+        if (preview) loadReplacementPreviewElement(image, preview, "image");
+        const info = document.createElement("div");
+        info.className = "pme-reference-image-info";
+        const name = document.createElement("strong");
+        name.textContent = String(reference?.name || `Referencia ${index + 1}`);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "pme-btn pme-btn-ghost";
+        button.textContent = "Usar como escena";
+        button.addEventListener("click", async () => {
+            const revision = replacementModalRevision;
+            const sessionId = String(getActivePodcasterSession()?.id || "");
+            button.disabled = true;
+            try {
+                await window.PodcasterMediaReferenceApi?.waitForRowReferenceUploads?.(rowId);
+                await window.PodcasterMediaReferenceApi?.hydrateSessionReferenceMedia?.(getActivePodcasterSession());
+                const latest = getActivePodcasterSession();
+                if (revision !== replacementModalRevision || !latest || String(latest.id || "") !== sessionId || currentEditingRowId !== rowId) return;
+                const currentReferences = getSceneReferenceImages(latest, rowId);
+                const referenceKey = String(reference?.storagePath || reference?.downloadUrl || reference?.localMediaCacheKey || reference?.id || "");
+                const selected = currentReferences.find(item => referenceKey && referenceKey === String(item?.storagePath || item?.downloadUrl || item?.localMediaCacheKey || item?.id || "")) || currentReferences[index];
+                if (!selected) throw new Error("La imagen de referencia ya no está disponible.");
+                if (typeof window.PodcasterSceneMedia?.applyReference !== "function") throw new Error("El editor de escenas aún no está listo.");
+                const saved = await window.PodcasterSceneMedia.applyReference(latest, rowId, selected);
+                if (saved?.status !== "applied") throw new Error("No se pudo guardar la imagen de referencia en la sesión.");
+                window.PodcasterUI?.renderPodcastVideoTimeline?.(getActivePodcasterSession(), { force: true, reason: "structure" });
+                document.getElementById("closeSceneVideoSelectorBtn")?.click();
+            } catch (error) {
+                alert(error?.message || "No se pudo usar la imagen de referencia.");
+            } finally {
+                button.disabled = false;
+            }
+        });
+        info.append(name, button);
+        card.append(image, info);
+        grid.append(card);
+    });
 }
 
 function renderExistingSingleMedia(media = existingSingleMedia) {
@@ -800,13 +917,53 @@ function hydrateMovementControls(rowId = "", session = null) {
     updateMovementSpeedLabel(speed);
 }
 
+// El clip de una escena puede llegar en cualquiera de las formas de sesión que
+// Snoopy y el reproductor ya aceptan. Leer sólo session.dialogueVideoMap dejaba
+// el modal vacío al reabrir una secuencia que venía de la nube o de otro hilo.
+function resolvePersistedSceneClip(rowId = "", session = null) {
+    const key = String(rowId || "").trim();
+    const activeSession = session || getActivePodcasterSession();
+    if (!key || !activeSession) return null;
+    return [
+        activeSession?.dialogueVideoMap?.[key],
+        activeSession?.session?.dialogueVideoMap?.[key],
+        activeSession?.podcastStudioUiState?.dialogueVideosByRowId?.[key],
+        activeSession?.script?.dialogueVideoMap?.[key]
+    ].find((clip) => clip && typeof clip === "object") || null;
+}
+
+// La entrada de timeline es la misma fuente que pinta las divisiones del chip:
+// si ahí se ve la secuencia, el modal también tiene que poder rehidratarla.
+function resolvePersistedStopMotion(rowId = "", session = null) {
+    const key = String(rowId || "").trim();
+    const activeSession = session || getActivePodcasterSession();
+    if (!key || !activeSession) return null;
+    const normalize = window.PodcasterStopMotion?.normalizeStopMotion;
+    const candidates = [
+        activeSession?.dialogueVideoMap?.[key]?.stopMotion,
+        activeSession?.session?.dialogueVideoMap?.[key]?.stopMotion,
+        activeSession?.podcastStudioUiState?.dialogueVideosByRowId?.[key]?.stopMotion,
+        activeSession?.script?.dialogueVideoMap?.[key]?.stopMotion
+    ];
+    const entries = typeof window.buildTimelineRuntimeEntries === "function"
+        ? (window.buildTimelineRuntimeEntries(activeSession) || [])
+        : [];
+    const entry = entries.find((item) => String(item?.rowId || "").trim() === key) || null;
+    if (entry) candidates.push(entry?.video?.stopMotion || entry?.stopMotion || entry?.clip?.stopMotion);
+    const usable = candidates.filter(Boolean);
+    if (typeof normalize === "function") {
+        return usable.find((raw) => normalize(raw)) || null;
+    }
+    return usable[0] || null;
+}
+
 function hydrateExistingStopMotion(rowId = "", session = null) {
     const key = String(rowId || "").trim();
     const activeSession = session || getActivePodcasterSession();
-    const persistedStopMotion = activeSession?.dialogueVideoMap?.[key]?.stopMotion || null;
-    const persistedFrames = Array.isArray(persistedStopMotion?.frames)
-        ? persistedStopMotion.frames
-        : [];
+    const persistedStopMotion = window.PodcasterStopMotion?.normalizeStopMotion?.(
+        resolvePersistedStopMotion(key, activeSession)
+    ) || null;
+    const persistedFrames = persistedStopMotion?.frames || [];
     if (persistedFrames.length < 2) return false;
 
     existingSingleMedia = normalizeExistingSceneMedia(key, activeSession);
@@ -829,14 +986,16 @@ function hydrateExistingStopMotion(rowId = "", session = null) {
                 mimeType: String(frame?.mimeType || "image/webp").trim().toLowerCase(),
                 downloadUrl,
                 storagePath,
+                ...(Number(persistedStopMotion?.frameWeights?.[index]) > 0
+                    ? { weight: Number(persistedStopMotion.frameWeights[index]) }
+                    : {}),
                 previewUrl: resolveReplacementPreviewUrl(downloadUrl, storagePath),
                 status: downloadUrl || storagePath ? "ready" : "error"
             };
         });
-    const normalizedPersisted = window.PodcasterStopMotion?.normalizeStopMotion?.(persistedStopMotion) || null;
-    stopMotionTimingMode = normalizedPersisted?.timingMode === "music-beat" ? "music-beat" : "fit-scene";
+    stopMotionTimingMode = persistedStopMotion?.timingMode === "music-beat" ? "music-beat" : "fit-scene";
     stopMotionBeatPositions = stopMotionTimingMode === "music-beat"
-        ? [...(normalizedPersisted?.beatPositions || [])]
+        ? [...(persistedStopMotion?.beatPositions || [])]
         : [];
     setReplacementImageMode("stop-motion");
     hydrateMovementControls(key, activeSession);
@@ -854,6 +1013,10 @@ function setReplacementImageMode(mode = "single") {
         resetStopMotionSelection();
     }
     const active = isStopMotionMode();
+    if (els.uploadContainer) {
+        els.uploadContainer.style.display = "block";
+        initFilePond();
+    }
     els.stopMotionModeButtons?.forEach((button) => {
         const selected = String(button.dataset.stopMotionMode || "") === replacementImageMode;
         button.classList.toggle("is-selected", selected);
@@ -874,6 +1037,7 @@ function setReplacementImageMode(mode = "single") {
         });
     }
     if (els.videoUploadHelp) els.videoUploadHelp.hidden = nextMode !== "video";
+    renderSceneReferenceImages(currentEditingRowId, getActivePodcasterSession());
     showSceneMediaUploadError("");
     showSceneMediaUploadStatus("");
     if (active) {
@@ -908,7 +1072,7 @@ function setReplacementImageMode(mode = "single") {
             window._selectedLibraryVideo = null;
         }
         renderExistingSingleMedia();
-        if (els.movementSettings) els.movementSettings.style.display = nextMode === "single" && existingTypeMatches ? "block" : "none";
+        if (els.movementSettings) els.movementSettings.style.display = nextMode === "single" ? "block" : "none";
         if (els.confirmBtn) {
             els.confirmBtn.disabled = false;
             els.confirmBtn.style.display = existingTypeMatches ? "inline-block" : "none";
@@ -1096,6 +1260,7 @@ function registerPodcasterMediaReplacementApi() {
         swapStageToImagePreview,
         onLibraryMediaSelected,
         openSceneVideoSelectorModal,
+        refreshSceneVideoSelectorLibrary,
         stopLibraryPreviews: stopSceneReplacementPreviews,
         isStopMotionMode,
         addStopMotionLibraryFrame
@@ -1207,11 +1372,14 @@ function initFilePond() {
                         const uploadSize = Number(uploadFile.size || 0) || 1;
                         progress(true, 0, uploadSize);
                         const isMovUpload = resolveSceneVideoFileKind(uploadFile) === "mov";
-                        const uploadResult = await uploadPodcasterAsset(uploadFile, {
+                        const uploadResult = await uploadSceneReplacementAsset(uploadFile, {
                             kind: String(uploadFile.type || "").startsWith("image/") ? "scene-image" : "scene-video",
                             sessionId: String(sessionId || "").trim(),
                             rowId: String(currentEditingRowId || "").trim(),
-                            previousStoragePath: String(uploadedStoragePath || "").trim(),
+                            // En stop motion cada imagen es un recurso nuevo: la subida
+                            // anterior no es su reemplazo y enviarla hacía borrar el archivo
+                            // de otro frame, que luego responde 404 al cargar la escena.
+                            previousStoragePath: isStopMotionMode() ? "" : String(uploadedStoragePath || "").trim(),
                             signal: controller.signal,
                             onProgress: (loaded, total) => {
                                 const safeTotal = Math.max(1, Number(total || uploadSize));
@@ -1289,6 +1457,14 @@ function initFilePond() {
                         console.error("[MediaReplacement] Exception in FilePond upload process:", err);
                         showSceneMediaUploadStatus("");
                         showSceneMediaUploadError(err?.message || "No se pudo subir el archivo.");
+                        // Las subidas van serializadas (maxParallelUploads: 1), así que estas
+                        // variables describen el archivo que acaba de fallar. Dejarlas llenas
+                        // hacía que Confirmar aplicara la subida anterior exitosa: el recurso
+                        // ya no estaba en la escena y el guardado terminaba en
+                        // "ruta de almacenamiento válida" o "archivo no está disponible".
+                        uploadedMediaUrl = null;
+                        uploadedStoragePath = null;
+                        uploadedMediaType = null;
                         if (stopMotionFrameId) {
                             stopMotionFrames = stopMotionFrames.map((frame) => (
                                 frame.id === stopMotionFrameId ? { ...frame, status: "error" } : frame
@@ -1348,6 +1524,22 @@ function getSelectedEffects() {
 function setupEventListeners() {
     if (!els.uploadTabBtn || !els.confirmBtn) return;
 
+    els.formatTab?.addEventListener("click", () => setReplacementSectionTab("format"));
+    els.sourceTab?.addEventListener("click", () => {
+        if (els.uploadTabBtn?.classList.contains("is-active")) els.libraryTabBtn?.click();
+        setReplacementSectionTab("source");
+    });
+    [els.formatTab, els.sourceTab].filter(Boolean).forEach((tab) => {
+        tab.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const next = tab === els.formatTab ? els.sourceTab : els.formatTab;
+            next?.click();
+            next?.focus();
+        });
+    });
+
+
     els.stopMotionModeButtons?.forEach((button) => {
         button.addEventListener("click", () => {
             setReplacementImageMode(button.dataset.stopMotionMode);
@@ -1381,7 +1573,7 @@ function setupEventListeners() {
         els.modal?.querySelectorAll?.(".scene-video-selector-card.is-selected").forEach((card) => card.classList.remove("is-selected"));
         renderExistingSingleMedia();
         if (els.confirmBtn) els.confirmBtn.style.display = "none";
-        if (els.movementSettings) els.movementSettings.style.display = "none";
+        if (els.movementSettings) els.movementSettings.style.display = isVideoReplacementMode() ? "none" : "block";
     });
     [
         document.getElementById("closeSceneVideoSelectorBtn"),
@@ -1411,12 +1603,13 @@ function setupEventListeners() {
         els.uploadContainer.style.display = 'block';
         els.libraryContainer.style.display = 'none';
         initFilePond();
+        setReplacementSectionTab("format");
     });
 
     const deactivateUploadTab = () => {
         els.uploadTabBtn.classList.remove('is-active');
         els.uploadTabBtn.setAttribute('aria-selected', 'false');
-        els.uploadContainer.style.display = 'none';
+        els.uploadContainer.style.display = 'block';
         els.libraryContainer.style.display = 'block';
     };
 
@@ -1445,7 +1638,9 @@ function setupEventListeners() {
         }
         const selectedLibrary = window._selectedLibraryVideo;
         const firstStopMotionFrame = stopMotionFrameRecords[0] || null;
-        const finalStoragePath = String(firstStopMotionFrame?.storagePath || uploadedStoragePath || selectedLibrary?.storagePath || '').trim();
+        const finalStoragePath = normalizeAssetStoragePath(
+            firstStopMotionFrame?.storagePath || uploadedStoragePath || selectedLibrary?.storagePath
+        );
         const mediaUrl = resolveStableReplacementMediaUrl(
             firstStopMotionFrame?.downloadUrl || uploadedMediaUrl || selectedLibrary?.downloadUrl,
             finalStoragePath
@@ -1466,8 +1661,19 @@ function setupEventListeners() {
             uploadedMediaType
         });
 
-        if (!mediaUrl || !currentEditingRowId) {
-            console.error("[MediaReplacement] Missing mediaUrl or rowId", { mediaUrl, currentEditingRowId });
+        if (!currentEditingRowId) {
+            alert("La escena cambió mientras preparabas el archivo. Abre nuevamente el selector para aplicar el recurso.");
+            return;
+        }
+        if (!mediaUrl) {
+            alert("El archivo no terminó de subirse. Reintenta la subida antes de confirmar el reemplazo.");
+            return;
+        }
+        // commitSceneMediaSelection hidrata el recurso desde Storage antes de
+        // escribir la selección: sin ruta de objeto ni URL http no hay nada que
+        // verificar y la transacción fallaría a la mitad.
+        if (!finalStoragePath && !/^https?:/i.test(mediaUrl)) {
+            alert("El archivo no quedó guardado en la nube. Vuelve a subirlo y luego confirma el reemplazo.");
             return;
         }
 
@@ -1484,6 +1690,10 @@ function setupEventListeners() {
         const targetModalRevision = replacementModalRevision;
         const context = window.PodcasterSceneMedia.capture(session, targetRowId);
         context.effects = effects;
+        // El reemplazo manual siempre es la intención más nueva del usuario: el
+        // archivo se subió en este momento. Autoriza a adoptar la revisión remota
+        // si la copia local y la de la nube divergieron para esta escena.
+        context.manualReplacement = true;
         try {
             const isImageMedia = mediaType === 'image' || mediaType.startsWith('image/');
             const mediaData = {
@@ -1502,6 +1712,7 @@ function setupEventListeners() {
                 variants: null
             };
             if (stopMotionFrameRecords.length >= 2) {
+                const frameWeights = normalizeStopMotionFrameWeightsForPersistence();
                 mediaData.stopMotion = {
                     version: 1,
                     timingMode: stopMotionTimingMode,
@@ -1509,13 +1720,14 @@ function setupEventListeners() {
                         beatPositions: stopMotionBeatPositions,
                         beatAnalysisVersion: 1
                     } : {}),
+                    ...(frameWeights ? { frameWeights } : {}),
                     frames: stopMotionFrameRecords
                 };
             }
             const application = await window.PodcasterSceneMedia.apply(context, mediaData);
             if (application.status !== "applied") throw new Error(application.reason === "selection-changed"
-                ? "Se seleccionó otro recurso durante el reemplazo. Abre nuevamente el selector para aplicar este video."
-                : "La escena o su versión ya no está disponible. El video creado sigue en la biblioteca.");
+                ? "Otra edición cambió esta escena mientras se aplicaba el reemplazo. Vuelve a abrir el selector y confirma de nuevo."
+                : "La escena o su versión ya no está disponible. El archivo creado sigue en la biblioteca.");
             if (replacementModalRevision !== targetModalRevision || currentEditingRowId !== targetRowId || window.PodcasterState?.activeSession?.id !== session.id) return;
             // Cleanup
             window._selectedLibraryVideo = null;
@@ -1556,16 +1768,31 @@ function setupEventListeners() {
         if (pond) pond.removeFiles();
         resetStopMotionSelection();
         setReplacementImageMode("single");
+        setReplacementSectionTab("format");
         if (els.modal && currentEditingRowId) {
             els.modal.dataset.rowId = currentEditingRowId;
         }
         const session = getActivePodcasterSession();
+        renderSceneReferenceImages(currentEditingRowId, session);
+        const openedRevision = replacementModalRevision;
+        Promise.resolve(window.PodcasterMediaReferenceApi?.hydrateSessionReferenceMedia?.(session)).then(() => {
+            if (openedRevision === replacementModalRevision && currentEditingRowId) {
+                renderSceneReferenceImages(currentEditingRowId, getActivePodcasterSession());
+            }
+        }).catch(() => {});
         const restoredStopMotion = hydrateExistingStopMotion(currentEditingRowId, session);
         const restoredSingleMedia = !restoredStopMotion && hydrateExistingSingleMedia(currentEditingRowId, session);
         if (!restoredStopMotion && !restoredSingleMedia) {
             hydrateMovementControls(currentEditingRowId, session);
             if (els.confirmBtn) els.confirmBtn.style.display = 'none';
-            if (els.movementSettings) els.movementSettings.style.display = 'none';
+            if (els.movementSettings) els.movementSettings.style.display = 'block';
+        }
+        if (restoredStopMotion) {
+            // La charola rehidratada vive en "Formato de escena": sin esto el modal
+            // quedaba en la pestaña de biblioteca y las fotos ya subidas no se veían.
+            setReplacementSectionTab("format");
+            els.stopMotionPanel?.scrollIntoView?.({ block: "nearest" });
+            return;
         }
         els.libraryTabBtn?.click();
     });
@@ -1583,6 +1810,7 @@ function onLibraryMediaSelected(media = null) {
     setReplacementImageMode(isImage ? "single" : "video");
     renderExistingSingleMedia(existingSingleMedia);
     if (els.movementSettings) els.movementSettings.style.display = isImage ? 'block' : 'none';
+    if (isImage) setReplacementSectionTab("format");
 
     if (els.confirmBtn && !isStopMotionMode()) els.confirmBtn.style.display = 'inline-block';
 }
@@ -1612,12 +1840,6 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
   document.dispatchEvent(new CustomEvent("podcaster:scene-media-selector-open", {
     detail: { rowId: key, triggerSource: currentReplacementRequestMeta.triggerSource }
   }));
-  if (els.sceneVideoSelectorGeneratedGrid) {
-    els.sceneVideoSelectorGeneratedGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;"><i class="fas fa-spinner fa-spin"></i> Buscando videos de esta sesión...</div>';
-  }
-  if (els.sceneVideoSelectorOthersGrid) {
-    els.sceneVideoSelectorOthersGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;"><i class="fas fa-spinner fa-spin"></i> Buscando videos de esta sesión...</div>';
-  }
   const setSceneVideoTab = (tab = "generated") => {
     const showGenerated = tab !== "others";
     if (els.sceneVideoSelectorGeneratedGrid) els.sceneVideoSelectorGeneratedGrid.hidden = !showGenerated;
@@ -1639,14 +1861,67 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     return;
   }
 
+  selectorLibraryContext = { rowId: key, sessionSlug, revision: replacementModalRevision };
+  attachSceneVideoGeneratedListener();
+  await refreshSceneVideoSelectorLibrary({ rowId: key, sessionSlug });
+}
+
+/**
+ * Vuelve a consultar la biblioteca de la sesión. Se usa al abrir el modal y también
+ * cuando Snoopy termina una escena con el modal ya abierto, para no obligar a
+ * cerrarlo y volverlo a abrir.
+ */
+async function refreshSceneVideoSelectorLibrary({ rowId = "", sessionSlug = "", expectedStoragePath = "", spinner = true } = {}) {
+  const key = String(rowId || selectorLibraryContext.rowId || "").trim();
+  const slug = String(sessionSlug || selectorLibraryContext.sessionSlug || "").trim();
+  if (!key || !slug) return { ok: false, totalVideos: 0, rowVideos: 0, expectedFound: false };
+  const revision = selectorLibraryContext.revision;
+  // Un refresco tardío no debe pintar un modal ya cerrado o de otra escena.
+  const isCurrentView = () => revision === replacementModalRevision
+    && selectorLibraryContext.rowId === key
+    && selectorLibraryContext.sessionSlug === slug
+    && els.modal?.hidden !== true
+    && String(els.modal?.dataset?.rowId || "").trim() === key;
+  const emptyResult = { ok: false, totalVideos: 0, rowVideos: 0, expectedFound: false };
+  if (spinner && els.sceneVideoSelectorGeneratedGrid) {
+    els.sceneVideoSelectorGeneratedGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;"><i class="fas fa-spinner fa-spin"></i> Buscando videos de esta sesión...</div>';
+  }
+  if (spinner && els.sceneVideoSelectorOthersGrid) {
+    els.sceneVideoSelectorOthersGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;"><i class="fas fa-spinner fa-spin"></i> Buscando videos de esta sesión...</div>';
+  }
+  let data = { videos: [] };
+  const maxAttempts = expectedStoragePath ? LIBRARY_RETRY_DELAYS_MS.length + 1 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    data = await authFetchJson(`/api/podcaster/sessions/list-videos?sessionSlug=${encodeURIComponent(slug)}`)
+      .catch((error) => ({ videos: [], fetchError: error }));
+    const alreadyIndexed = expectedStoragePath
+      && (Array.isArray(data?.videos) ? data.videos : [])
+        .some((item) => String(item?.storagePath || item?.path || "").trim() === expectedStoragePath);
+    if (alreadyIndexed || attempt >= maxAttempts - 1) break;
+    // Storage tarda algo en indexar el clip que el motor local acaba de subir.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, LIBRARY_RETRY_DELAYS_MS[attempt]));
+    if (!isCurrentView()) return { ...emptyResult, stale: true };
+  }
+  if (!isCurrentView()) return { ...emptyResult, stale: true };
+  const session = getActivePodcasterSession();
+
   try {
-    const data = await authFetchJson(`/api/podcaster/sessions/list-videos?sessionSlug=${encodeURIComponent(sessionSlug)}`);
     const rawVideos = Array.isArray(data?.videos) ? data.videos : (Array.isArray(data) ? data : []);
-    const allVideos = rawVideos.filter((v) => {
+    const currentSceneVideo = normalizeExistingSceneMedia(key, session);
+    const videoCandidates = currentSceneVideo?.type === "video"
+      ? [currentSceneVideo, ...rawVideos]
+      : rawVideos;
+    const seenVideoKeys = new Set();
+    const allVideos = videoCandidates.filter((v) => {
       const path = String(v?.storagePath || v?.path || "").toLowerCase();
       const mime = String(v?.mimeType || v?.type || "").toLowerCase();
       if (path.includes("/references/") || path.includes("/reference/")) return false;
       if (mime.startsWith("image/") && !mime.startsWith("video/")) return false;
+      const identity = String(v?.storagePath || v?.path || v?.downloadUrl || v?.videoDownloadUrl || v?.url || "").trim();
+      if (identity && seenVideoKeys.has(identity)) return false;
+      if (identity) seenVideoKeys.add(identity);
       return true;
     });
 
@@ -1654,6 +1929,7 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     const hasRowIdInText = (value = "") => String(value || "").trim().toLowerCase().includes(normalizedRowId);
     const rowVideos = allVideos.filter((v) => {
       if (!normalizedRowId) return false;
+      if (String(v?.rowId || "").trim().toLowerCase() === normalizedRowId) return true;
       return hasRowIdInText(v.path) || hasRowIdInText(v.storagePath) || hasRowIdInText(v.rowFolder) || hasRowIdInText(v.name) || hasRowIdInText(v.downloadUrl);
     });
 
@@ -1747,10 +2023,40 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
       return card;
     };
 
+    const buildLibraryNotice = (messageHtml) => {
+      const notice = document.createElement("div");
+      notice.className = "pme-replacement-loading";
+      notice.innerHTML = messageHtml;
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "pme-tab-btn";
+      retryBtn.textContent = "Reintentar";
+      retryBtn.addEventListener("click", () => {
+        refreshSceneVideoSelectorLibrary({ rowId: key, sessionSlug: slug });
+      });
+      notice.appendChild(document.createElement("br"));
+      notice.appendChild(retryBtn);
+      return notice;
+    };
+
     if (els.sceneVideoSelectorGeneratedGrid) {
       els.sceneVideoSelectorGeneratedGrid.innerHTML = "";
       if (!sortedRowVideos.length) {
-        els.sceneVideoSelectorGeneratedGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;">No hay videos generados para esta escena.</div>';
+        if (data?.fetchError) {
+          els.sceneVideoSelectorGeneratedGrid.appendChild(buildLibraryNotice(
+            `No se pudo cargar la biblioteca: ${escapeHtml(data.fetchError.message || "error de conexión")}`
+          ));
+        } else if (!rawVideos.length) {
+          // La biblioteca respondió vacía: puede que la lista haya fallado en
+          // silencio, así que no afirmamos que no exista el video.
+          els.sceneVideoSelectorGeneratedGrid.appendChild(buildLibraryNotice(
+            `Busqué en la sesión ${escapeHtml(slug)} y la biblioteca devolvió 0 videos. Si Servidor Snoopy ya lo generó, espera a que termine o usa la pestaña «Subir archivo» con el clip de la consola.`
+          ));
+        } else {
+          els.sceneVideoSelectorGeneratedGrid.appendChild(buildLibraryNotice(
+            `Ninguno de los ${rawVideos.length} videos de la sesión pertenece a esta escena.`
+          ));
+        }
       } else {
         sortedRowVideos.forEach((video) => els.sceneVideoSelectorGeneratedGrid.appendChild(renderCard(video)));
       }
@@ -1758,11 +2064,28 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     if (els.sceneVideoSelectorOthersGrid) {
       els.sceneVideoSelectorOthersGrid.innerHTML = "";
       if (!sortedOtherVideos.length) {
-        els.sceneVideoSelectorOthersGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;">No hay otros videos en Storage para esta sesión.</div>';
+        els.sceneVideoSelectorOthersGrid.innerHTML = data?.fetchError
+          ? '<div class="pme-replacement-loading">No se pudieron cargar los videos de otras escenas.</div>'
+          : '<div class="pme-replacement-loading">No hay otros videos en esta sesión.</div>';
       } else {
         sortedOtherVideos.forEach((video) => els.sceneVideoSelectorOthersGrid.appendChild(renderCard(video)));
       }
     }
+    const expectedFound = expectedStoragePath
+      ? sortedRowVideos.some((video) => String(video?.storagePath || video?.path || "").trim() === expectedStoragePath)
+      : false;
+    logSceneReplacement("library:rendered", key, {
+      sessionSlug: slug,
+      rowVideos: sortedRowVideos.length,
+      expectedStoragePath: expectedStoragePath || "",
+      expectedFound
+    });
+    return {
+      ok: !data?.fetchError,
+      totalVideos: rawVideos.length,
+      rowVideos: sortedRowVideos.length,
+      expectedFound
+    };
   } catch (error) {
     if (els.sceneVideoSelectorGeneratedGrid) {
       els.sceneVideoSelectorGeneratedGrid.innerHTML = `<div style="text-align: center; grid-column: 1 / -1; padding: 2rem; color: var(--error-color);">Error: ${escapeHtml(error.message)}</div>`;
@@ -1770,7 +2093,26 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     if (els.sceneVideoSelectorOthersGrid) {
       els.sceneVideoSelectorOthersGrid.innerHTML = "";
     }
+    return { ok: false, totalVideos: 0, rowVideos: 0, expectedFound: false, error };
   }
+}
+
+function attachSceneVideoGeneratedListener() {
+  if (selectorGeneratedListenerAttached) return;
+  selectorGeneratedListenerAttached = true;
+  document.addEventListener("podcaster:scene-video-generated", (event) => {
+    const detail = event?.detail || {};
+    const key = String(detail.rowId || "").trim();
+    if (!key || !els.modal || els.modal.hidden) return;
+    if (String(els.modal.dataset.rowId || "").trim() !== key) return;
+    const sessionId = String(detail.sessionId || "").trim();
+    if (sessionId && selectorLibraryContext.sessionSlug && sessionId !== selectorLibraryContext.sessionSlug) return;
+    refreshSceneVideoSelectorLibrary({
+      rowId: key,
+      sessionSlug: selectorLibraryContext.sessionSlug,
+      expectedStoragePath: String(detail.storagePath || "").trim()
+    });
+  });
 }
 
 function initPodcasterMediaReplacementDom() {

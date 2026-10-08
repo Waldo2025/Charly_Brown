@@ -7,10 +7,10 @@ import {
 } from "./attachments.js?v=2026-09-07.9";
 import { uploadGeneratedResults } from "./assets-store.js";
 import { renderAttachmentTray, renderChatFeed } from "./chat-renderer.js?v=2026-09-08.20";
-import { bindComposer, clearComposer, setComposerDisabled } from "./composer.js?v=2026-09-07.14";
+import { bindComposer, clearComposer, formatMatrixAsMarkdownTable, renderComposerCapsules, setComposerDisabled, syncComposerModeMenu } from "./composer.js?v=2026-09-07.14";
 import { IMAGE_CREATOR_SESSION_TITLE } from "./constants.js?v=2026-09-07.1";
 import { getImageCreatorDom } from "./dom.js?v=2026-09-07.15";
-import { initializeOptionsPanel, applyOptionsToPanel, readOptionsFromPanel, syncOptionsPresentation } from "./options-panel.js?v=2026-09-11.1";
+import { initializeOptionsPanel, initializeFloatingFormatPanel, syncFloatingFormatPanel, applyOptionsToPanel, readOptionsFromPanel, syncOptionsPresentation } from "./options-panel.js?v=2026-09-11.1";
 import { generateImagesViaGemini } from "./api.js?v=2026-09-11.1";
 import { resolveImageCreatorMode } from "./payloads.js?v=2026-09-14.1";
 import { downloadPreparedBlob, prepareMetadataFreeImage } from "./image-download.js?v=2026-09-07.1";
@@ -19,12 +19,14 @@ import { renderSessionList } from "./sidebar.js";
 import { createImageCreatorState, deriveSessionTitleFromPrompt } from "./state.js?v=2026-09-07.13";
 import { buildLocalizedEditPrompt, buildLocalizedTextEditPrompt, buildTextRemovalPrompt, createRegionEditor } from "./region-editor.js?v=2026-09-07.10";
 import { overlayExactTextOnImage } from "./text-overlay.js?v=2026-09-07.1";
+import { VideoScriptWorkflow } from "./video-script-workflow.js";
 
 const elements = getImageCreatorDom();
 const state = {
   ...createImageCreatorState(),
   resultAssetCache: new Map()
 };
+let videoScriptWorkflow = null;
 const IMAGE_CREATOR_MOBILE_MEDIA = "(max-width: 960px), (hover: none) and (pointer: coarse) and (max-width: 1366px)";
 const sessionStore = createImageCreatorSessionStore();
 let unsubscribeSessions = null;
@@ -95,36 +97,71 @@ function reflectResultControls() {
 }
 
 function renderAll() {
+  if (!videoScriptWorkflow) {
+    videoScriptWorkflow = new VideoScriptWorkflow({
+      state,
+      elements,
+      renderAll,
+      persistActiveSession
+    });
+  }
   reflectSessionHeader();
   reflectSessionList();
   renderChatFeed(elements.chatFeed, state.activeSession);
+  if (elements.chatFeed && videoScriptWorkflow?.currentScript?.scenes) {
+    videoScriptWorkflow.attachToolbarEvents(elements.chatFeed, videoScriptWorkflow.currentScript.scenes);
+  }
   reflectResultControls();
   renderAttachmentTray(elements.attachmentTray, state.composerAttachments);
-  if (elements.optionsModal) {
-    elements.optionsModal.classList.toggle("hidden", !state.optionsPanelOpen);
-    elements.optionsModal.setAttribute("aria-hidden", state.optionsPanelOpen ? "false" : "true");
+
+  const isRightPanelOpen = state.optionsPanelOpen !== false && state.chatPanelOpen !== false;
+  elements.panelsGrid?.classList.toggle("is-chat-collapsed", !isRightPanelOpen);
+  if (elements.floatingFormatPanel) {
+    elements.floatingFormatPanel.classList.toggle("hidden", !isRightPanelOpen);
+    elements.floatingFormatPanel.setAttribute("aria-hidden", isRightPanelOpen ? "false" : "true");
+    elements.floatingFormatPanel.inert = !isRightPanelOpen;
   }
   if (elements.toggleOptionsBtn) {
-    elements.toggleOptionsBtn.setAttribute("aria-expanded", state.optionsPanelOpen ? "true" : "false");
+    elements.toggleOptionsBtn.setAttribute("aria-expanded", isRightPanelOpen ? "true" : "false");
   }
-  elements.panelsGrid?.classList.toggle("is-chat-collapsed", !state.chatPanelOpen);
-  if (elements.toolsPanel) elements.toolsPanel.inert = !state.chatPanelOpen;
   if (elements.toggleChatBtn) {
-    elements.toggleChatBtn.setAttribute("aria-expanded", state.chatPanelOpen ? "true" : "false");
-    elements.toggleChatBtn.setAttribute("aria-label", state.chatPanelOpen ? "Ocultar Chat creativo" : "Mostrar Chat creativo");
-    elements.toggleChatBtn.title = `Arrastra para mover · ${state.chatPanelOpen ? "Ocultar Chat creativo" : "Mostrar Chat creativo"}`;
+    elements.toggleChatBtn.setAttribute("aria-expanded", isRightPanelOpen ? "true" : "false");
+    elements.toggleChatBtn.setAttribute("aria-label", isRightPanelOpen ? "Ocultar parámetros" : "Mostrar parámetros");
+    elements.toggleChatBtn.title = `Arrastra para mover · ${isRightPanelOpen ? "Ocultar parámetros" : "Mostrar parámetros"}`;
   }
+  if (typeof window.refreshChatTogglePosition === "function") {
+    window.refreshChatTogglePosition();
+  }
+  syncComposerModeMenu(elements, state.options.mode);
+  renderComposerCapsules(elements, state.options, state.composerTable, {
+    onRemoveMode: () => {
+      state.options.mode = "generate";
+      syncComposerModeMenu(elements, "generate");
+      applyOptionsToPanel(elements, state.options);
+      renderAll();
+      elements.promptInput?.focus();
+    },
+    onRemoveTable: () => {
+      state.composerTable = null;
+      renderAll();
+      elements.promptInput?.focus();
+    }
+  });
 }
 
 function setOptionsPanelOpen(open, { restoreFocus = false } = {}) {
   state.optionsPanelOpen = open === true;
+  state.chatPanelOpen = open === true;
   renderAll();
   if (state.optionsPanelOpen) {
-    window.setTimeout(() => elements.closeOptionsBtn?.focus(), 40);
+    applyOptionsToPanel(elements, state.options);
+    window.setTimeout(() => elements.closeFloatingFormatBtn?.focus(), 40);
   } else if (restoreFocus) {
     elements.toggleOptionsBtn?.focus();
   }
 }
+
+const setFloatingFormatPanelOpen = setOptionsPanelOpen;
 
 function setActiveSession(sessionId = "") {
   closeImageViewer({ restoreFocus: false });
@@ -132,6 +169,9 @@ function setActiveSession(sessionId = "") {
   state.activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   state.selectedResultRef = null;
   state.pendingRevision = null;
+  if (state.activeSession && videoScriptWorkflow) {
+    videoScriptWorkflow.rehydrateFromSession(state.activeSession);
+  }
   renderAll();
 }
 
@@ -316,8 +356,21 @@ async function submitPrompt({
 } = {}) {
   if (state.isGenerating) return;
   const typedPrompt = String(elements.promptInput?.value || "").trim();
-  const prompt = String(requestPrompt || typedPrompt).trim();
-  const visiblePrompt = String(displayPrompt || typedPrompt || requestPrompt).trim();
+  const attachedTable = state.composerTable;
+  let prompt = String(requestPrompt || typedPrompt).trim();
+  let visiblePrompt = String(displayPrompt || typedPrompt || requestPrompt).trim();
+
+  if (attachedTable && attachedTable.matrix) {
+    const tableMarkdown = formatMatrixAsMarkdownTable(attachedTable.matrix);
+    if (!prompt) {
+      prompt = `Crea un guion y escenas educativas a partir de los datos de la siguiente tabla:\n\n${tableMarkdown}`;
+      visiblePrompt = `Tabla de Excel adjunta (${attachedTable.rowCount} filas × ${attachedTable.colCount} columnas)`;
+    } else {
+      prompt = `${prompt}\n\nDatos de tabla adjunta:\n${tableMarkdown}`;
+    }
+    state.composerTable = null;
+  }
+
   if (!prompt || !visiblePrompt) {
     setComposerError("Escribe un prompt antes de generar.");
     return;
@@ -332,6 +385,84 @@ async function submitPrompt({
 
   const options = { ...state.options };
   const attachments = [...state.composerAttachments];
+
+  const isScriptRequest = state.options.mode === "video_script"
+    || /guion|video|escena|podcaster|timeline/i.test(prompt)
+    || Boolean(videoScriptWorkflow?.currentScript);
+  if (isScriptRequest && attachments.length === 0) {
+    state.isGenerating = true;
+    setComposerDisabled(elements, true);
+    try {
+      const sessionId = await ensureSessionExists();
+      let activeSession = state.sessions.find((session) => session.id === sessionId) || state.activeSession;
+      if (!activeSession) {
+        activeSession = {
+          id: sessionId,
+          ownerId: state.currentUser?.uid || "",
+          ownerEmail: state.currentUser?.email || "",
+          title: IMAGE_CREATOR_SESSION_TITLE,
+          archived: false,
+          lastPrompt: "",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          session: {
+            messages: []
+          }
+        };
+        state.sessions = [activeSession, ...state.sessions.filter((session) => session.id !== sessionId)];
+        state.activeSessionId = sessionId;
+        state.activeSession = activeSession;
+      }
+      const userMessage = {
+        id: makeId("msg"),
+        role: "user",
+        prompt: visiblePrompt,
+        createdAt: new Date().toISOString()
+      };
+      activeSession.session.messages.push(userMessage);
+      renderAll();
+
+      let parsedScenes = attachedTable?.matrix
+        ? videoScriptWorkflow.detectScenesFromTable(attachedTable.matrix)
+        : null;
+
+      let reply = "";
+      if (!parsedScenes || !parsedScenes.length) {
+        reply = await videoScriptWorkflow.sendAgentMessage(prompt);
+        parsedScenes = videoScriptWorkflow.parseScriptFromReply(reply);
+      }
+
+      let assistantMessage;
+      if (parsedScenes && parsedScenes.length) {
+        videoScriptWorkflow.currentScript = { scenes: parsedScenes };
+        assistantMessage = {
+          id: makeId("msg"),
+          role: "assistant",
+          html: videoScriptWorkflow.renderScriptTable(parsedScenes),
+          note: "He detectado las columnas del guion y preparado las escenas para generar sus imágenes:",
+          createdAt: new Date().toISOString()
+        };
+      } else {
+        assistantMessage = {
+          id: makeId("msg"),
+          role: "assistant",
+          note: reply || "No fue posible detectar las columnas del guion.",
+          createdAt: new Date().toISOString()
+        };
+      }
+      activeSession.session.messages.push(assistantMessage);
+      await persistActiveSession();
+      renderAll();
+    } catch (err) {
+      setComposerError(err.message || "Error procesando el guion.");
+    } finally {
+      state.isGenerating = false;
+      setComposerDisabled(elements, false);
+      clearComposer(elements);
+    }
+    return;
+  }
+
   const requestMode = resolveImageCreatorMode(options.mode, attachments);
   if ((options.mode === "edit" || options.mode === "variation") && attachments.length < 1) {
     setComposerError("Este modo requiere al menos una imagen de referencia.");
@@ -712,7 +843,7 @@ function applyWorkspaceTheme(theme = "dark") {
   document.body.dataset.icTheme = normalized;
   const button = document.getElementById("icThemeToggleBtn");
   if (button) {
-    button.innerHTML = `<i class="fas ${config.icon}" aria-hidden="true"></i><span>${config.label}</span>`;
+    button.innerHTML = `<i class="fas ${config.icon}" aria-hidden="true"></i>`;
     button.setAttribute("aria-label", `Tema actual: ${config.label}. Cambiar tema`);
     button.title = `Tema actual: ${config.label}`;
   }
@@ -777,14 +908,13 @@ function initializeMovableChatToggle() {
     width: shell.clientWidth,
     height: shell.clientHeight,
     buttonWidth: button.offsetWidth || 46,
-    buttonHeight: button.offsetHeight || 46,
-    headerHeight: shell.querySelector(".ic-app-header")?.offsetHeight || 58
+    buttonHeight: button.offsetHeight || 46
   });
   const normalizePosition = (left, top) => {
     const bounds = getBounds();
     return {
       left: clamp(left, 8, bounds.width - bounds.buttonWidth - 8),
-      top: clamp(top, bounds.headerHeight + 8, bounds.height - bounds.buttonHeight - 8)
+      top: clamp(top, 8, bounds.height - bounds.buttonHeight - 8)
     };
   };
   const positionButton = ({ left, top }) => {
@@ -798,19 +928,8 @@ function initializeMovableChatToggle() {
     const bounds = getBounds();
     return normalizePosition(
       bounds.width - bounds.buttonWidth - 14,
-      bounds.headerHeight + 12
+      14
     );
-  };
-  const restorePosition = () => {
-    const bounds = getBounds();
-    if (!savedPosition) {
-      positionButton(defaultPosition());
-      return;
-    }
-    positionButton({
-      left: savedPosition.x * Math.max(1, bounds.width - bounds.buttonWidth),
-      top: savedPosition.y * Math.max(1, bounds.height - bounds.buttonHeight)
-    });
   };
   const persistPosition = (position) => {
     const bounds = getBounds();
@@ -825,8 +944,36 @@ function initializeMovableChatToggle() {
     }
   };
 
-  restorePosition();
-  window.addEventListener("resize", restorePosition);
+  const updateButtonPlacement = () => {
+    const bounds = getBounds();
+    const isPanelOpen = state.optionsPanelOpen !== false && state.chatPanelOpen !== false;
+
+    if (!isPanelOpen) {
+      const currentY = savedPosition?.y != null
+        ? savedPosition.y * Math.max(1, bounds.height - bounds.buttonHeight)
+        : 14;
+      positionButton({
+        left: bounds.width - bounds.buttonWidth - 14,
+        top: currentY
+      });
+      button.classList.add("is-docked-right");
+    } else {
+      button.classList.remove("is-docked-right");
+      if (savedPosition?.x != null && savedPosition?.y != null) {
+        positionButton({
+          left: savedPosition.x * Math.max(1, bounds.width - bounds.buttonWidth),
+          top: savedPosition.y * Math.max(1, bounds.height - bounds.buttonHeight)
+        });
+      } else {
+        positionButton(defaultPosition());
+      }
+    }
+  };
+
+  window.refreshChatTogglePosition = updateButtonPlacement;
+  updateButtonPlacement();
+  window.addEventListener("resize", updateButtonPlacement);
+
   button.addEventListener("click", (event) => {
     if (suppressClick) {
       event.preventDefault();
@@ -834,7 +981,6 @@ function initializeMovableChatToggle() {
       return;
     }
     toggleChatPanel();
-    if (!savedPosition) window.requestAnimationFrame(() => positionButton(defaultPosition()));
   });
   button.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -864,7 +1010,20 @@ function initializeMovableChatToggle() {
       button.removeEventListener("pointercancel", onUp);
       if (dragged) {
         suppressClick = upEvent?.type === "pointerup";
-        persistPosition(positionButton({ left: button.offsetLeft, top: button.offsetTop }));
+        const currentPos = positionButton({ left: button.offsetLeft, top: button.offsetTop });
+        const isPanelOpen = state.optionsPanelOpen !== false && state.chatPanelOpen !== false;
+        if (isPanelOpen) {
+          persistPosition(currentPos);
+        } else {
+          const bounds = getBounds();
+          savedPosition = {
+            x: savedPosition?.x != null ? savedPosition.x : 0.65,
+            y: currentPos.top / Math.max(1, bounds.height - bounds.buttonHeight)
+          };
+          try {
+            localStorage.setItem(IMAGE_CREATOR_CHAT_FAB_POSITION_KEY, JSON.stringify(savedPosition));
+          } catch (_) {}
+        }
       }
     };
     button.addEventListener("pointermove", onMove);
@@ -1084,7 +1243,7 @@ async function applyLocalizedTextEdit({
   };
   applyOptionsToPanel(elements, state.options);
   elements.promptInput.value = `Reemplazar texto por “${newText}”`;
-  setComposerMeta(exactMode ? "Limpiando el fondo y componiendo el texto exacto..." : "Editando texto con Gemini 3 Pro Image...");
+  setComposerMeta(exactMode ? "Limpiando el fondo y componiendo el texto exacto..." : "Editando texto con Lucy Pro...");
   regionEditor.close({ restoreFocus: false });
   renderAll();
   await submitPrompt({
@@ -1353,11 +1512,17 @@ function bindGlobalEvents() {
   elements.toggleOptionsBtn?.addEventListener("click", () => {
     setOptionsPanelOpen(!state.optionsPanelOpen, { restoreFocus: state.optionsPanelOpen });
   });
-  elements.closeOptionsBtn?.addEventListener("click", () => {
+  elements.floatingFormatTrigger?.addEventListener("click", () => {
+    setOptionsPanelOpen(!state.optionsPanelOpen, { restoreFocus: state.optionsPanelOpen });
+  });
+  elements.floatingFormatTab?.addEventListener("click", () => {
+    setOptionsPanelOpen(!state.optionsPanelOpen, { restoreFocus: state.optionsPanelOpen });
+  });
+  elements.closeFloatingFormatBtn?.addEventListener("click", () => {
     setOptionsPanelOpen(false, { restoreFocus: true });
   });
-  elements.optionsModal?.addEventListener("pointerdown", (event) => {
-    if (event.target === elements.optionsModal) setOptionsPanelOpen(false, { restoreFocus: true });
+  elements.closeOptionsBtn?.addEventListener("click", () => {
+    setOptionsPanelOpen(false, { restoreFocus: true });
   });
   elements.imageViewerMenuTrigger?.addEventListener("click", toggleImageViewerMenu);
   elements.imageViewerAnnotateBtn?.addEventListener("click", () => {
@@ -1397,6 +1562,15 @@ function bindGlobalEvents() {
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(".ic-session-card")) closeSessionMenus();
     if (!event.target.closest(".ic-result-card")) closeResultMenus();
+    const isMobile = window.matchMedia(IMAGE_CREATOR_MOBILE_MEDIA).matches;
+    if (isMobile && state.optionsPanelOpen) {
+      const isInside = elements.floatingFormatPanel?.contains(event.target);
+      const isTrigger = elements.toggleOptionsBtn?.contains(event.target) ||
+                        elements.toggleChatBtn?.contains(event.target);
+      if (!isInside && !isTrigger) {
+        setOptionsPanelOpen(false);
+      }
+    }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -1408,23 +1582,14 @@ function bindGlobalEvents() {
         closeImageViewer();
         return;
       }
-      if (state.optionsPanelOpen) setOptionsPanelOpen(false, { restoreFocus: true });
+      if (state.optionsPanelOpen) {
+        setOptionsPanelOpen(false, { restoreFocus: true });
+        return;
+      }
       closeSessionMenus({ restoreFocus: true });
       closeResultMenus({ restoreFocus: true });
       setMobileSessionsOpen(false, { restoreFocus: true });
     }
-  });
-  [
-    elements.modeSelect,
-    elements.modelSelect,
-    elements.aspectRatioSelect,
-    elements.imageSizeSelect,
-    elements.downloadFormatSelect,
-    elements.countSelect
-  ].forEach((control) => {
-    control?.addEventListener("change", () => {
-      state.options = syncOptionsPresentation(elements, readOptionsFromPanel(elements));
-    });
   });
   elements.attachmentTray?.addEventListener("click", (event) => {
     const removeEl = event.target.closest("[data-attachment-action='remove']");
@@ -1434,6 +1599,19 @@ function bindGlobalEvents() {
     renderAttachmentTray(elements.attachmentTray, state.composerAttachments);
   });
   elements.chatFeed?.addEventListener("click", (event) => {
+    const suggestionBtn = event.target.closest("[data-empty-prompt]");
+    if (suggestionBtn) {
+      const promptText = suggestionBtn.getAttribute("data-empty-prompt");
+      if (promptText.includes("guion")) {
+        state.options.mode = "video_script";
+        applyOptionsToPanel(elements, state.options);
+      }
+      if (elements.promptInput) {
+        elements.promptInput.value = promptText;
+        elements.promptInput.focus();
+      }
+      return;
+    }
     const menuToggle = event.target.closest("[data-result-menu-toggle]");
     if (menuToggle) {
       toggleResultMenu(menuToggle);
@@ -1478,6 +1656,9 @@ function bootstrapSessionSubscription(user) {
       const preferredSession = sessions.find((session) => session.id === state.activeSessionId) || fallbackSession;
       state.activeSessionId = preferredSession?.id || "";
       state.activeSession = preferredSession;
+      if (preferredSession && videoScriptWorkflow) {
+        videoScriptWorkflow.rehydrateFromSession(preferredSession);
+      }
       renderAll();
     },
     () => setComposerError("No fue posible sincronizar las sesiones desde Firebase.")
@@ -1496,7 +1677,11 @@ function initialize() {
   if (elements.imageInfoModal?.parentElement !== document.body) {
     document.body.append(elements.imageInfoModal);
   }
-  initializeOptionsPanel(elements, state.options);
+  initializeOptionsPanel(elements, state.options, (updatedOptions) => {
+    state.options = { ...state.options, ...updatedOptions };
+    applyOptionsToPanel(elements, state.options);
+    renderAll();
+  });
   regionEditor = createRegionEditor(elements, {
     onApply: (payload) => payload?.editorMode === "text"
       ? applyLocalizedTextEdit(payload)
@@ -1508,6 +1693,40 @@ function initialize() {
     },
     onFilesSelected: (files) => {
       void handleFilesSelected(files);
+    },
+    onTableAttached: (tableData) => {
+      state.composerTable = tableData;
+      renderAll();
+    },
+    onClear: () => {
+      state.composerTable = null;
+      renderAll();
+    },
+    onModeSelected: (mode) => {
+      state.options.mode = mode;
+      syncComposerModeMenu(elements, mode);
+      applyOptionsToPanel(elements, state.options);
+      renderAll();
+      if (mode === "video_script" && elements.promptInput && !elements.promptInput.value.trim()) {
+        elements.promptInput.value = "Crea un guion educativo sobre: ";
+      }
+      elements.promptInput?.focus();
+    },
+    onVideoScript: () => {
+      state.options.mode = "video_script";
+      syncComposerModeMenu(elements, "video_script");
+      applyOptionsToPanel(elements, state.options);
+      renderAll();
+      if (elements.promptInput) {
+        if (!elements.promptInput.value.trim()) {
+          elements.promptInput.value = "Crea un guion educativo sobre: ";
+        }
+        elements.promptInput.focus();
+        elements.promptInput.setSelectionRange(
+          elements.promptInput.value.length,
+          elements.promptInput.value.length
+        );
+      }
     }
   });
   bindGlobalEvents();
@@ -1518,7 +1737,20 @@ function initialize() {
   initializeMobileLayout();
   renderAll();
 
+  function dismissGlobalLoader() {
+    const loader = document.getElementById("icGlobalLoader");
+    if (loader && !loader.classList.contains("is-hidden")) {
+      loader.classList.add("is-hidden");
+      window.setTimeout(() => {
+        try { loader.remove(); } catch (_) {}
+      }, 450);
+    }
+  }
+
+  window.setTimeout(dismissGlobalLoader, 2500);
+
   onAuthStateChanged(sessionStore.auth, (user) => {
+    dismissGlobalLoader();
     if (!user) {
       window.location.href = "index.html";
       return;

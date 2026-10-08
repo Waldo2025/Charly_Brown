@@ -18,8 +18,9 @@ test("each proposal receives and persists an audience-specific dossier", () => {
 });
 
 test("drafting uses the audience dossier instead of the global trend dossier", () => {
-  assert.match(mode, /const researchDossier = await ensureAudienceResearchForDraft/);
-  assert.match(mode, /cached\?\.researchFingerprint === fingerprint/);
+  assert.match(mode, /researchDossier = await ensureAudienceResearchForDraft/);
+  assert.match(mode, /researchPolicy\.readiness\(cached, researchPolicy\.target\(session\)\)\.ready/);
+  assert.match(mode, /cached\.researchFingerprint === fingerprint/);
   const draftSection = mode.slice(mode.indexOf("export async function draftArticleForMode"), mode.indexOf("const AUDIENCE_LABELS"));
   assert.doesNotMatch(draftSection, /session\.trends\?\.\[0\]/);
 });

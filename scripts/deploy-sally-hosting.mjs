@@ -24,6 +24,7 @@ const uploads=new Map();
 changed.push("js/sally-result-view.js");
 changed.push("js/sally-template-store.js","js/sally-template-manager.js");
 changed.push("js/sally-tasks.js");
+changed.push("js/sally-user-import.js");
 for(const file of changed){
   const bytes=gzipSync(await readFile(new URL("../public/"+file,import.meta.url)),{level:9});
   const hash=createHash("sha256").update(bytes).digest("hex");
@@ -31,8 +32,8 @@ for(const file of changed){
 }
 const config=structuredClone(previous.config);
 for(const rule of config.headers||[])for(const [key,value] of Object.entries(rule.headers||{})){
-  if(key.toLowerCase()==="content-security-policy"&&!value.includes("https://sally-browser-mm2qel4fka-uc.a.run.app"))
-    rule.headers[key]=value.replace("connect-src ","connect-src https://sally-browser-mm2qel4fka-uc.a.run.app ");
+  if(key.toLowerCase()==="content-security-policy"&&!value.includes("wss://sally-browser-mm2qel4fka-uc.a.run.app"))
+    rule.headers[key]=value.replace("connect-src ","connect-src https://sally-browser-mm2qel4fka-uc.a.run.app wss://sally-browser-mm2qel4fka-uc.a.run.app ");
 }
 // Avoid publishing over another deployment that completed while reading files.
 if((await api(site+"/releases?pageSize=1")).releases[0].name!==release.name)throw Error("La versión publicada cambió; vuelve a ejecutar.");

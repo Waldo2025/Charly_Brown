@@ -3,6 +3,8 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../public/js/scienceActivities.js", import.meta.url), "utf8");
+const production = await readFile(new URL("../functions/src/science-production-workers.js", import.meta.url), "utf8");
+const productionUI = await readFile(new URL("../public/js/science-production-ui.mjs", import.meta.url), "utf8");
 const generationStart = source.indexOf("async function generateAssessmentsWithGemini(activity)");
 const generationEnd = source.indexOf("async function enforceExactlyOneVisualQuestion", generationStart);
 const generation = source.slice(generationStart, generationEnd);
@@ -36,7 +38,8 @@ test("los lotes incompletos reintentan, omiten la posición inválida y conserva
   assert.match(generation, /nextQuestionTypeAfterRejection\(activity, failedType, slotIndex, skippedTypes\)/);
   assert.match(generation, /Tipo de pregunta omitido tras varios rechazos/);
   assert.doesNotMatch(generation, /await deleteGenerationDraft\(draftKey\)/);
-  assert.match(source, /await renderGame\(\);[\s\S]*?if \(completedAssessmentDraftKey\) \{[\s\S]*?await deleteGenerationDraft\(completedAssessmentDraftKey\)/);
+  assert.match(production, /items\.length !== config\.questionsPerLevel/);
+  assert.match(production, /Se detectaron preguntas duplicadas entre niveles/);
 });
 
 test("una pregunta para imagen no bloquea el lote y se adapta en la fase visual", () => {
@@ -75,15 +78,12 @@ test("cada petición exige a Gemini exactamente el tamaño del lote", () => {
   assert.match(source, /Cada opción debe tener máximo 8 palabras/);
 });
 
-test("la cantidad configurada se captura al iniciar y gobierna el total final", () => {
-  assert.match(source, /const requestedLevelCount = positiveInteger\(\$\("#gameLevelCount"\)\.value, 1\)/);
-  assert.match(source, /const MAX_QUESTIONS_PER_LEVEL = 15/);
-  assert.match(source, /function configuredQuestionsPerLevel\(value, fallback = 3\)/);
-  assert.match(source, /const requestedQuestionsPerLevel = configuredQuestionsPerLevel\(\$\("#questionsPerLevel"\)\.value, 1\)/);
-  assert.match(source, /\$\("#questionsPerLevel"\)\.value = String\(requestedQuestionsPerLevel\)/);
-  assert.match(source, /state\.activity\.levelCount = requestedLevelCount/);
-  assert.match(source, /state\.activity\.questionsPerLevel = requestedQuestionsPerLevel/);
-  assert.match(source, /questionSourcePolicy: isSimulator \? "simulator" : "gemini-only-v1"/);
+test("la cantidad configurada se captura en el plan y gobierna el total final", () => {
+  assert.match(source, /levelCount: positiveInteger\(\$\("#gameLevelCount"\)\.value, 1\)/);
+  assert.match(source, /questionsPerLevel: configuredQuestionsPerLevel\(\$\("#questionsPerLevel"\)\.value, 1\)/);
+  assert.match(source, /config\.levelCount \* config\.questionsPerLevel/);
+  assert.match(production, /validateQuestions\(dependenciesResults\[`level-\$\{i\}`\]\?\.questions,run\.config,i\)/);
+  assert.match(production, /totalQuestions:activity\.assessments\.length/);
 });
 
 test("la validación posterior tampoco reemplaza duplicados Gemini con contenido local", () => {
@@ -114,12 +114,12 @@ test("la generación registra cada etapa y el progreso por pregunta sin exponer 
   assert.match(source, /function beginScienceGenerationTrace\(details = \{\}\)/);
   assert.match(source, /function logScienceGenerationStep\(label, details = \{\}, level = "info"\)/);
   assert.match(source, /Paso \$\{String\(scienceGenerationTrace\.step\)\.padStart\(2, "0"\)\}/);
-  assert.match(source, /"Solicitando diseño base del videojuego"/);
-  assert.match(source, /"Guía pedagógica y personaje preparados"/);
+  assert.match(productionUI, /Planificación/);
+  assert.match(productionUI, /Guía pedagógica/);
   assert.match(source, /"Pregunta aceptada"/);
   assert.match(source, /"Pregunta rechazada por validación"/);
   assert.match(source, /"Borrador parcial actualizado"/);
-  assert.match(source, /"Preview interactivo renderizado"/);
+  assert.match(productionUI, /Validación final/);
   assert.match(source, /finishScienceGenerationTrace\("success"/);
   assert.match(source, /finishScienceGenerationTrace\("error"/);
   assert.doesNotMatch(source, /logScienceGenerationStep\([^\n]+experiencePrompt/);

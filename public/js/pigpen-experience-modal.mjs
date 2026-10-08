@@ -1,68 +1,6 @@
-import {experience} from './escape-room-experience.mjs?v=20260912-text-pieces-v9';
+import {experience} from './escape-room-experience.mjs?v=20260924-coordinate-grid-v12';
 
-const PRESETS_STORAGE_KEY = 'pigpen.experiencePresets.v1';
-
-const DEFAULT_PRESETS = [
-  {
-    id: 'preset_classic',
-    name: 'Clásico',
-    config: {
-      question_types: ['opcion_multiple', 'verdadero_falso', 'texto', 'relacion_columnas', 'drag_drop', 'completar_espacio', 'ordenar_secuencia', 'multimedia'],
-      primary_reward: 'letras',
-      extras: []
-    },
-    structure: { rooms: 4, questionsPerRoom: 4 }
-  },
-  {
-    id: 'preset_logic',
-    name: 'Lógica y deducción',
-    config: {
-      question_types: ['matriz_deduccion', 'clasificar_grupos', 'completar_patron', 'resolver_restricciones', 'opcion_multiple'],
-      primary_reward: 'simbolos',
-      extras: ['pista']
-    },
-    structure: { rooms: 4, questionsPerRoom: 4 }
-  },
-  {
-    id: 'preset_math',
-    name: 'Matemáticas y escala',
-    config: {
-      question_types: ['construir_expresion', 'ubicar_escala', 'balancear_cantidades', 'respuesta_coordenadas'],
-      primary_reward: 'letras',
-      extras: ['recompensa_visual']
-    },
-    structure: { rooms: 4, questionsPerRoom: 4 }
-  },
-  {
-    id: 'preset_variety',
-    name: 'Variedad total',
-    config: {
-      question_types: ['opcion_multiple', 'respuesta_justificacion', 'marcar_evidencia', 'matriz_deduccion', 'construir_solucion', 'clasificar_grupos'],
-      primary_reward: 'imagen',
-      extras: ['pista', 'recompensa_visual']
-    },
-    structure: { rooms: 4, questionsPerRoom: 4 }
-  }
-];
-
-function loadPresets() {
-  try {
-    const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return structuredClone(DEFAULT_PRESETS);
-}
-
-function savePresets(presets) {
-  try {
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
-  } catch {}
-}
-
-export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:4,questionsPerRoom:4}),isBusy=()=>false}) {
+export function mountExperienceModal({getConfig,onSave,presetStore,getStructure=()=>({rooms:4,questionsPerRoom:4}),isBusy=()=>false}) {
   const esc=experience.esc;
   const root=document.createElement('div');
   root.id='erExperienceModal';root.className='modal fade';root.tabIndex=-1;
@@ -81,6 +19,12 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
       </div>
     </div>
     <div class="er-experience-presets-list" data-experience-presets-list aria-label="Lista de presets"></div>
+    <p class="er-field-help" data-experience-preset-status role="status" aria-live="polite"></p>
+    <div class="er-preset-save-bar">
+      <button type="button" class="er-button er-button-ghost" data-experience-refresh-presets>Recargar presets</button>
+      <button type="button" class="er-button er-button-secondary" data-experience-import-presets hidden>Importar presets de este navegador</button>
+      <button type="button" class="er-button er-button-ghost" data-experience-restore-draft hidden>Recuperar borrador</button>
+    </div>
   </section>`;
   root.innerHTML=`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content er-experience-modal"><div class="modal-header"><div><h2 id="erExperienceTitle" class="modal-title">Configurar preguntas y recompensas</h2><p>Elige cómo responderá el alumnado y qué recibirá al completar cada sala.</p></div><button type="button" class="er-experience-close" data-bs-dismiss="modal" aria-label="Cerrar"><span aria-hidden="true">×</span></button></div><div class="modal-body">
   ${presetsSection}
@@ -95,6 +39,7 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
   <section data-experience-image hidden><label class="er-field"><span>Imagen para reconstruir (opcional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-experience-image-file></label><p>Se incluirá en el juego descargable. Sin archivo, PigPen crea una imagen con el código.</p><img data-experience-image-preview alt="Vista previa de la recompensa" style="max-width:100%;max-height:180px" hidden><button type="button" data-experience-clear-image>Usar imagen automática</button></section>
   ${group('extras','Premios adicionales · Opcionales',experience.extras)}
   <p class="er-experience-rule">Sala perfecta: todas las preguntas al primer intento y sin ayudas. Sólo así se obtienen los premios adicionales. La recompensa principal siempre se entrega al completar la sala.</p>
+  <p>Después de crear el escape room, puedes cambiar solo la recompensa principal y pulsar «Generar escape room»; PigPen conservará las salas y preguntas.</p>
   <p id="erExperienceError" role="alert"></p></div><div class="modal-footer"><p id="erExperienceSummary" aria-live="polite"></p><button type="button" class="er-button er-button-secondary" data-experience-reset>Restaurar clásicos</button><button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button><button type="button" class="er-button er-button-primary" data-experience-save>Guardar y continuar</button></div></div></div>`;
   document.body.append(root);
   function syncTheme() {
@@ -105,8 +50,22 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
   }
   syncTheme();
   new MutationObserver(syncTheme).observe(document.documentElement,{attributes:true,attributeFilter:['style','class']});
-  let pending=null,saving=false,rewardImage='',returnFocus=null,saved=false;
-  let presets=loadPresets();
+  let pending=null,saving=false,rewardImage='',rewardImageAlt='',rewardImageAspect=null,imageSequence=0,returnFocus=null,saved=false;
+  let presets=[],presetBusy=false,accountUid='',libraryState={};
+  const presetStatus=root.querySelector('[data-experience-preset-status]');
+  const showPresetMessage=message=>{presetStatus.textContent=message;};
+  presetStore?.subscribe(value=>{
+    if(accountUid!==value.uid){
+      if(accountUid&&root.classList.contains('show'))window.bootstrap.Modal.getInstance(root)?.hide();
+      accountUid=value.uid;imageSequence++;rewardImage='';rewardImageAlt='';rewardImageAspect=null;
+      root.querySelector('[data-experience-preset-name]').value='';
+    }
+    libraryState=value;presets=value.presets;presetBusy=value.busy;
+    root.querySelector('[data-experience-import-presets]').hidden=!value.legacyAvailable;
+    root.querySelector('[data-experience-restore-draft]').hidden=!value.draft;
+    showPresetMessage(value.error||value.warning||(value.busy?'Sincronizando presets…':value.source==='cloud'?'Presets sincronizados con tu cuenta.':value.uid?'Presets de este navegador; falta sincronizar.':'Inicia sesión para recuperar tus presets.'));
+    renderPresets();
+  });
   root.inert=true;
   root.addEventListener('show.bs.modal',()=>{returnFocus=document.activeElement;root.inert=false;});
   root.addEventListener('shown.bs.modal',()=>{root.inert=false;});
@@ -119,13 +78,14 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
   });
   function readStructure(){return {rooms:Number(root.querySelector('[data-experience-rooms]').value),questionsPerRoom:Number(root.querySelector('[data-experience-question-count]').value)};}
   function structureIssues(){const s=readStructure();return [...(!Number.isInteger(s.rooms)||s.rooms<1||s.rooms>8?['El número de salas debe estar entre 1 y 8.']:[]),...(!Number.isInteger(s.questionsPerRoom)||s.questionsPerRoom<1?['Las preguntas por sala deben ser un entero mayor que cero.']:[])];}
-  function read(){return experience.config({reward_image:rewardImage,question_types:[...root.querySelectorAll('input[type=checkbox]:checked')].filter(i=>i.name!=='extras').map(i=>i.value),primary_reward:root.querySelector('input[type=radio]:checked')?.value,extras:[...root.querySelectorAll('input[name=extras]:checked')].map(i=>i.value)});}
+  function read(){return experience.config({reward_image:rewardImage,reward_image_alt:rewardImageAlt,reward_image_aspect:rewardImageAspect,question_types:[...root.querySelectorAll('input[type=checkbox]:checked')].filter(i=>i.name!=='extras').map(i=>i.value),primary_reward:root.querySelector('input[type=radio]:checked')?.value,extras:[...root.querySelectorAll('input[name=extras]:checked')].map(i=>i.value)});}
   function isMatchingPreset(p,cfg,str){
     if(!p||!p.config)return false;
     if(p.structure&&str){
       if(Number(p.structure.rooms)!==Number(str.rooms)||Number(p.structure.questionsPerRoom)!==Number(str.questionsPerRoom))return false;
     }
     if(p.config.primary_reward!==cfg.primary_reward)return false;
+    if((p.config.reward_image||'')!==(cfg.reward_image||''))return false;
     const aTypes=[...(p.config.question_types||[])].sort();
     const bTypes=[...(cfg.question_types||[])].sort();
     if(aTypes.length!==bTypes.length||aTypes.some((v,idx)=>v!==bTypes[idx]))return false;
@@ -135,6 +95,12 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
     return true;
   }
   function renderPresets(){
+    root.querySelectorAll('input,[data-experience-all],[data-experience-none],[data-experience-clear-image],[data-experience-reset]').forEach(control=>control.disabled=presetBusy);
+    root.querySelector('[data-experience-save]').disabled=saving||presetBusy||!!(experience.configIssues(read()).length||structureIssues().length);
+    const writable=libraryState.ready&&libraryState.source==='cloud'&&!presetBusy;
+    root.querySelector('[data-experience-save-preset]').disabled=!writable;
+    root.querySelector('[data-experience-import-presets]').disabled=!writable;
+    root.querySelector('[data-experience-refresh-presets]').disabled=presetBusy;
     const list=root.querySelector('[data-experience-presets-list]');
     if(!list)return;
     if(!presets.length){
@@ -147,11 +113,11 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
       const active=isMatchingPreset(p,currentCfg,currentStr);
       return `<div class="er-preset-badge ${active?'is-active':''}" data-preset-id="${esc(p.id)}" role="button" tabindex="0" title="Cargar preset: ${esc(p.name)}">
         <span class="er-preset-badge-name">${esc(p.name)}</span>
-        <button type="button" class="er-preset-delete-btn" data-preset-delete="${esc(p.id)}" aria-label="Eliminar preset ${esc(p.name)}" title="Eliminar preset">&times;</button>
+        <button type="button" class="er-preset-delete-btn" data-preset-delete="${esc(p.id)}" aria-label="Eliminar preset ${esc(p.name)}" title="Eliminar preset" ${writable?'':'disabled'}>&times;</button>
       </div>`;
     }).join('');
   }
-  function handleSavePreset(){
+  async function handleSavePreset(){
     const input=root.querySelector('[data-experience-preset-name]');
     if(!input)return;
     const name=input.value.trim();
@@ -159,20 +125,12 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
     const currentCfg=read();
     const currentStr=readStructure();
     const newPreset={
-      id:'preset_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
-      name:name.slice(0,30),
+      name,
       config:currentCfg,
       structure:currentStr
     };
-    const existingIndex=presets.findIndex(p=>p.name.toLowerCase()===newPreset.name.toLowerCase());
-    if(existingIndex>=0){
-      presets[existingIndex]=newPreset;
-    }else{
-      presets.push(newPreset);
-    }
-    savePresets(presets);
-    input.value='';
-    renderPresets();
+    try{await presetStore.save(newPreset);input.value='';showPresetMessage('Preset guardado en tu cuenta.');}
+    catch(error){showPresetMessage(error.message||'No se pudo guardar el preset. Tu borrador se conserva.');}
   }
   function summary(){
     const c=read();root.querySelector('[data-experience-image]').hidden=c.primary_reward!=='imagen';
@@ -183,13 +141,14 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
     root.querySelector('[data-experience-save]').disabled=saving||!!issues.length;
     renderPresets();
   }
-  function fill(value){const c=experience.config(value);rewardImage=c.reward_image||'';root.querySelectorAll('input[type=checkbox],input[type=radio]').forEach(i=>i.checked=i.type==='radio'?i.value===c.primary_reward:i.name==='extras'?c.extras.includes(i.value):c.question_types.includes(i.value));summary();}
-  root.addEventListener('input',e=>{if(e.target.matches('[data-experience-rooms],[data-experience-question-count]'))summary();});
-  root.addEventListener('change',async e=>{if(e.target.matches('[data-experience-image-file]')){const file=e.target.files[0];if(file){if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>4*1024*1024){root.querySelector('#erExperienceError').textContent='Elige una imagen PNG, JPEG o WebP de hasta 4 MB.';return;}rewardImage=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const image=new Image();image.onload=()=>{const canvas=document.createElement('canvas');const scale=Math.min(1,900/image.width,600/image.height);canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',0.65));};image.onerror=()=>reject(new Error('No se pudo leer la imagen.'));image.src=reader.result;};reader.onerror=reject;reader.readAsDataURL(file);});}}summary();});
+  function fill(value){imageSequence++;const c=experience.config(value);rewardImage=c.reward_image||'';rewardImageAlt=c.reward_image_alt||'';rewardImageAspect=c.reward_image_aspect||null;root.querySelectorAll('input[type=checkbox],input[type=radio]').forEach(i=>i.checked=i.type==='radio'?i.value===c.primary_reward:i.name==='extras'?c.extras.includes(i.value):c.question_types.includes(i.value));summary();}
+  const preserveDraft=()=>{const name=root.querySelector('[data-experience-preset-name]').value.trim();if(!presetBusy)presetStore.saveDraft({name,config:read(),structure:readStructure()});};
+  root.addEventListener('input',e=>{if(e.target.matches('[data-experience-rooms],[data-experience-question-count]'))summary();preserveDraft();});
+  root.addEventListener('change',async e=>{if(e.target.matches('[data-experience-image-file]')){const file=e.target.files[0];if(file){if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>4*1024*1024){root.querySelector('#erExperienceError').textContent='Elige una imagen PNG, JPEG o WebP de hasta 4 MB.';return;}try{const owner=accountUid,sequence=++imageSequence;const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const image=new Image();image.onload=()=>{const canvas=document.createElement('canvas');const scale=Math.min(1,900/image.width,600/image.height);canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',0.65));};image.onerror=()=>reject(new Error('No se pudo leer la imagen.'));image.src=reader.result;};reader.onerror=reject;reader.readAsDataURL(file);});if(owner!==accountUid||sequence!==imageSequence)return;rewardImage=data;rewardImageAlt=file.name.slice(0,500);rewardImageAspect=null;}catch(error){root.querySelector('#erExperienceError').textContent=error.message||'No se pudo leer la imagen.';return;}}}summary();preserveDraft();});
   root.addEventListener('keydown',e=>{
     if(e.key==='Enter'&&e.target.matches('[data-experience-preset-name]')){
       e.preventDefault();
-      handleSavePreset();
+      void handleSavePreset();
     }else if((e.key==='Enter'||e.key===' ')&&e.target.matches('.er-preset-badge')){
       e.preventDefault();
       e.target.click();
@@ -200,9 +159,8 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
     if(deleteBtn){
       e.stopPropagation();
       const pId=deleteBtn.dataset.presetDelete;
-      presets=presets.filter(p=>p.id!==pId);
-      savePresets(presets);
-      renderPresets();
+      try{await presetStore.remove(pId);showPresetMessage('Preset eliminado de tu cuenta.');}
+      catch(error){showPresetMessage(error.message||'No se pudo eliminar el preset.');}
       return;
     }
     const badge=e.target.closest('[data-preset-id]');
@@ -214,18 +172,28 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
           if(p.structure.rooms)root.querySelector('[data-experience-rooms]').value=p.structure.rooms;
           if(p.structure.questionsPerRoom)root.querySelector('[data-experience-question-count]').value=p.structure.questionsPerRoom;
         }
-        summary();
+        summary();preserveDraft();
       }
       return;
     }
     if(e.target.closest('[data-experience-save-preset]')){
-      handleSavePreset();
+      await handleSavePreset();
       return;
     }
-    if(e.target.closest('[data-experience-clear-image]')){rewardImage='';root.querySelector('[data-experience-image-file]').value='';summary();}
+    if(e.target.closest('[data-experience-refresh-presets]')){await presetStore.load();return;}
+    if(e.target.closest('[data-experience-import-presets]')){
+      try{const result=await presetStore.importLegacy();showPresetMessage(`${result.imported} presets importados.${result.conflicts.length?' Se conservaron los existentes: '+result.conflicts.join(', ')+'.':''}${result.invalid.length?' Presets inválidos omitidos: '+result.invalid.join(', ')+'.':''}`);}
+      catch(error){showPresetMessage(error.message||'No se pudo completar la importación; el respaldo local se conserva.');}
+      return;
+    }
+    if(e.target.closest('[data-experience-restore-draft]')){
+      const draft=presetStore.state().draft;if(draft){fill(draft.config);root.querySelector('[data-experience-preset-name]').value=draft.name||'';root.querySelector('[data-experience-rooms]').value=draft.structure?.rooms||4;root.querySelector('[data-experience-question-count]').value=draft.structure?.questionsPerRoom||4;summary();showPresetMessage('Borrador recuperado. Aún no está guardado en Firebase.');}return;
+    }
+    if(e.target.closest('[data-experience-clear-image]')){imageSequence++;rewardImage='';rewardImageAlt='';rewardImageAspect=null;root.querySelector('[data-experience-image-file]').value='';summary();}
     const all=e.target.closest('[data-experience-all]'),none=e.target.closest('[data-experience-none]');
     if(all||none){const name=all?.dataset.experienceAll||none.dataset.experienceNone;root.querySelectorAll(`[data-experience-group="${name}"] input`).forEach(i=>i.checked=!!all);summary();}
     if(e.target.closest('[data-experience-reset]'))fill({});
+    if(all||none||e.target.closest('[data-experience-reset],[data-experience-clear-image],[data-preset-id]'))preserveDraft();
     if(e.target.closest('[data-experience-save]')&&!saving){
       const value=read();if(experience.configIssues(value).length||structureIssues().length)return; saving=true;summary();
       try{await onSave(value,readStructure());saved=true;window.bootstrap.Modal.getInstance(root).hide();}
@@ -233,9 +201,11 @@ export function mountExperienceModal({getConfig,onSave,getStructure=()=>({rooms:
       finally{saving=false;root.querySelector('[data-experience-save]').disabled=!!(experience.configIssues(read()).length||structureIssues().length);}
     }
   });
+  window.addEventListener('offline',()=>{void presetStore.load();});
+  window.addEventListener('online',()=>{void presetStore.load();});
   root.addEventListener('hidden.bs.modal',()=>{
     if(!pending&&!root.classList.contains('show'))root.inert=true;
     if(returnFocus?.isConnected&&!returnFocus.disabled&&!returnFocus.closest('[inert]')&&document.activeElement===document.body)returnFocus.focus({preventScroll:true});
   });
-  return {open(){if(isBusy())return Promise.resolve(false);if(pending)return Promise.resolve(false);syncTheme();saved=false;root.inert=false;const structure=getStructure();root.querySelector('[data-experience-rooms]').value=structure.rooms;root.querySelector('[data-experience-question-count]').value=structure.questionsPerRoom;fill(getConfig());return new Promise(resolve=>{pending=resolve;window.bootstrap.Modal.getOrCreateInstance(root).show();});},element:root};
+  return {open(){if(isBusy())return Promise.resolve(false);if(pending)return Promise.resolve(false);syncTheme();saved=false;root.inert=false;const structure=getStructure();root.querySelector('[data-experience-rooms]').value=structure.rooms;root.querySelector('[data-experience-question-count]').value=structure.questionsPerRoom;fill(getConfig());void presetStore.load();return new Promise(resolve=>{pending=resolve;window.bootstrap.Modal.getOrCreateInstance(root).show();});},element:root};
 }

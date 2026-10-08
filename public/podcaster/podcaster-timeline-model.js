@@ -1,5 +1,7 @@
 import { resolveGeminiAudioTimelineDurationMs } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
 import podcasterMediaState from "./podcaster-media-state.js?v=2026-09-11.snoopy-voice-23";
+import { normalizeFreeVoiceTrack } from "./podcaster-free-voice-track.js?v=2026-10-06.voice-perf-1";
+import { normalizeFreeVideoTrack } from "./podcaster-free-video-track.js";
 /**
  * podcaster-timeline-model.js
  * Extracted Timeline Model, Track Structure, and Duration Math Helper functions.
@@ -23,6 +25,7 @@ import {
 import {
   AVAILABLE_PODCASTER_VIDEO_MODELS,
   isVertexVeoModelId,
+  isLocalVideoModel,
   normalizeVertexVeoModelId
 } from "./podcaster-video-model-catalog.js";
 import { resolveVideoPhysicalDurationMs } from "./podcaster-video-generation-timing.js";
@@ -49,7 +52,7 @@ function migrateLegacyPodcasterVideoModel(raw = {}) {
   const requestedModel = normalizeVertexVeoModelId(raw?.videoModel || "");
   const hasModernRouting = Math.max(0, Number(raw?.videoRoutingVersion || 0) || 0) >= PODCASTER_VIDEO_ROUTING_VERSION;
   if (!requestedModel) return "auto";
-  if (AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel) || isVertexVeoModelId(requestedModel)) {
+  if (AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel) || isVertexVeoModelId(requestedModel) || isLocalVideoModel(requestedModel)) {
     // Lite used to be the implicit default. Only preserve it after a user has
     // saved the modern selector at least once; legacy sessions migrate to auto.
     if (/-lite-generate-/.test(requestedModel) && !hasModernRouting) return "auto";
@@ -60,6 +63,7 @@ function migrateLegacyPodcasterVideoModel(raw = {}) {
 
 function resolvePodcasterVideoGeneratorForModel(model = "auto") {
   const normalized = String(model || "auto").trim();
+  if (isLocalVideoModel(normalized)) return "local";
   if (normalized === "gemini-omni-flash-preview") return "omni";
   if (normalized.startsWith("veo-")) return "veo";
   return "auto";
@@ -319,6 +323,7 @@ function normalizeOverlayCardItem(raw = {}, fallbackId = "") {
     exitDelayMs,
     preset: normalizeOverlayCardPreset(raw.preset),
     styleModel: normalizeOverlayCardStyleModel(raw.styleModel, "lower-third-slab"),
+    renderVersion: Number(raw.renderVersion || 1) >= 2 ? 2 : 1,
     animationPreset: String(raw.animationPreset || "broadcast-soft").trim() || "broadcast-soft",
     textLines,
     position: normalizeOverlayCardPosition(raw.position || raw.size || {}),
@@ -844,6 +849,7 @@ function normalizePodcastVideoConfig(raw = {}) {
   const clipVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.clipVolume, 100)));
   const audioMasterStabilize = raw?.audioMasterStabilize === true;
   const audioMasterLimiterEnabled = raw?.audioMasterLimiterEnabled === true;
+  const audioMasterDuckFreeVoiceEnabled = raw?.audioMasterDuckFreeVoiceEnabled !== false;
   const normalizedAudioMode = audioMode === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene";
   const montageDefaultVeoVolumePct = Math.max(
     0,
@@ -883,7 +889,7 @@ function normalizePodcastVideoConfig(raw = {}) {
   const routingVersion = Math.max(0, Number(raw?.videoRoutingVersion || 0) || 0);
   const requestedVideoGenerator = String(raw?.videoGenerator || "").trim().toLowerCase();
   const hasExplicitModernGenerator = routingVersion >= PODCASTER_VIDEO_ROUTING_VERSION
-    && ["auto", "omni", "veo"].includes(requestedVideoGenerator);
+    && ["auto", "omni", "veo", "local"].includes(requestedVideoGenerator);
   let normalizedVideoModel = migrateLegacyPodcasterVideoModel(raw);
   const normalizedVideoGenerator = hasExplicitModernGenerator
     ? requestedVideoGenerator
@@ -927,12 +933,15 @@ function normalizePodcastVideoConfig(raw = {}) {
       alignment: String(raw?.dialogueAlignment || raw?.geminiDialogueTrack?.alignment || "left").trim().toLowerCase(),
       ...(raw?.geminiDialogueTrack || {})
     }),
+    freeVoiceTrack: normalizeFreeVoiceTrack(raw?.freeVoiceTrack),
+    freeVideoTrack: normalizeFreeVideoTrack(raw?.freeVideoTrack),
     geminiDialogueTrackIndex,
     audioMode: normalizedAudioMode,
     masterVolume,
     clipVolume,
     audioMasterStabilize,
     audioMasterLimiterEnabled,
+    audioMasterDuckFreeVoiceEnabled,
     montageDefaultVeoVolumePct,
     montageDefaultGeminiVolumePct,
     playbackSpeed: Math.max(0.5, Math.min(2.0, toFiniteNumber(raw?.playbackSpeed, 1.0))),
@@ -1026,7 +1035,13 @@ function ensureTimelineTracks(session = null, options = {}) {
   rows.forEach((row) => {
     const speakerKey = String(row?.speaker || "").trim();
     if (!speakerKey) return;
-    usedTrackIds.add(resolveTimelineDefaultTrackIdForSpeaker(speakerKey));
+    const rowId = String(row?.id || "").trim();
+    const assignedTrackId = String(existingClipMap[rowId]?.trackId || "").trim();
+    const normalizedAssignedTrackId = String(educationalTrackIdRemap[assignedTrackId] || assignedTrackId).trim();
+    // A scene with an explicit timeline assignment belongs to that track. Adding
+    // its speaker's default track as well leaves an empty duplicate Video/voice
+    // pair behind after track reassignment (especially in educational sessions).
+    usedTrackIds.add(normalizedAssignedTrackId || resolveTimelineDefaultTrackIdForSpeaker(speakerKey));
   });
   if (!lockPodcastTracksToSpeakers) {
     Object.values(existingClipMap).forEach((clip) => {
@@ -1400,7 +1415,10 @@ function getTimelineClipEndMs(clip = null) {
 
 function getOnScreenTextTimelineMaxEndMs(session = null) {
   const clipMap = ensureOnScreenTextClipsByRowId(session, { persist: false });
-  return Object.values(clipMap || {}).reduce((acc, clip) => {
+  const validRowIds = new Set(getSessionRows(session || getActiveSession())
+    .map((row) => String(row?.id || "").trim()).filter(Boolean));
+  return Object.entries(clipMap || {}).reduce((acc, [rowId, clip]) => {
+    if (!validRowIds.has(String(rowId).trim())) return acc;
     const startMs = Math.max(0, Number(clip?.startMs || 0) || 0);
     const durationMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
@@ -1417,9 +1435,12 @@ function getTimelineTotalDurationMs(session = null) {
   const clipMaxEnd = Object.values(map).reduce((acc, clip) => Math.max(acc, getTimelineClipEndMs(clip)), 0);
   const cfg = getPodcastVideoConfig(session || getActiveSession());
   const geminiTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+  const validRowIds = new Set(getSessionRows(session || getActiveSession())
+    .map((row) => String(row?.id || "").trim()).filter(Boolean));
   const geminiMaxEnd = geminiTrack.enabled === true
     ? (geminiTrack.segments || []).reduce((acc, segment) => {
       const rowId = String(segment?.rowId || "").trim();
+      if (!validRowIds.has(rowId)) return acc;
       const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
       const playbackRate = window.resolveDialogueAudioPlaybackRate?.(session || getActiveSession(), rowId) || 1;
       const durationMs = resolveGeminiAudioTimelineDurationMs({
@@ -1431,7 +1452,11 @@ function getTimelineTotalDurationMs(session = null) {
     }, 0)
     : 0;
   const onScreenTextMaxEnd = getOnScreenTextTimelineMaxEndMs(session);
-  const maxEnd = Math.max(runtimeMaxEnd, clipMaxEnd, geminiMaxEnd, onScreenTextMaxEnd);
+  const freeVoiceMaxEnd = normalizeFreeVoiceTrack(cfg?.freeVoiceTrack).clips.reduce(
+    (max, clip) => Math.max(max, clip.startMs + clip.trimOutMs - clip.trimInMs), 0);
+  const freeVideoMaxEnd = normalizeFreeVideoTrack(cfg?.freeVideoTrack).clips.reduce(
+    (max, clip) => Math.max(max, clip.startMs + clip.trimOutMs - clip.trimInMs), 0);
+  const maxEnd = Math.max(runtimeMaxEnd, clipMaxEnd, geminiMaxEnd, onScreenTextMaxEnd, freeVoiceMaxEnd, freeVideoMaxEnd);
   return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, maxEnd);
 }
 

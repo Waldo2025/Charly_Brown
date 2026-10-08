@@ -555,6 +555,7 @@ function registerCustomRuleRoutes(app) {
 }
 
 function registerAnalizarPdfDataRoutes(app) {
+  require('./pdf-source-uploads.js').registerPdfSourceUploadRoutes(app);
   registerSessionRoutes(app);
   registerStyleMappingRoutes(app);
   registerCustomRuleRoutes(app);

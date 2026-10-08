@@ -7,6 +7,7 @@ export const podcasterGenerationShared = {
   buildTimelineSceneGenerationKey: null,
   runSceneVideoGenerationFlow: null,
   generateDialogueVideoForRow: null,
+  resumeLocalDialogueVideoJobs: null,
   generateDialogueAudioForRow: null
 };
 

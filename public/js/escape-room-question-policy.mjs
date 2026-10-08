@@ -1,5 +1,5 @@
-import { experience } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
-import { experienceAuthoringInstruction } from "./escape-room-experience-authoring.mjs?v=20260912-text-pieces-v11";
+import { experience } from "./escape-room-experience.mjs?v=20260924-coordinate-grid-v12";
+import { experienceAuthoringInstruction } from "./escape-room-experience-authoring.mjs?v=20260924-coordinate-grid-v13";
 // Generation policy only: existing projects and manually edited questions keep their data.
 export const CLOSED_ANSWER_SUBTYPES = ["palabra", "frase_corta", "letra", "numero", "codigo_corto"];
 export const DRAG_DROP_AUTHORING_TEMPLATE = `PLANTILLA DRAG & DROP (aplica sólo a drag_drop):
@@ -188,8 +188,41 @@ export function repairAnswerEntryInstruction(text, answers = []) {
   return result;
 }
 
+export function coordinateRiddleIssues(question = {}) {
+  if (question.tipo_interaccion !== 'respuesta_coordenadas') return [];
+  const data = question.interaction_data || {};
+  const text = [question.titulo, question.reto, data.instructions].filter(Boolean).join(' ');
+  if (!/\b(?:desplaz|muev|avanz|recorr|trayector|ruta|movimiento|move|shift|advance|route|path)\w*/iu.test(text)) return [];
+
+  const issues = [];
+  const start = data.options?.find(option => option.id === data.start_option);
+  if (!start) issues.push('Coordenadas: marca una casilla inicial y di desde dónde comienza el recorrido.');
+  else {
+    const pair = new RegExp(`(?:\\(\\s*${start.x}\\s*[,;]\\s*${start.y}\\s*\\)|x\\s*=\\s*${start.x}\\s*[,;]\\s*y\\s*=\\s*${start.y})`, 'iu');
+    if (!pair.test(text)) issues.push('Coordenadas: indica las coordenadas iniciales en el orden (x, y).');
+  }
+
+  const amount = '(?:\\d+|un|una|uno|dos|tres|cuatro|cinco|one|a|an|two|three|four|five)';
+  const unit = '(?:columnas?|filas?|casillas?|pasos?|unidades?)';
+  const direction = (directions) => new RegExp(
+    `(?:\\b${amount}\\s+${unit}\\s+(?:(?:hacia|a)\\s+)?(?:la\\s+)?(?:${directions})\\b|\\b(?:${directions})\\b[^.!?]{0,28}\\b${amount}\\s+${unit}\\b)`,
+    'iu'
+  );
+  const horizontal = direction('derecha|izquierda|right|left');
+  const vertical = direction('arriba|abajo|up|down');
+  const horizontalUnchanged = /\b(?:x|eje\s+horizontal)\b[^.!?]{0,24}\b(?:no\s+cambia|se\s+mantiene|permanece\s+igual|sin\s+cambio)\b/iu.test(text);
+  const verticalUnchanged = /\b(?:y|eje\s+vertical)\b[^.!?]{0,24}\b(?:no\s+cambia|se\s+mantiene|permanece\s+igual|sin\s+cambio)\b/iu.test(text);
+  if (!horizontal.test(text) && !horizontalUnchanged) issues.push('Coordenadas: especifica cuántas columnas se mueve x y hacia qué dirección, o indica que x no cambia.');
+  if (!vertical.test(text) && !verticalUnchanged) issues.push('Coordenadas: especifica cuántas filas se mueve y y hacia qué dirección, o indica que y no cambia.');
+  return issues;
+}
+
 export function questionInteractionIssues(question, { requireMedia = false, generated = false } = {}) {
-  if (experience.get(question.tipo_interaccion)) return (generated ? experience.authoringIssues : experience.structuralIssues)(question.tipo_interaccion, question.interaction_data);
+  if (experience.get(question.tipo_interaccion)) {
+    const issues = (generated ? experience.authoringIssues : experience.structuralIssues)(question.tipo_interaccion, question.interaction_data);
+    if (generated && question.tipo_interaccion === 'respuesta_coordenadas') issues.push(...coordinateRiddleIssues(question));
+    return [...new Set(issues)];
+  }
   const issues = generated ? [...matchingPromptIssues(question), ...answerDisclosureIssues(question)] : [];
   if (question.tipo_interaccion === 'relacion_columnas' && (generated || question.interaction_contract_version === 2)) {
     const answers = new Set((question.parejas || []).map(pair => key(pair?.derecha)).filter(Boolean));

@@ -21,12 +21,8 @@ const BOUNDS = {
 function applyPanelWidth(panel, widthPx) {
   if (!panel) return;
   const w = `${Math.round(widthPx)}px`;
-  panel.style.width = w;
-  panel.style.minWidth = w;
-  panel.style.maxWidth = w;
-  panel.style.flexBasis = w;
-  panel.style.flexGrow = "0";
-  panel.style.flexShrink = "0";
+  panel.getAnimations().forEach((animation) => animation.cancel());
+  panel.animate([{ width: w, minWidth: w, maxWidth: w, flexBasis: w }], { duration: 1, fill: "forwards" });
 }
 
 export function initPanelResizers() {

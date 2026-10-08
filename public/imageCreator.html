@@ -19,7 +19,7 @@
   </script>
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Image Creator</title>
+  <title>Lucy Studio</title>
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
@@ -40,145 +40,281 @@
     </div>
   </div>
 
+  <!-- Loader de pantalla completa con Lucy Studio al iniciar -->
+  <div id="icGlobalLoader" class="ic-global-loader" aria-live="polite" aria-label="Cargando Lucy Studio">
+    <div class="ic-loader-content">
+      <div class="ic-loader-brand">
+        <img src="imagecreator/lucyStudio1.png" alt="Lucy Studio" class="ic-loader-logo">
+        <div class="ic-loader-spinner" aria-hidden="true"></div>
+      </div>
+      <span class="ic-loader-text">Cargando Lucy Studio...</span>
+    </div>
+  </div>
+
   <main id="imageCreatorApp" class="ic-page-shell">
-    <header class="ic-app-header">
-      <div>
-        <p class="ic-eyebrow">Workspace generativo</p>
-        <h1>Image Creator</h1>
-      </div>
-      <div class="ic-app-header__actions">
-        <button type="button" id="icMobileSessionsBtn" class="ic-mobile-sessions-btn" aria-controls="icSessionRail" aria-expanded="false">
-          <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
-          <span>Sesiones</span>
-        </button>
-        <button type="button" id="icToggleOptionsBtn" class="ic-header-icon-btn" aria-expanded="false" aria-controls="icOptionsModal" aria-label="Mostrar ajustes" title="Ajustes">
-          <i class="fas fa-sliders" aria-hidden="true"></i>
-        </button>
-        <button type="button" id="icThemeToggleBtn" class="ic-theme-toggle" aria-label="Tema actual: Oscuro. Cambiar tema">
-          <i class="fas fa-moon" aria-hidden="true"></i>
-          <span>Oscuro</span>
-        </button>
-      </div>
-    </header>
-
     <div class="ic-panels-grid">
-    <aside id="icSessionRail" class="ic-session-rail" aria-label="Sesiones de Image Creator">
-      <div class="ic-session-rail__header">
-        <h1>Sesiones</h1>
-      </div>
-
-      <div class="ic-session-controls">
-        <div class="ic-session-rail__search">
-          <i class="fas fa-search"></i>
-          <input id="icSessionSearchInput" type="search" placeholder="Buscar sesiones">
-        </div>
-        <button type="button" id="icNewSessionBtn" class="ic-ghost-btn">
-          <i class="fas fa-pen-to-square"></i>
-          <span>Nueva</span>
-        </button>
-      </div>
-
-      <div id="icSessionStatus" class="ic-session-status" aria-live="polite">Cargando sesiones...</div>
-      <div id="icSessionList" class="ic-session-list" aria-live="polite"></div>
-    </aside>
-
-    <button type="button" id="icMobileBackdrop" class="ic-mobile-backdrop hidden" aria-label="Cerrar panel de sesiones"></button>
-
-    <div class="ic-resizer" data-resizer="sessions" role="separator" aria-label="Redimensionar panel de sesiones" aria-orientation="vertical" tabindex="0"></div>
-
-    <section class="ic-canvas-shell">
-      <div class="ic-chat-toolbar">
-        <div class="ic-chat-toolbar__main">
-          <div>
-            <p class="ic-toolbar-label">Sesión activa</p>
-            <h2 id="icActiveSessionTitle">Nueva sesión</h2>
+      <!-- Columna 1 (Izquierda): Header + Sesiones -->
+      <aside id="icSessionRail" class="ic-session-rail" aria-label="Sesiones de Image Creator">
+        <header class="ic-app-header">
+          <div class="ic-app-header__brand">
+            <img src="imagecreator/lucyStudioLogo.png" alt="Lucy Studio" class="ic-brand-logo">
+            <div class="ic-brand-titles">
+              <h1>Lucy Studio</h1>
+            </div>
           </div>
+          <div class="ic-app-header__actions">
+            <button type="button" id="icThemeToggleBtn" class="ic-theme-toggle" aria-label="Tema actual: Oscuro. Cambiar tema" title="Cambiar tema">
+              <i class="fas fa-moon" aria-hidden="true"></i>
+            </button>
+          </div>
+        </header>
+
+        <div class="ic-session-controls">
+          <div class="ic-session-rail__search">
+            <i class="fas fa-search"></i>
+            <input id="icSessionSearchInput" type="search" placeholder="Buscar sesiones">
+          </div>
+          <button type="button" id="icNewSessionBtn" class="ic-ghost-btn" title="Nueva sesión" aria-label="Nueva sesión">
+            <i class="fas fa-pen-to-square" aria-hidden="true"></i>
+          </button>
         </div>
 
-        <span class="ic-toolbar-context"><i class="fas fa-sparkles"></i> Lienzo generativo</span>
-      </div>
+        <div id="icSessionStatus" class="ic-session-status" aria-live="polite">Cargando sesiones...</div>
+        <div id="icSessionList" class="ic-session-list" aria-live="polite"></div>
+      </aside>
 
-      <section id="icChatFeed" class="ic-chat-feed" aria-live="polite"></section>
-    </section>
+      <button type="button" id="icMobileBackdrop" class="ic-mobile-backdrop hidden" aria-label="Cerrar panel de sesiones"></button>
 
-    <div id="icToolsResizer" class="ic-resizer" data-resizer="tools" role="separator" aria-label="Redimensionar panel de herramientas" aria-orientation="vertical" tabindex="0"></div>
+      <div class="ic-resizer" data-resizer="sessions" role="separator" aria-label="Redimensionar panel de sesiones" aria-orientation="vertical" tabindex="0"></div>
 
-    <aside id="icToolsPanel" class="ic-tools-panel">
-      <div class="ic-tools-panel__header">
-        <div>
-          <p class="ic-toolbar-label">Asistente</p>
-          <h2>Chat creativo</h2>
-        </div>
-      </div>
+      <!-- Columna 2 (Central): Feed y Chat Composer al bottom -->
+      <section class="ic-canvas-shell">
+        <section id="icChatFeed" class="ic-chat-feed" aria-live="polite"></section>
 
-      <div class="ic-chat-panel">
-        <div class="ic-chat-panel__label"><i class="fas fa-message"></i><span>Chat</span></div>
+        <!-- Chat Composer en la columna central al bottom -->
         <div class="ic-composer-shell">
           <div id="icComposerError" class="ic-inline-alert hidden" aria-live="polite"></div>
           <div id="icComposerMeta" class="ic-composer-meta hidden"></div>
           <div id="icAttachmentTray" class="ic-attachment-tray hidden"></div>
 
           <div class="ic-composer">
-            <label class="ic-composer__field" for="icPromptInput">
-              <span class="ic-sr-only">Instrucción creativa</span>
-              <textarea id="icPromptInput" rows="5" placeholder="Describe la imagen o indica cómo editar/componer referencias..."></textarea>
-            </label>
+            <button type="button" id="icComposerExpandBtn" class="ic-composer-expand-handle" aria-label="Expandir o contraer entrada" title="Expandir entrada">
+              <i class="fas fa-expand-alt" aria-hidden="true"></i>
+            </button>
+            <div id="icComposerCapsules" class="ic-composer-capsules hidden"></div>
+            <textarea id="icPromptInput" rows="2" placeholder="Escribe lo que necesitas cambiar, generar o corregir..."></textarea>
+            <footer class="ic-composer-footer">
+              <div class="ic-composer-footer-left">
+                <div class="ic-composer-mode-dropdown-wrapper">
+                  <button type="button" id="icComposerModeBtn" class="ic-composer-action-btn" aria-label="Cambiar modo" title="Modos de creación" aria-haspopup="true" aria-expanded="false">
+                    <i class="fa-solid fa-plus"></i>
+                  </button>
 
-            <div class="ic-composer__footer">
-              <div class="ic-composer__actions">
-                <button type="button" id="icAttachBtn" class="ic-composer-action" aria-label="Adjuntar referencias">
-                  <i class="fas fa-paperclip"></i>
-                  <span>Adjuntar</span>
+                  <div id="icComposerModeMenu" class="ic-composer-mode-menu hidden" role="menu" aria-label="Modos de creación">
+                    <button type="button" class="ic-mode-menu-item active" data-mode="generate" role="menuitem">
+                      <i class="fa-solid fa-wand-magic-sparkles" style="color: #f59e0b;"></i>
+                      <div class="ic-mode-menu-info">
+                        <strong>Crear</strong>
+                        <small>Imagen original desde texto</small>
+                      </div>
+                    </button>
+                    <button type="button" class="ic-mode-menu-item" data-mode="edit" role="menuitem">
+                      <i class="fa-solid fa-paintbrush" style="color: #ec4899;"></i>
+                      <div class="ic-mode-menu-info">
+                        <strong>Editar</strong>
+                        <small>Modificar una referencia</small>
+                      </div>
+                    </button>
+                    <button type="button" class="ic-mode-menu-item" data-mode="compose" role="menuitem">
+                      <i class="fa-solid fa-layer-group" style="color: #3b82f6;"></i>
+                      <div class="ic-mode-menu-info">
+                        <strong>Componer</strong>
+                        <small>Fusionar 2+ referencias</small>
+                      </div>
+                    </button>
+                    <button type="button" class="ic-mode-menu-item" data-mode="variation" role="menuitem">
+                      <i class="fa-solid fa-shuffle" style="color: #10b981;"></i>
+                      <div class="ic-mode-menu-info">
+                        <strong>Variar</strong>
+                        <small>Versiones alternativas</small>
+                      </div>
+                    </button>
+                    <button type="button" class="ic-mode-menu-item" data-mode="video_script" role="menuitem">
+                      <i class="fa-solid fa-clapperboard" style="color: #a855f7;"></i>
+                      <div class="ic-mode-menu-info">
+                        <strong>Guion</strong>
+                        <small>Escenas para Podcaster</small>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <span class="ic-action-separator" aria-hidden="true"></span>
+
+                <button type="button" id="icAttachBtn" class="ic-composer-attach-btn" aria-label="Adjuntar imágenes" title="Adjuntar imágenes de referencia">
+                  <i class="fas fa-paperclip" aria-hidden="true"></i>
                 </button>
                 <input id="icAttachmentInput" type="file" accept="image/*" multiple hidden>
+
+                <span class="ic-action-separator" aria-hidden="true"></span>
+
+                <button type="button" id="icVideoScriptBtn" class="ic-composer-action-btn" aria-label="Crear guion de video" title="Crear Guion de Video y Referencias para Podcaster">
+                  <i class="fas fa-clapperboard" aria-hidden="true"></i>
+                </button>
+
+                <span class="ic-action-separator" aria-hidden="true"></span>
+
+                <button type="button" id="icClearPromptBtn" class="ic-composer-action-btn" aria-label="Limpiar campo" title="Limpiar texto">
+                  <i class="fas fa-trash-can" aria-hidden="true"></i>
+                </button>
               </div>
 
-              <div class="ic-composer__submit">
-                <button type="button" id="icSendBtn" class="ic-send-btn">
-                  <i class="fas fa-wand-magic-sparkles"></i>
-                  <span>Generar</span>
-                </button>
+              <button type="button" id="icSendBtn" class="ic-send-btn" aria-label="Generar" title="Generar">
+                <i class="fas fa-paper-plane" aria-hidden="true"></i>
+              </button>
+            </footer>
+          </div>
+        </div>
+      </section>
+
+      <div id="icToolsResizer" class="ic-resizer" data-resizer="tools" role="separator" aria-label="Redimensionar panel de parámetros" aria-orientation="vertical" tabindex="0"></div>
+
+      <!-- Columna 3 (Derecha): Parámetros de Formato estilo Midjourney HUD -->
+      <aside id="icFloatingFormatPanel" class="ic-tools-panel ic-mj-format-panel" aria-label="Parámetros de imagen">
+        <div class="ic-mj-panel-header">
+          <div class="ic-mj-title">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Parámetros de Imagen</span>
+          </div>
+        </div>
+
+        <div class="ic-mj-panel-body">
+          <!-- Bloque 1: Dimensiones & Ratio -->
+          <div class="ic-inspector-block">
+            <div class="ic-inspector-header">
+              <span class="ic-inspector-title"><i class="fa-solid fa-crop-simple"></i> Proporción (Aspect Ratio)</span>
+            </div>
+            <div class="ic-mj-ratio-grid" role="radiogroup" aria-label="Aspect Ratio" id="icMjRatioGrid">
+              <button type="button" class="ic-mj-ratio-card" data-ratio="1:1" role="radio" aria-checked="false" title="1:1 Cuadrado">
+                <span class="ic-mj-ratio-box ratio-1-1"></span>
+                <span class="ic-mj-ratio-text">1:1</span>
+              </button>
+              <button type="button" class="ic-mj-ratio-card active" data-ratio="16:9" role="radio" aria-checked="true" title="16:9 Panorámico">
+                <span class="ic-mj-ratio-box ratio-16-9"></span>
+                <span class="ic-mj-ratio-text">16:9</span>
+              </button>
+              <button type="button" class="ic-mj-ratio-card" data-ratio="9:16" role="radio" aria-checked="false" title="9:16 Vertical">
+                <span class="ic-mj-ratio-box ratio-9-16"></span>
+                <span class="ic-mj-ratio-text">9:16</span>
+              </button>
+              <button type="button" class="ic-mj-ratio-card" data-ratio="4:3" role="radio" aria-checked="false" title="4:3 Horizontal">
+                <span class="ic-mj-ratio-box ratio-4-3"></span>
+                <span class="ic-mj-ratio-text">4:3</span>
+              </button>
+              <button type="button" class="ic-mj-ratio-card" data-ratio="3:4" role="radio" aria-checked="false" title="3:4 Retrato">
+                <span class="ic-mj-ratio-box ratio-3-4"></span>
+                <span class="ic-mj-ratio-text">3:4</span>
+              </button>
+            </div>
+
+            <div class="ic-inspector-subrow">
+              <span class="ic-inspector-subtitle"><i class="fa-solid fa-expand"></i> Resolución</span>
+              <div class="ic-mj-pill-group" role="radiogroup" aria-label="Resolución" id="icMjImageSizeGroup">
+                <button type="button" class="ic-mj-pill active" data-size="1K" role="radio" aria-checked="true">1k <small>1024</small></button>
+                <button type="button" class="ic-mj-pill" data-size="2K" role="radio" aria-checked="false">2k <small>2048</small></button>
+                <button type="button" class="ic-mj-pill" data-size="4K" role="radio" aria-checked="false">4k <small>4096</small></button>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </aside>
-    </div>
 
-    <button type="button" id="icToggleChatBtn" class="ic-chat-fab" aria-controls="icToolsPanel" aria-expanded="true" aria-label="Ocultar Chat creativo" title="Arrastra para mover · Ocultar Chat creativo">
-      <i class="fas fa-comments" aria-hidden="true"></i>
-      <span class="ic-sr-only">Mostrar u ocultar Chat creativo</span>
-    </button>
+          <!-- Bloque 3: Salida & Variaciones -->
+          <div class="ic-inspector-block">
+            <div class="ic-inspector-grid-2">
+              <div>
+                <span class="ic-inspector-title"><i class="fa-solid fa-file-image"></i> Formato</span>
+                <div class="ic-mj-pill-group" role="radiogroup" aria-label="Formato" id="icMjFormatGroup" style="margin-top: 6px;">
+                  <button type="button" class="ic-mj-pill active" data-format="png" role="radio" aria-checked="true">png</button>
+                  <button type="button" class="ic-mj-pill" data-format="jpeg" role="radio" aria-checked="false">jpg</button>
+                  <button type="button" class="ic-mj-pill" data-format="webp" role="radio" aria-checked="false">webp</button>
+                </div>
+              </div>
 
-    <div id="icOptionsModal" class="ic-options-modal hidden" aria-hidden="true">
-      <section id="icOptionsPanel" class="ic-options-panel" role="dialog" aria-modal="true" aria-labelledby="icOptionsTitle">
-        <div class="ic-options-panel__header">
-          <div>
-            <p class="ic-toolbar-label">Configuración de imagen</p>
-            <h2 id="icOptionsTitle">Ajustes</h2>
-            <p>Controla modelo, formato y orientación.</p>
+              <div>
+                <span class="ic-inspector-title"><i class="fa-solid fa-clone"></i> Muestras</span>
+                <div class="ic-mj-pill-group ic-mj-count-group" role="radiogroup" aria-label="Cantidad" id="icMjCountGroup" style="margin-top: 6px;">
+                  <button type="button" class="ic-mj-pill active" data-count="1" role="radio" aria-checked="true">1</button>
+                  <button type="button" class="ic-mj-pill" data-count="2" role="radio" aria-checked="false">2</button>
+                  <button type="button" class="ic-mj-pill" data-count="3" role="radio" aria-checked="false">3</button>
+                  <button type="button" class="ic-mj-pill" data-count="4" role="radio" aria-checked="false">4</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <button type="button" id="icCloseOptionsBtn" class="ic-panel-close-btn" aria-label="Cerrar ajustes">
-            <i class="fas fa-xmark"></i>
-          </button>
-        </div>
 
-        <div class="ic-options-grid">
-          <label class="ic-field"><span>Modo</span><select id="icModeSelect"></select></label>
-          <label class="ic-field"><span>Modelo</span><select id="icModelSelect"></select></label>
-          <label class="ic-field"><span>Aspect ratio</span><select id="icAspectRatioSelect"></select></label>
-          <label class="ic-field"><span>Image size</span><select id="icImageSizeSelect"></select></label>
-          <label class="ic-field"><span>Formato descarga</span><select id="icDownloadFormatSelect"></select></label>
-          <label class="ic-field"><span>Cantidad</span><select id="icCountSelect"></select></label>
-        </div>
+          <!-- Bloque 4: Sujetos / Personas -->
+          <div class="ic-inspector-block">
+            <div class="ic-inspector-header">
+              <span class="ic-inspector-title"><i class="fa-solid fa-users"></i> Sujetos y Personas</span>
+            </div>
+            <div class="ic-mj-chip-group ic-mj-person-group" role="radiogroup" aria-label="Personas" id="icMjPersonGroup">
+              <button type="button" class="ic-mj-chip active" data-person="ALLOW_ALL" role="radio" aria-checked="true">
+                <i class="fa-solid fa-users"></i><span>Todas</span>
+              </button>
+              <button type="button" class="ic-mj-chip" data-person="ALLOW_ADULT" role="radio" aria-checked="false">
+                <i class="fa-solid fa-user"></i><span>Solo adultos</span>
+              </button>
+              <button type="button" class="ic-mj-chip" data-person="DONT_ALLOW" role="radio" aria-checked="false">
+                <i class="fa-solid fa-user-slash"></i><span>Sin personas</span>
+              </button>
+            </div>
+          </div>
 
-        <div class="ic-options-note">
-          <strong>Notas:</strong>
-          <span id="icOptionsHint">Gemini 2.5 ignora `imageSize`; Gemini 3.1 y Pro sí lo usan.</span>
+          <!-- Bloque 5: Motor de Generación -->
+          <div class="ic-inspector-block">
+            <div class="ic-inspector-header">
+              <span class="ic-inspector-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Motor Lucy</span>
+            </div>
+            <div class="ic-mj-model-group" role="radiogroup" aria-label="Modelo" id="icMjModelGroup">
+              <button type="button" class="ic-mj-model-card active" data-model="gemini-3.1-flash-image" role="radio" aria-checked="true">
+                <div class="ic-mj-model-info">
+                  <div class="ic-mj-model-badge"><i class="fa-solid fa-bolt"></i></div>
+                  <div class="ic-mj-model-names">
+                    <strong>Lucy Flash</strong>
+                    <small>Rápido · 1K a 4K</small>
+                  </div>
+                </div>
+                <span class="ic-mj-check-indicator"><i class="fa-solid fa-circle-check"></i></span>
+              </button>
+              <button type="button" class="ic-mj-model-card" data-model="gemini-3-pro-image" role="radio" aria-checked="false">
+                <div class="ic-mj-model-info">
+                  <div class="ic-mj-model-badge"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                  <div class="ic-mj-model-names">
+                    <strong>Lucy Pro</strong>
+                    <small>Alta fidelidad · 1K a 4K</small>
+                  </div>
+                </div>
+                <span class="ic-mj-check-indicator"><i class="fa-solid fa-circle-check"></i></span>
+              </button>
+              <button type="button" class="ic-mj-model-card" data-model="gemini-2.5-flash-image" role="radio" aria-checked="false">
+                <div class="ic-mj-model-info">
+                  <div class="ic-mj-model-badge"><i class="fa-solid fa-cube"></i></div>
+                  <div class="ic-mj-model-names">
+                    <strong>Lucy Estándar</strong>
+                    <small>Estándar · Fijo</small>
+                  </div>
+                </div>
+                <span class="ic-mj-check-indicator"><i class="fa-solid fa-circle-check"></i></span>
+              </button>
+            </div>
+          </div>
         </div>
-      </section>
+      </aside>
     </div>
+
+    <button type="button" id="icToggleChatBtn" class="ic-chat-fab" aria-controls="icFloatingFormatPanel" aria-expanded="true" aria-label="Mostrar u ocultar parámetros" title="Parámetros de imagen">
+      <i class="fas fa-sliders" aria-hidden="true"></i>
+      <span class="ic-sr-only">Mostrar u ocultar parámetros</span>
+    </button>
 
     <div id="icImageViewer" class="ic-image-viewer hidden" aria-hidden="true">
       <section class="ic-image-viewer__gallery" role="dialog" aria-modal="true" aria-label="Imagen generada en vista de galería">
@@ -263,8 +399,8 @@
 
           <div id="icRegionTextFields" class="ic-region-text-fields hidden">
             <div class="ic-region-text-mode" role="radiogroup" aria-label="Método para editar texto">
-              <label><input type="radio" name="icTextRenderMode" value="integrated" checked><span><strong>Integrado</strong><small>Gemini conserva perspectiva y textura</small></span></label>
-              <label><input type="radio" name="icTextRenderMode" value="exact"><span><strong>Texto exacto</strong><small>Fondo con Gemini y letras precisas</small></span></label>
+              <label><input type="radio" name="icTextRenderMode" value="integrated" checked><span><strong>Integrado</strong><small>Lucy conserva perspectiva y textura</small></span></label>
+              <label><input type="radio" name="icTextRenderMode" value="exact"><span><strong>Texto exacto</strong><small>Fondo con Lucy Studio y letras precisas</small></span></label>
             </div>
             <div class="ic-region-text-grid">
               <label><span>Texto actual</span><input id="icRegionCurrentText" type="text" placeholder="Texto que aparece ahora (opcional)"></label>

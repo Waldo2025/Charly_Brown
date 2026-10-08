@@ -71,7 +71,7 @@ export function repairTruncatedJson(str) {
 
     try {
       const parsed = JSON.parse(candidate + closing);
-      if (parsed && typeof parsed === "object") return parsed;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Object.keys(parsed).length) return parsed;
     } catch (_) {}
   }
   return null;

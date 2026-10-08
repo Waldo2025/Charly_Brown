@@ -8,10 +8,11 @@ const editor = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/edito
 const geminiService = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/services/marcie-gemini-service.js"), "utf8");
 const modal = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/components/modals.js"), "utf8");
 
-test("las propuestas incluyen coordinadores como cuarta audiencia", () => {
-  assert.match(geminiService, /genera EXACTAMENTE cuatro propuestas editoriales diferenciadas/);
-  assert.match(geminiService, /"coordinators" \(Coordinadores académicos y directivos escolares\)/);
-  assert.match(geminiService, /"id": "prop-coordinators"/);
+test("las propuestas soportan coordinadores sin forzar cuatro audiencias", () => {
+  assert.match(geminiService, /coordinators:\s*\{/);
+  assert.match(geminiService, /label: "Coordinadores académicos y directivos escolares"/);
+  assert.match(geminiService, /EXACTAMENTE \$\{proposalCount\}/);
+  assert.doesNotMatch(geminiService, /EXACTAMENTE cuatro propuestas/i);
   assert.match(modal, /ALL_AUDIENCE_KEYS = \["students", "parents", "educators", "coordinators"\]/);
 });
 

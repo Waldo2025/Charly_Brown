@@ -5750,3 +5750,63 @@ body.sa-shell[data-sa-theme] .sa-page .sa-session:focus-visible{outline:2px soli
 @media(max-width:720px){body.sa-shell[data-sa-theme] .sa-page .sa-session-group{flex:0 0 min(88vw,330px)}body.sa-shell[data-sa-theme] .sa-page .sa-session-group-items{padding-left:4px}}
 @media(max-width:720px){body.sa-shell[data-sa-theme] .sa-page .sa-session-filter{flex:0 0 min(88vw,330px);align-self:center}}
 @media(prefers-reduced-motion:reduce){body.sa-shell[data-sa-theme] .sa-page .sa-session-group-chevron,body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions,body.sa-shell[data-sa-theme] .sa-page .sa-session-item,.sa-session-filter button{transition:none}}
+
+/* Production shares the editor's tokens, fields and buttons. */
+.sa-production-dialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid var(--sa-line); border-radius: 12px; background: var(--sa-panel); color: var(--sa-text); font-family: var(--sa-font); box-shadow: var(--sa-shadow); }
+.sa-production-dialog::backdrop { background: color-mix(in srgb, var(--sa-bg) 75%, transparent); }
+.sa-production-dialog .sa-panel-title h2 { margin: 0; font-size: 1rem; }
+.sa-production-dialog p { font-size: .85rem; line-height: 1.5; white-space: pre-wrap; }
+.sa-production-dialog .sa-field > span { color: var(--sa-muted) !important; -webkit-text-fill-color: var(--sa-muted) !important; }
+.sa-production-dialog :is(input, textarea, select) { color: var(--sa-text) !important; -webkit-text-fill-color: var(--sa-text) !important; border-color: var(--sa-line) !important; background: var(--sa-panel-3) !important; caret-color: var(--sa-cyan); }
+.sa-production-dialog :is(input, textarea, select):focus { border-color: var(--sa-cyan) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--sa-cyan) 18%, transparent) !important; outline: none; }
+.sa-production-dialog :is(input, textarea)::placeholder { color: var(--sa-muted) !important; -webkit-text-fill-color: var(--sa-muted) !important; opacity: 1; }
+.sa-production-dialog select option { color: var(--sa-text) !important; background: var(--sa-panel-3) !important; }
+.sa-production-dialog .sa-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.sa-production-dialog .sa-panel-title .sa-icon-button { width: 32px; height: 32px; flex: 0 0 auto; color: var(--sa-muted); border: 1px solid var(--sa-line); background: var(--sa-panel-2); }
+.sa-production-dialog .sa-panel-title .sa-icon-button:hover { color: var(--sa-text); border-color: var(--sa-cyan); background: var(--sa-panel-3); }
+.sa-production-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sa-production-actions button { padding: 8px 12px; }
+.sa-production-dialog [hidden] { display: none !important; }
+.sa-production-tasks { padding-left: 20px; }
+.sa-production-tasks li { padding: 8px 0; overflow-wrap: anywhere; }
+.sa-production-tasks button { margin-top: 8px; padding: 8px 12px; }
+.sa-production-dialog [data-production="error"] { color: var(--sa-coral); }
+
+.sa-production-progress { position: fixed; z-index: 1800; right: 24px; bottom: 24px; width: min(420px, calc(100vw - 32px)); padding: 18px; color: var(--sa-text); border: 1px solid color-mix(in srgb, var(--sa-cyan) 32%, var(--sa-line)); border-radius: 14px; background: color-mix(in srgb, var(--sa-panel) 94%, #07131f); box-shadow: 0 24px 70px rgba(2, 6, 23, .34), 0 0 0 1px rgba(255,255,255,.04) inset; font-family: var(--sa-font); animation: sa-production-progress-in .28s cubic-bezier(.2,.8,.2,1) both; }
+.sa-production-progress[hidden] { display: none !important; }
+.sa-production-progress-head { display: grid; grid-template-columns: 38px minmax(0, 1fr) 30px; align-items: start; gap: 11px; }
+.sa-production-progress-mark { width: 38px; height: 38px; display: grid; place-items: center; color: var(--sa-bg); border-radius: 11px; background: linear-gradient(135deg, var(--sa-cyan), var(--sa-lime)); box-shadow: 0 0 24px color-mix(in srgb, var(--sa-cyan) 26%, transparent); }
+.sa-production-progress-heading > span { display: block; color: var(--sa-cyan); font-size: .58rem; font-weight: 900; letter-spacing: .13em; }
+.sa-production-progress-heading h2 { margin: 3px 0 3px; overflow: hidden; color: var(--sa-text); font-size: .98rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.sa-production-progress-heading p { margin: 0; overflow: hidden; color: var(--sa-muted); font-size: .72rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.sa-production-progress > .sa-icon-button { width: 30px; height: 30px; color: var(--sa-muted); border: 1px solid transparent; background: transparent; }
+.sa-production-progress > .sa-icon-button:hover { color: var(--sa-text); border-color: var(--sa-line); background: var(--sa-panel-2); }
+.sa-production-progress-meter { height: 6px; margin: 17px 0 9px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--sa-line) 72%, transparent); }
+.sa-production-progress-meter > div { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--sa-cyan), var(--sa-lime)); box-shadow: 0 0 16px color-mix(in srgb, var(--sa-cyan) 70%, transparent); transition: width .45s ease; }
+.sa-production-progress-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--sa-muted); font-size: .66rem; }
+.sa-production-progress-summary strong { color: var(--sa-text); font-weight: 850; }
+.sa-production-progress-tasks { max-height: 172px; margin: 13px 0 0; padding: 0; overflow: auto; list-style: none; }
+.sa-production-progress-tasks li { display: grid; grid-template-columns: 25px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 38px; padding: 7px 8px; border-top: 1px solid color-mix(in srgb, var(--sa-line) 62%, transparent); }
+.sa-production-progress-tasks li > i { width: 25px; height: 25px; display: grid; place-items: center; color: var(--sa-muted); border-radius: 8px; background: var(--sa-panel-2); font-size: .65rem; }
+.sa-production-progress-tasks li span { display: grid; gap: 2px; min-width: 0; }
+.sa-production-progress-tasks strong { overflow: hidden; color: var(--sa-text); font-size: .72rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.sa-production-progress-tasks small { color: var(--sa-muted); font-size: .63rem; }
+.sa-production-progress-tasks li.is-running > i { color: var(--sa-bg); background: var(--sa-cyan); animation: sa-production-agent-pulse 1.25s ease-in-out infinite; }
+.sa-production-progress-tasks li.is-completed > i { color: var(--sa-bg); background: var(--sa-lime); }
+.sa-production-progress-tasks li.is-failed > i,.sa-production-progress-tasks li.is-blocked > i { color: #fff; background: var(--sa-coral); }
+.sa-production-progress-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.sa-production-progress-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 7px 10px; font-size: .68rem; }
+@keyframes sa-production-progress-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes sa-production-agent-pulse { 0%,100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--sa-cyan) 42%, transparent); } 50% { transform: scale(1.08); box-shadow: 0 0 0 5px color-mix(in srgb, var(--sa-cyan) 0%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .sa-production-progress { animation: none; } .sa-production-progress-meter > div,.sa-production-progress-tasks li.is-running > i { transition: none; animation: none; } }
+@media (max-width: 640px) { .sa-production-progress { right: 12px; bottom: 12px; width: calc(100vw - 24px); padding: 15px; } }
+
+.science-generated-frame { width: 100%; height: 100%; min-height: 480px; border: 0; background: var(--sa-bg); }
+
+.sa-production-partial { border: 1px solid var(--sa-line); border-radius: 12px; padding: 12px; margin-top: 12px; background: var(--sa-panel-2); }
+.sa-production-partial img { display: block; width: 100%; max-height: 320px; object-fit: contain; margin-block: 12px; }
+
+.sa-generate-button.sa-button-secondary { background: var(--sa-panel-2); border: 1px solid var(--sa-line); color: var(--sa-text); box-shadow: none; }
+.sa-generate-button.sa-button-secondary:hover { border-color: var(--sa-cyan); }
+.sa-generate-button.sa-button-destructive { background: transparent; border: 1px solid transparent; color: var(--sa-coral); box-shadow: none; }
+.sa-generate-button.sa-button-destructive:hover { border-color: var(--sa-coral); background: color-mix(in srgb, var(--sa-coral) 8%, transparent); }

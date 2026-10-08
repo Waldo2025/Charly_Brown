@@ -11,7 +11,7 @@ try{
  await page.route("**/js/SallyBrownEditor.js",r=>r.fulfill({body:""}));await page.route("**/js/sidebar.js",r=>r.fulfill({body:""}));
  await page.goto(`http://127.0.0.1:${server.address().port}/SallyBrownEditor.html`);
  await page.evaluate(async()=>{
-   document.getElementById("sallyAccessGate").remove();document.getElementById("sallyApp").hidden=false;document.getElementById("sallyResultsPanel").hidden=false;document.getElementById("sallyCurrentResults").hidden=true;
+   document.getElementById("sallyAccessGate").remove();document.getElementById("sallyApp").hidden=false;document.getElementById("sallyResultsPanel").hidden=false;document.getElementById("sallyCurrentResults").hidden=true;document.getElementById("sallyResultDetail").closest("details").open=true;
    window.views=await import("/js/sally-result-view.js");
    window.fixture={title:"Español 1, Bloque 1",url:"https://moodle.test/course/view.php?id=855",format:"Temas por pestañas",coverage:{complete:false},warnings:[{message:"Una subpestaña requiere revisión."}],tabs:[{title:"Introducción"},{title:"Libro digital",level:1}],sections:[{title:"Introducción",modules:[{title:"Tutorial de navegación",type:"page",url:"https://moodle.test/mod/page/view.php?id=1",text:"Contenido completo del tutorial."},{title:"Guía docente",type:"resource",url:"javascript:alert(1)",html:'<p>Texto seguro</p><script>window.injected=true</script>'}]}]};
    views.renderResult(document.getElementById("sallyResultDetail"),{kind:"analysis",text:"### Reporte del análisis\n\nEl curso organiza sus contenidos en **pestañas temáticas**."},fixture);
@@ -21,8 +21,8 @@ try{
  assert.equal(await result.locator("strong").first().textContent(),"pestañas temáticas");
  assert.doesNotMatch(await result.textContent(),/"sections"\s*:|"modules"\s*:|"coverage"\s*:/);
  assert.match(await result.textContent(),/Parcial/);assert.equal(await result.locator('a[href^="javascript:"]').count(),0);
- const section=result.locator("details").filter({has:page.locator("summary",{hasText:"Introducción · 2 recursos"})}).first();
- await section.locator(":scope > summary").focus();await page.keyboard.press("Enter");assert.equal(await section.evaluate(n=>n.open),true);
+ const section=result.locator("summary",{hasText:"Introducción · 2 recursos"}).locator("..").first();
+ if(!await section.evaluate(n=>n.open))await section.locator(":scope > summary").click();assert.equal(await section.evaluate(n=>n.open),true);
  assert.match(await result.textContent(),/Tutorial de navegación/);assert.equal(await page.evaluate(()=>window.injected),undefined);
  await page.screenshot({path:"artifacts/sally-friendly-results-desktop.png"});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:"artifacts/sally-friendly-results-mobile.png"});

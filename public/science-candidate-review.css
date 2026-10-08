@@ -1,0 +1,5 @@
+.sa-candidate-dialog { color: var(--sa-text); background: var(--sa-panel); border: 1px solid var(--sa-line); border-radius: 16px; width: min(1100px, 94vw); max-height: 94vh; padding: 20px; }
+.sa-candidate-dialog::backdrop { background: rgb(0 0 0 / .65); }
+.sa-candidate-dialog iframe { width: 100%; height: min(620px, 64vh); border: 1px solid var(--sa-line); border-radius: 12px; background: var(--sa-bg); }
+.sa-candidate-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.sa-candidate-dialog .sa-stage-actions { flex-wrap: wrap; margin-top: 16px; }

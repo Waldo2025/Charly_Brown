@@ -131,6 +131,8 @@ function validateMontageExportPreflight(input = {}, options = {}) {
     const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
     const hasVisualSource = hasRenderableAssetSource(videoAsset);
     const hasSyntheticSource = hasSyntheticVisualSource(entry);
+    const stopMotionFrames = Array.isArray(videoAsset?.stopMotion?.frames) ? videoAsset.stopMotion.frames : [];
+    const hasStopMotionSequence = stopMotionFrames.length >= 2;
     const usesNativeVideoAudio = entry?.useNativeVideoAudio === true || Number(entry?.veoVolumeOverridePct || 0) > 0.0001;
 
     totalDurationMs += durationMs;
@@ -170,7 +172,22 @@ function validateMontageExportPreflight(input = {}, options = {}) {
       }));
     }
 
-    if (!onlyAudio && !hasVisualSource && !hasSyntheticSource) {
+    if (!onlyAudio && hasStopMotionSequence) {
+      stopMotionFrames.forEach((frame, frameIndex) => {
+        if (hasRenderableAssetSource(frame && typeof frame === "object" ? frame : {})) return;
+        issues.push(buildIssue({
+          code: "missing_stop_motion_frame_source",
+          message: `Escena ${sceneIndex} tiene un frame de stop motion sin imagen accesible (frame ${frameIndex + 1}).`,
+          path: `entries.${index}.video.stopMotion.frames.${frameIndex}`,
+          index,
+          sceneIndex,
+          rowId,
+          field: "stopMotion"
+        }));
+      });
+    }
+
+    if (!onlyAudio && !hasVisualSource && !hasSyntheticSource && !hasStopMotionSequence) {
       issues.push(buildIssue({
         code: "missing_visual_source",
         message: `Escena ${sceneIndex} no tiene video, imagen ni fondo renderizable para el backend.`,

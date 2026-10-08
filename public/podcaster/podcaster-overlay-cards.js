@@ -1,4 +1,4 @@
-export * from "./podcaster-overlay-card-studio.js";
+export * from "./podcaster-overlay-card-studio.js?rev=2026-10-07.export-preview-controls-1";
 
 /*
 Compatibility comments to pass static contract checks:

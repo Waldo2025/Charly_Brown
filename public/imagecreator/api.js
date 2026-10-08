@@ -1,4 +1,4 @@
-import { authFetchJson, buildVeoApiUrl } from "../js/api-client.js";
+import { authFetchJson, buildGeminiApiUrl } from "../js/api-client.js";
 import { prepareAttachmentsForGemini } from "./attachments.js?v=2026-09-07.9";
 import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js?v=2026-09-14.1";
 import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js?v=2026-09-07.1";
@@ -34,8 +34,8 @@ function buildGeminiImageQuotaError(error, retryAfterMs) {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
   const quotaLimited = isGeminiImageQuotaError(error);
   const transientError = new Error(quotaLimited
-    ? `Gemini alcanzó temporalmente el límite de generación de imágenes. Intenta nuevamente en aproximadamente ${seconds} segundos.`
-    : `Gemini no respondió a tiempo. La escena conservará lo ya generado; intenta nuevamente en aproximadamente ${seconds} segundos.`);
+    ? `Lucy Studio alcanzó temporalmente el límite de generación de imágenes. Intenta nuevamente en aproximadamente ${seconds} segundos.`
+    : `Lucy Studio no respondió a tiempo. La escena conservará lo ya generado; intenta nuevamente en aproximadamente ${seconds} segundos.`);
   transientError.name = quotaLimited ? "GeminiQuotaError" : "GeminiTemporaryUnavailableError";
   transientError.code = quotaLimited ? "GEMINI_QUOTA_EXHAUSTED" : "GEMINI_IMAGE_TEMPORARILY_UNAVAILABLE";
   transientError.status = quotaLimited ? 429 : 503;
@@ -101,16 +101,22 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
   });
 
   for (let index = 0; index < count; index += 1) {
+    const savingsKind = options?.savingsKind === "script" ? "script" : "photo";
+    const savingsId = savingsKind === "script"
+      ? String(options?.scriptSessionId || "studio_draft")
+      : `photo_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${index}`}`;
     try {
       const payload = buildGeminiImagePayload({ mode, prompt, options, attachments: preparedAttachments });
       if (estimateGeminiPayloadBytes(payload) > MAX_GEMINI_PAYLOAD_BYTES) {
-        throw new Error("Las referencias adjuntas siguen siendo demasiado pesadas para Gemini. Usa menos imágenes o referencias más ligeras.");
+        throw new Error("Las referencias adjuntas siguen siendo demasiado pesadas para Lucy Studio. Usa menos imágenes o referencias más ligeras.");
       }
       // eslint-disable-next-line no-await-in-loop
-      const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+      const response = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
         method: "POST",
         body: {
-          model: options.model,
+          model: options?.model || "gemini-2.5-flash-image",
+          generationProfile: "imagecreator",
+          savingsContext: { kind: savingsKind, objectId: savingsId },
           payload
         }
       });
@@ -119,10 +125,10 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
         options
       });
       if (!extracted.length) {
-        lastError = "Gemini no devolvió una imagen válida.";
+        lastError = "Lucy Studio no devolvió una imagen válida.";
         continue;
       }
-      for (const item of extracted) {
+      for (const item of extracted.slice(0, 1)) {
         results.push(item);
       }
     } catch (error) {
@@ -131,12 +137,12 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
         geminiImageQuotaBlockedUntil = Date.now() + retryAfterMs;
         throw buildGeminiImageQuotaError(error, retryAfterMs);
       }
-      lastError = error instanceof Error ? error : new Error(String(error || "Error al generar imagen con Gemini."));
+      lastError = error instanceof Error ? error : new Error(String(error || "Error al generar imagen con Lucy Studio."));
     }
   }
 
   if (!results.length) {
-    throw lastError || new Error("Gemini no devolvió imágenes.");
+    throw lastError || new Error("Lucy Studio no devolvió imágenes.");
   }
 
   return results;

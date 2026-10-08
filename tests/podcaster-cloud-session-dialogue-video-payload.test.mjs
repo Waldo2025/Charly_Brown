@@ -16,6 +16,7 @@ function buildDeps(overrides = {}) {
     getSpeakerScenarioVariantsMap: () => ({}),
     getGlobalScenarioDeck: () => null,
     normalizeDisfluencyConfig: (value) => value || {},
+    normalizeTtsDirectionConfig: (value) => value || {},
     DEFAULT_DISFLUENCY_CONFIG: {},
     resolvePanelMusicTrackKind: () => "preset",
     getPanelMusicUploadedTracks: () => [],
@@ -42,6 +43,13 @@ function buildDeps(overrides = {}) {
   };
 }
 
+test("Gemini voice directions and language survive cloud serialization", () => {
+  const direction = { stylePrompt: "Cálida", pacingPrompt: "Pausas naturales", accentPrompt: "Español mexicano" };
+  const payload = buildCloudSessionPayload({ id: "tts", speechLocale: "es-MX", ttsDirectionDefaults: direction, script: { rows: [] } }, {}, [], buildDeps());
+  assert.deepEqual(payload.ttsDirectionDefaults, direction);
+  assert.equal(payload.speechLocale, "es-MX");
+});
+
 test("buildCloudSessionPayload serializes dialogueVideoMap without undefined type", () => {
   const payload = buildCloudSessionPayload({
     id: "session-1",
@@ -55,6 +63,22 @@ test("buildCloudSessionPayload serializes dialogueVideoMap without undefined typ
 
   assert.equal(payload.dialogueVideoMap["row-1"].type, "video");
   assert.notEqual(payload.dialogueVideoMap["row-1"].type, undefined);
+});
+
+test("cloud serialization stores free voice phrase boundaries in Firestore-safe records", () => {
+  const payload = buildCloudSessionPayload({
+    id: "session-free-voice",
+    script: { rows: [] },
+    podcastVideoConfig: { freeVoiceTrack: { clips: [{
+      id: "clip-1", storagePath: "session/audio/source.mp3",
+      phraseRanges: [[0, 800], [1000, 1800]]
+    }] } }
+  }, {}, [], buildDeps({
+    normalizePodcastVideoConfig: (config) => config
+  }));
+  const ranges = payload.podcastVideoConfig.freeVoiceTrack.clips[0].phraseRanges;
+  assert.deepEqual(ranges, [{ startMs: 0, endMs: 800 }, { startMs: 1000, endMs: 1800 }]);
+  assert.equal(ranges.some(Array.isArray), false);
 });
 
 test("buildCloudSessionPayload preserves canonical editorial tracks including explicit empty text", () => {

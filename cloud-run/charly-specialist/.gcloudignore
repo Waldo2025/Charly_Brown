@@ -1,0 +1,10 @@
+**
+!.dockerignore
+!functions/
+!functions/package.json
+!functions/package-lock.json
+!functions/src/
+!functions/src/**
+!cloud-run/
+!cloud-run/charly-specialist/
+!cloud-run/charly-specialist/**

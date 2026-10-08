@@ -145,12 +145,11 @@ test("regenerating an active session preserves its current title", async () => {
     source.indexOf("async function setGenerating")
   );
 
-  assert.match(generation, /const preserveActiveSessionTitle = !initialSetup && Boolean\(state\.activeSessionId\)/);
-  assert.match(generation, /const preservedSessionTitle = preserveActiveSessionTitle/);
-  assert.match(generation, /simulatorActivity\.title = preservedSessionTitle \|\|/);
-  assert.match(generation, /if \(preservedSessionTitle\) generatedActivity\.title = preservedSessionTitle/);
-  assert.match(generation, /if \(preservedSessionTitle\) state\.activity\.title = preservedSessionTitle/);
-  assert.match(generation, /Título de sesión protegido/);
+  assert.match(generation, /title: !sessionSetupState\.active && state\.activeSessionId \? String\(\$\("#activityTitle"\)\?\.value \|\| state\.activity\?\.title/);
+  assert.match(generation, /contexts\[run\.id\] = context/);
+  assert.match(source, /const context = productionContexts\(\)\[run\.id\]/);
+  assert.match(source, /if \(context\?\.title\) state\.activity\.title = context\.title/);
+
 });
 
 test("the session rail supports command multi-selection and persistent groups", async () => {

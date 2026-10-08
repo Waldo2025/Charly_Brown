@@ -5,6 +5,123 @@ const store = await import("../public/podcaster/podcaster-session-store.js");
 
 const { mergeCloudVsLocalSessions, bootstrapSessions, loadSessionsFromCloud, loadSessionsFromLocalCache, loadSingleSessionFromCloud } = store;
 
+test("a deleted overlay card is not restored from a stale top-level config", async () => {
+  const session = await loadSingleSessionFromCloud("card-session", "uid-1", {
+    hasAvailableApiBase: () => false,
+    firestoreDb: {},
+    doc: () => ({}),
+    getDoc: async () => ({
+      exists: () => true,
+      data: () => ({
+        ownerId: "uid-1",
+        podcastVideoConfig: { timelineOverlayCardsById: { old: { id: "old", rowId: "row-1" } } },
+        session: {
+          id: "card-session",
+          script: { rows: [{ id: "row-1", text: "Scene" }] },
+          podcastVideoConfig: { timelineOverlayCardsById: {} }
+        }
+      })
+    })
+  });
+  assert.deepEqual(session.podcastVideoConfig.timelineOverlayCardsById, {});
+});
+
+test("a saved cloud Gemini position replaces a newer clean local cache", () => {
+  const segment = (startMs, manualStartMs) => ({
+    rowId: "row-1", audioSrc: "https://example.test/voice.mp3", startMs,
+    durationMs: 2000, manualStartMs
+  });
+  const cloud = {
+    id: "audio-session", updatedAt: "2026-09-30T10:00:00.000Z", isStub: false,
+    script: { rows: [{ id: "row-1", text: "cloud" }] },
+    dialogueAudioMap: { "row-1": { downloadUrl: "https://example.test/voice.mp3" } },
+    podcastVideoConfig: { geminiDialogueTrack: { enabled: true, updatedAt: "2026-09-30T10:00:00.000Z", segments: [segment(4500, true)] } }
+  };
+  const local = {
+    ...cloud, updatedAt: "2026-09-30T11:00:00.000Z",
+    script: { rows: [{ id: "row-1", text: "stale local" }] },
+    podcastVideoConfig: { geminiDialogueTrack: { enabled: true, updatedAt: "2026-09-30T09:00:00.000Z", segments: [segment(500, false)] } }
+  };
+  const [merged] = mergeCloudVsLocalSessions([cloud], [local]);
+  assert.equal(merged.script.rows[0].text, "cloud");
+  assert.equal(merged.podcastVideoConfig.geminiDialogueTrack.segments[0].startMs, 4500);
+  assert.equal(merged.podcastVideoConfig.geminiDialogueTrack.segments[0].manualStartMs, true);
+});
+
+test("an unsaved dirty local Gemini position survives cloud hydration", () => {
+  const storageAdapter = {
+    readJson: () => ({ "audio-session": { dirty: true } })
+  };
+  const base = {
+    id: "audio-session", isStub: false,
+    script: { rows: [{ id: "row-1", text: "audio" }] },
+    podcastVideoConfig: { geminiDialogueTrack: { enabled: true, segments: [{ rowId: "row-1", audioSrc: "https://example.test/voice.mp3", startMs: 500, manualStartMs: false }] } }
+  };
+  const [merged] = mergeCloudVsLocalSessions(
+    [{ ...base, updatedAt: "2026-09-30T10:00:00.000Z" }],
+    [{ ...base, updatedAt: "2026-09-30T11:00:00.000Z", podcastVideoConfig: { geminiDialogueTrack: { enabled: true, segments: [{ rowId: "row-1", audioSrc: "https://example.test/voice.mp3", startMs: 4500, manualStartMs: true }] } } }],
+    { resolveCurrentUid: () => "user-1" }, storageAdapter
+  );
+  assert.equal(merged.podcastVideoConfig.geminiDialogueTrack.segments[0].startMs, 4500);
+});
+
+test("independent voice clips keep their Storage path and timing after cloud hydration", () => {
+  const clip = { id: "free-1", storagePath: "podcaster/sessions/s/audio/free-1.mp3", sourceDurationMs: 7000,
+    startMs: 4300, trimInMs: 900, trimOutMs: 6200 };
+  const cloud = { id: "s", updatedAt: "2026-10-01T10:00:00.000Z", isStub: false,
+    script: { rows: [{ id: "row-1", text: "Scene" }] },
+    podcastVideoConfig: { freeVoiceTrack: { enabled: true, clips: [clip] } } };
+  const local = { ...cloud, updatedAt: "2026-10-01T09:00:00.000Z", podcastVideoConfig: {} };
+  const [merged] = mergeCloudVsLocalSessions([cloud], [local]);
+  assert.deepEqual(merged.podcastVideoConfig.freeVoiceTrack.clips, [clip]);
+});
+
+test("a mirrored legacy scene block does not double the timeline or discard its media", () => {
+  const authored = [1, 2].map((number) => ({
+    id: `row-${number}`,
+    voiceOverText: `Narración ${number}`,
+    sceneDescription: `Plano ${number}`,
+    visualNotes: `Imagen ${number}`,
+    transition: "Corte"
+  }));
+  const legacy = authored.map((row, index) => ({
+    ...row,
+    id: `scene-${index + 1}`,
+    voiceOverText: `La secuencia ${index + 3} muestra ${row.sceneDescription}`
+  }));
+  const [merged] = mergeCloudVsLocalSessions([{
+    id: "s1",
+    isStub: false,
+    script: { rows: [...authored, ...legacy] },
+    dialogueVideoMap: { "row-1": { url: "video-1" } },
+    rowReferenceImageMap: { "row-2": { name: "referencia" } },
+    podcastVideoConfig: {
+      timelineClipsByRowId: {
+        "row-1": { startMs: 0, trimOutMs: 8000 },
+        "scene-1": { startMs: 112000, trimOutMs: 8000 }
+      },
+      timelineOnScreenTextClipsByRowId: {
+        "row-1": { startMs: 0, durationMs: 8000 },
+        "scene-1": { startMs: 112000, durationMs: 8000 }
+      },
+      geminiDialogueTrack: {
+        enabled: true,
+        segments: [{ rowId: "row-1", startMs: 0 }, { rowId: "scene-1", startMs: 112000 }]
+      }
+    }
+  }], [{
+    id: "s1",
+    script: { rows: legacy }
+  }], {});
+
+  assert.deepEqual(merged.script.rows.map((row) => row.id), ["row-1", "row-2"]);
+  assert.equal(merged.dialogueVideoMap["row-1"].url, "video-1");
+  assert.equal(merged.rowReferenceImageMap["row-2"].name, "referencia");
+  assert.deepEqual(Object.keys(merged.podcastVideoConfig.timelineClipsByRowId), ["row-1"]);
+  assert.deepEqual(Object.keys(merged.podcastVideoConfig.timelineOnScreenTextClipsByRowId), ["row-1"]);
+  assert.deepEqual(merged.podcastVideoConfig.geminiDialogueTrack.segments.map((segment) => segment.rowId), ["row-1"]);
+});
+
 test("mergeCloudVsLocalSessions prefers full cloud rows over stale local rows", () => {
   const cloudSessions = [{
     id: "s1",
@@ -439,11 +556,46 @@ test("bootstrapSessions persists merged local cloud session instead of raw cloud
     hasAvailableApiBase: () => true
   }, storageAdapter);
 
-  assert.equal(result.sessions[0].dialogueAudioMap["row-1"].playbackRate, 4.5);
+  assert.equal(result.sessions[0].dialogueAudioMap["row-1"].playbackRate, 1);
   assert.equal(result.sessions[0].script.rows[0].playbackRate, 1);
   const persistedSession = written.find((entry) => entry.key === "test_sessions:uid-1")?.value?.find?.((session) => session.id === "s1") || null;
   assert.ok(persistedSession);
-  assert.equal(persistedSession.dialogueAudioMap["row-1"].playbackRate, 4.5);
+  assert.equal(persistedSession.dialogueAudioMap["row-1"].playbackRate, 1);
+});
+
+test("bootstrapSessions reuses matching cached content without rewriting full sessions", async () => {
+  const local = [{
+    id: "s1",
+    title: "Última sesión",
+    updatedAt: "2026-09-29T10:00:00.000Z",
+    archived: false,
+    publicar: false,
+    script: { rows: [{ id: "scene-1", text: "Guion completo" }] }
+  }];
+  const writes = [];
+  const result = await bootstrapSessions("uid-1", {
+    STORAGE_KEY_BASE: "test_sessions",
+    hasAvailableApiBase: () => true,
+    authFetchJson: async () => ({ sessions: [{
+      id: "s1",
+      title: "Última sesión",
+      updatedAt: "2026-09-29T10:00:00.000Z",
+      archived: false,
+      publicar: false,
+      isStub: true,
+      script: { rows: [] }
+    }] })
+  }, {
+    readJson: (key) => key === "test_sessions:uid-1" ? local : [],
+    writeJson: (...args) => writes.push(args),
+    getItem: () => "",
+    setItem() {},
+    removeItem() {}
+  });
+
+  assert.equal(result.sessions[0].script.rows[0].text, "Guion completo");
+  assert.equal(result.useLocal, true);
+  assert.equal(writes.length, 0);
 });
 
 test("loadSessionsFromCloud falls back to Firestore when the API returns 401", async () => {
@@ -533,7 +685,9 @@ test("loadSessionsFromCloud can prefer Firestore directly to avoid noisy session
       docs: (getDocsCallCount++ === 0 ? [{
         id: "s1",
         title: "firestore",
-        updatedAt: "2026-06-15T00:00:00.000Z"
+        updatedAt: "2026-06-15T00:00:00.000Z",
+        script: { rows: [{ id: "scene-1", text: "full scene" }], videoContentType: "creative" },
+        dialogueVideoMap: { "scene-1": { downloadUrl: "https://example.test/video.mp4" } }
       }] : []).map((session) => ({
         id: session.id,
         data: () => ({
@@ -549,6 +703,10 @@ test("loadSessionsFromCloud can prefer Firestore directly to avoid noisy session
   assert.equal(apiCalls, 0);
   assert.equal(result.length, 1);
   assert.equal(result[0].title, "firestore");
+  assert.equal(result[0].isStub, true);
+  assert.deepEqual(result[0].script.rows, []);
+  assert.equal(result[0].script.videoContentType, "creative");
+  assert.equal(result[0].dialogueVideoMap, undefined);
 });
 
 test("loadSessionsFromCloud preserves lightweight API stubs for lazy active-session hydration", async () => {

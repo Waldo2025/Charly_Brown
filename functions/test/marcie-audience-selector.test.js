@@ -51,3 +51,73 @@ test("audience selectors use Estudiantes, Padres, Docentes, Coordinadores order"
   const modal = read("public/MarcieBlogEditor/js/components/modals.js");
   assert.match(modal, /ALL_AUDIENCE_KEYS = \["students", "parents", "educators", "coordinators"\]/);
 });
+
+test("generating a missing audience retries a fetch failure and opens the article before save finishes", async () => {
+  const editor = read("public/MarcieBlogEditor/js/editor-app.js");
+  const source = editor.slice(editor.indexOf("async function selectAudienceSafely"), editor.indexOf("async function reconfigureSession"));
+  const events = [];
+  let attempts = 0;
+  let releaseSave;
+  const savePending = new Promise((resolve) => { releaseSave = resolve; });
+  const context = vm.createContext({
+    sessionOperations: new Set(),
+    chooseEditorialAction: async () => "generate",
+    getEditorialAudienceLabel: () => "Docentes",
+    draftArticleForMode: async ({ session }) => {
+      attempts += 1;
+      if (attempts === 1) throw vm.runInContext('new TypeError("Failed to fetch")', context);
+      session.researchByAudience = { educators: { sources: [{ id: "s1" }] } };
+      return { title: "Artículo docentes", audience: "educators", blocks: [{ text: "Contenido" }] };
+    },
+    hasCompleteArticle: (article) => Array.isArray(article?.blocks) && article.blocks.length > 0,
+    saveMarcieSession: () => { events.push("save-started"); return savePending; },
+    renderSessionList: () => events.push("list-rendered"),
+    renderActiveSession: () => events.push("article-rendered"),
+    setSyncStatus: () => {},
+    invalidateMaterialApproval: () => {},
+    showToast: () => {},
+    console,
+    window: { __marcieShowArticleGenerationSpinner: () => {}, __marcieHideArticleGenerationSpinner: () => events.push("spinner-hidden") }
+  });
+  vm.runInContext(read("public/MarcieBlogEditor/js/services/marcie-automation-recovery.js").replace(/\bexport /g, ""), context);
+  const retry = vm.runInContext("retryTransientFetch", context);
+  context.retryTransientFetch = (operation) => retry(operation, { wait: async () => {} });
+  vm.runInContext(source, context);
+  const session = { id: "s1", title: "Tema", topic: "Tema", audience: "parents", humanizationEnabled: false, articlesByAudience: {}, researchByAudience: {} };
+  const generating = context.selectAudienceSafely(session, "educators");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(session.articlesByAudience.educators.title, "Artículo docentes");
+  assert.equal(session.audience, "educators");
+  assert.ok(events.indexOf("article-rendered") > events.indexOf("save-started"));
+  assert.ok(events.indexOf("spinner-hidden") < events.indexOf("article-rendered"));
+  releaseSave();
+  await generating;
+});
+
+test("an article remains available when its Firebase save fails", async () => {
+  const editor = read("public/MarcieBlogEditor/js/editor-app.js");
+  const source = editor.slice(editor.indexOf("async function selectAudienceSafely"), editor.indexOf("async function reconfigureSession"));
+  const statuses = [];
+  const context = vm.createContext({
+    sessionOperations: new Set(),
+    chooseEditorialAction: async () => "generate",
+    getEditorialAudienceLabel: () => "Docentes",
+    draftArticleForMode: async () => ({ title: "Artículo docentes", blocks: [{ text: "Contenido" }] }),
+    retryTransientFetch: (operation) => operation(),
+    hasCompleteArticle: (article) => Array.isArray(article?.blocks) && article.blocks.length > 0,
+    saveMarcieSession: async () => { throw new Error("Firebase no disponible"); },
+    renderSessionList: () => {}, renderActiveSession: () => {},
+    setSyncStatus: (status) => statuses.push(status),
+    invalidateMaterialApproval: () => {},
+    showToast: () => {},
+    console: { error() {} },
+    window: { __marcieShowArticleGenerationSpinner() {}, __marcieHideArticleGenerationSpinner() {} }
+  });
+  vm.runInContext(source, context);
+  const session = { id: "s2", title: "Tema", topic: "Tema", audience: "parents", humanizationEnabled: false, articlesByAudience: {} };
+  await context.selectAudienceSafely(session, "educators");
+  assert.equal(session.article.title, "Artículo docentes");
+  assert.equal(session.articlesByAudience.educators.blocks.length, 1);
+  assert.ok(statuses.includes("Artículo pendiente de sincronizar"));
+});

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
 const { createServer, createToolHandlers, normalizeSession, selectAgentTools } = require("./charly-brown-mcp.js");
-const { buildActivityPrompt, buildResourcePrompt, formatApa7, getProjectDefinition, renderCutoutSvg, validateProjectArtifact, validateResourceArtifact } = require("./charly-brown-agent-tools.js");
+const { buildActivityPrompt, buildResourcePrompt, formatApa7, getProjectDefinition, validateProjectArtifact, validateResourceArtifact } = require("./charly-brown-agent-tools.js");
 
 function fixture() {
   const session = normalizeSession({
@@ -143,7 +143,8 @@ test("publica el contrato MCP completo", async () => {
   await client.connect(clientTransport);
   const tools = await client.listTools();
   const names = tools.tools.map((tool) => tool.name);
-  ["get_session_context", "get_unit_curriculum", "list_readings", "get_unit_workflow", "list_activity_sections", "draft_activity_section", "create_activity_section", "update_activity_section", "restore_activity_section", "design_reading_stage", "design_activity", "design_worksheet", "design_annex", "design_cutout", "design_video_script", "create_teacher_notes", "render_cutout", "list_unit_citations", "format_bibliography_apa7", "search_teaching_memory", "propose_teaching_memory", "confirm_teaching_memory"].forEach((name) => assert.ok(names.includes(name), `falta ${name}`));
+  ["get_session_context", "get_unit_curriculum", "list_readings", "get_unit_workflow", "list_activity_sections", "draft_activity_section", "create_activity_section", "update_activity_section", "restore_activity_section", "design_reading_stage", "design_activity", "design_worksheet", "design_annex", "design_cutout", "design_video_script", "create_teacher_notes", "list_unit_citations", "format_bibliography_apa7", "search_teaching_memory", "propose_teaching_memory", "confirm_teaching_memory"].forEach((name) => assert.ok(names.includes(name), `falta ${name}`));
+  assert.equal(names.includes("render_cutout"), false);
   await client.close();
   await server.close();
 });
@@ -158,14 +159,16 @@ test("el agente selecciona el MCP de notas del maestro", () => {
   assert.deepEqual(selected.map((tool) => tool.name), ["create_teacher_notes", "get_unit_curriculum"]);
 });
 
-test("formatea APA 7 y valida un recortable interactivo", () => {
+test("formatea APA 7 y rechaza el recortable vectorial heredado", () => {
   const apa = formatApa7({ authors: ["López, W."], year: 2025, title: "Aprender con materiales", publication: "Revista Escolar", doi: "10.1000/demo" });
   assert.match(apa, /López, W\. \(2025\)/);
   assert.match(apa, /https:\/\/doi\.org\/10\.1000\/demo/);
   const document = { title: "Clasificar animales", instructions: "Recorta y clasifica.", pieces: [{ id: "p1", label: "Águila", interactionRole: "clasificar", targetId: "aves" }] };
-  const validation = validateResourceArtifact({ title: document.title, activityId: "a1", cutoutDocument: document }, "cutout");
-  assert.equal(validation.ok, true);
-  assert.match(renderCutoutSvg(document).svg, /data-piece-id="p1"/);
+  const legacy = validateResourceArtifact({ title: document.title, activityId: "a1", cutoutDocument: document, html: '<img src="https://example.test/legacy.svg">', assets: [{ mimeType: "image/svg+xml", url: "https://example.test/legacy.svg", storagePath: "legacy.svg" }] }, "cutout");
+  assert.equal(legacy.ok, false);
+  assert.match(legacy.errors.join(" "), /imagen terminada generada por Gemini/);
+  const raster = validateResourceArtifact({ title: document.title, activityId: "a1", cutoutDocument: document, generatedImage: true, visualReview: { ok: true }, html: '<img src="https://example.test/cutout.png">', assets: [{ mimeType: "image/png", url: "https://example.test/cutout.png", storagePath: "cutout.png" }] }, "cutout");
+  assert.equal(raster.ok, true);
 });
 
 test("los prompts de actividades y recursos incluyen la secuencia y alcance exacta", () => {
@@ -312,7 +315,7 @@ test("create_teacher_notes genera y guarda notas globales del maestro", async ()
       : JSON.stringify({ title: "Notas del maestro", html: "<section><h3>Orientaciones</h3><p>Prepare una planta.</p></section>" })
   });
   const result = await handlers.create_teacher_notes({
-    sessionId: "session-1", targetUnitId: "unit-2", baseRevision: 4, mode: "global"
+    sessionId: "session-1", targetUnitId: "unit-2", baseRevision: 4, mode: "global", confirm: true
   });
   const unit = data.read().units.find((item) => item.id === "unit-2");
   assert.equal(result.saved, true);
@@ -341,7 +344,7 @@ test("create_teacher_notes exige explicar cada recurso dentro de su actividad", 
     }
   });
   const result = await handlers.create_teacher_notes({
-    sessionId: "session-1", targetUnitId: "unit-2", baseRevision: 4, mode: "global"
+    sessionId: "session-1", targetUnitId: "unit-2", baseRevision: 4, mode: "global", confirm: true
   });
   const note = data.read().units.find((item) => item.id === "unit-2").accepted.teacherNotes[0];
   assert.equal(result.saved, true);

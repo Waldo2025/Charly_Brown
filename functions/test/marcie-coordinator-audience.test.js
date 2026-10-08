@@ -30,3 +30,17 @@ test("Aida aplica el mismo contrato diferenciado a propuesta y artículo", async
   assert.match(code, /Contrato específico de audiencia: \$\{audienceEditorialDirection\(audience\)\}/);
   assert.doesNotMatch(code, /generated\[index\]/);
 });
+
+test("todas las rutas de redacción exigen español neutro latinoamericano", async () => {
+  const gemini = await source("services/marcie-gemini-service.js");
+  const aida = await source("services/marcie-aida-service.js");
+  const voice = await source("services/marcie-agent-voice.js");
+  const backend = await readFile(new URL("../../functions/src/marcie-editorial-agent.js", import.meta.url), "utf8");
+  assert.match(gemini, /LATAM_ARTICLE_LANGUAGE_POLICY = `VARIANTE REGIONAL OBLIGATORIA: redacta toda la prosa original en español neutro latinoamericano/);
+  assert.match(gemini, /\$\{LATAM_ARTICLE_LANGUAGE_POLICY\}/);
+  assert.match(aida, /\$\{LATAM_ARTICLE_LANGUAGE_POLICY\}/);
+  assert.match(backend, /Redacta un artículo educativo original en español neutro latinoamericano/);
+  assert.match(voice, /Lee en español neutro latinoamericano/);
+  assert.doesNotMatch(gemini, /natural para lectores de México/);
+  assert.doesNotMatch(backend, /español de México/);
+});

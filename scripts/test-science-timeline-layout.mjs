@@ -101,8 +101,8 @@ test("el CSS de exportación conserva el mismo contrato final", () => {
 
 test("la página invalida caché para recibir el arreglo", () => {
   assert.doesNotMatch(page, /science-hud-themes\.css|science-timeline-responsive\.css/);
-  assert.match(page, /scienceActivities\.bundle\.js\?v=20260816-optional-visual-question-v219/);
-  assert.match(source, /loadOptionalStyle\("science-hud-themes\.css\?v=20260815-centered-gameplay-v44"/);
+  assert.match(page, /scienceActivities\.bundle\.js\?v=20260924-production-agents-v1/);
+  assert.match(source, /loadOptionalStyle\("science-hud-themes\.css\?v=20260924-scientific-models-v1"/);
   assert.match(source, /loadOptionalStyle\("science-timeline-responsive\.css\?v=20260814-timeline-pointer-v11"/);
 });
 

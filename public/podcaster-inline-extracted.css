@@ -1,0 +1,497 @@
+.movement-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 15px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  margin-top: 15px;
+}
+
+.movement-option {
+  background: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  user-select: none;
+  color: #333;
+}
+
+.movement-option.is-selected {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  color: #6366f1;
+}
+
+.movement-option i {
+  display: block;
+  font-size: 1.2rem;
+  margin-bottom: 5px;
+}
+
+.pme-stop-motion {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--pme-border);
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.pme-stop-motion-mode,
+.pme-stop-motion-summary {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+
+.pme-stop-motion-mode > span,
+.pme-stop-motion-summary strong {
+  margin-right: auto;
+  color: var(--pme-text);
+  font-size: .88rem;
+  font-weight: 650;
+}
+
+.pme-stop-motion-mode-btn {
+  border: 1px solid var(--pme-border);
+  border-radius: 999px;
+  padding: .4rem .75rem;
+  background: #fff;
+  color: var(--pme-text);
+  font-size: .8rem;
+  cursor: pointer;
+}
+
+.pme-stop-motion-mode-btn.is-selected {
+  border-color: var(--pme-primary);
+  background: color-mix(in srgb, var(--pme-primary) 12%, #fff);
+  color: var(--pme-primary);
+}
+
+.pme-stop-motion-panel {
+  margin-top: .9rem;
+}
+
+.pme-stop-motion-beat-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem .85rem;
+  margin: .7rem 0 .9rem;
+  padding: .7rem .8rem;
+  border: 1px solid var(--pme-border);
+  border-radius: 10px;
+  background: var(--pme-surface-soft);
+}
+
+.pme-stop-motion-beat-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--pme-text);
+  font-size: .82rem;
+  font-weight: 650;
+}
+
+.pme-stop-motion-beat-controls input[type="checkbox"] {
+  accent-color: var(--pme-primary);
+}
+
+.pme-stop-motion-help,
+.pme-stop-motion-empty,
+.pme-stop-motion-stats {
+  color: #64748b;
+  font-size: .78rem;
+}
+
+.pme-stop-motion-help {
+  margin: .35rem 0 .8rem;
+}
+
+.pme-upload-error {
+  margin-top: .75rem;
+  padding: .7rem .85rem;
+  border: 1px solid rgba(220, 38, 38, .28);
+  border-radius: 10px;
+  background: rgba(254, 226, 226, .78);
+  color: #991b1b;
+  font-size: .82rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.pme-upload-status {
+  margin-top: .75rem;
+  padding: .7rem .85rem;
+  border: 1px solid rgba(79, 70, 229, .22);
+  border-radius: 10px;
+  background: rgba(238, 242, 255, .82);
+  color: #3730a3;
+  font-size: .82rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.pme-stop-motion-tray {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: .65rem;
+}
+
+.pme-stop-motion-frame {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid var(--pme-border);
+  border-radius: 10px;
+  background: #fff;
+  cursor: grab;
+}
+
+.pme-stop-motion-frame.is-error {
+  border-color: #dc2626;
+}
+
+.pme-stop-motion-frame img {
+  display: block;
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  background: #111827;
+}
+
+.pme-stop-motion-frame-meta {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .35rem;
+}
+
+.pme-stop-motion-frame-name {
+  overflow: hidden;
+  flex: 1;
+  font-size: .7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pme-stop-motion-frame-remove {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: #eef2f7;
+  color: #475569;
+  cursor: pointer;
+}
+
+.pme-stop-motion-frame-status {
+  position: absolute;
+  top: .3rem;
+  left: .3rem;
+  padding: .15rem .35rem;
+  border-radius: 999px;
+  background: rgb(15 23 42 / 82%);
+  color: #fff;
+  font-size: .62rem;
+}
+
+.pme-stop-motion-empty {
+  padding: .85rem 0 0;
+  text-align: center;
+}
+
+.speed-control {
+  margin-top: 15px;
+  color: #333;
+}
+
+#stylized-text-canvas-container {
+  width: 100%;
+  height: 400px;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #333;
+}
+
+.podcast-stylized-text-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.podcast-video-preview img.podcast-active-speaker-image,
+.montage-export-preview-container img.podcast-active-speaker-image {
+  position: absolute;
+  top: var(--pod-scene-media-top, 0px);
+  left: var(--pod-scene-media-left, 0px);
+  width: var(--pod-scene-media-width, 100%);
+  height: var(--pod-scene-media-height, 100%);
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.podcast-video-preview img.podcast-active-speaker-image.is-visible,
+.montage-export-preview-container img.podcast-active-speaker-image.is-visible {
+  opacity: 1;
+  z-index: 1;
+}
+
+/* === Snoopy Editor: Media Loading Overlay === */
+#podcastPreviewMediaLoadingOverlay {
+  display: flex;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#podcastPreviewMediaLoadingOverlay.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+}
+
+.podcast-preview-loading-content {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+}
+
+.podcast-preview-loading-logo {
+  display: none !important;
+}
+
+.podcast-preview-loading-status {
+  margin: 0;
+  color: rgba(226,232,240,.88);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  max-width: 190px;
+  line-height: 1.4;
+}
+
+.podcast-preview-loading-bar-track {
+  width: 140px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.1);
+  overflow: hidden;
+}
+
+.podcast-preview-loading-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  width: 0%;
+  transition: width 240ms ease;
+}
+
+@keyframes snoopyPreviewLogoSpin {
+  from { transform: rotate(0deg) scale(0.94); }
+  50%  { transform: rotate(180deg) scale(1.06); }
+  to   { transform: rotate(360deg) scale(0.94); }
+}
+
+
+/* Podcaster Threads UI */
+.podcaster-threads-selector {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  z-index: 10;
+}
+
+.threads-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: none;
+}
+
+.threads-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.thread-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: #4b5563;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.thread-tab:hover {
+  background: #e5e7eb;
+}
+
+.thread-tab.is-active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+}
+
+.thread-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  opacity: 0.5;
+}
+
+.thread-close:hover {
+  background: rgba(0, 0, 0, 0.1);
+  opacity: 1;
+}
+
+.thread-tab.is-active .thread-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.thread-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px dashed #9ca3af;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.thread-add:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.05);
+}
+
+/* Mantiene el hover existente para el botón de añadir */
+
+/* Nuevos estilos para el panel colapsable de hilos */
+.threads-panel {
+  position: relative;
+  width: 240px;
+  /* Ancho expandido por defecto */
+  min-width: 60px;
+  /* Ancho colapsado */
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s ease-in-out;
+  z-index: 10;
+  flex-shrink: 0;
+  /* Evita que el panel se encoja */
+}
+
+.threads-panel.is-collapsed {
+  width: 60px;
+}
+
+.threads-panel-toggle {
+  position: absolute;
+  top: 50%;
+  right: -16px;
+  /* A medio camino sobre el borde */
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease-in-out;
+  z-index: 11;
+}
+
+.threads-panel.is-collapsed .threads-panel-toggle {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.threads-panel-content {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.threads-panel.is-collapsed .threads-panel-content {
+  overflow: hidden;
+  /* Oculta el contenido cuando está colapsado */
+  padding: 10px 0;
+  /* Ajusta el padding */
+}
+
+.threads-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.threads-panel.is-collapsed .threads-panel-list .thread-tab span,
+.threads-panel.is-collapsed .threads-panel-list .thread-close,
+.threads-panel.is-collapsed .thread-add span {
+  display: none;
+  /* Oculta el texto y el botón de cerrar cuando está colapsado */
+}
+
+.threads-panel.is-collapsed .threads-panel-list .thread-tab {
+  justify-content: center;
+  /* Centra el icono cuando está colapsado */
+  padding: 8px;
+}
+
+.threads-panel.is-collapsed .thread-add {
+  justify-content: center;
+  padding: 8px;
+}
+
+.threads-panel-list .thread-tab i,
+.threads-panel-list .thread-add i {
+  font-size: 1rem;
+  /* Ajusta el tamaño del icono */
+}

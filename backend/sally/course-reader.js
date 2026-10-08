@@ -2,23 +2,23 @@
 function extractCourseStructure({courseUrl}) {
   const body=document.body,base=new URL(courseUrl);
   const text=node=>String(node?.textContent||"").replace(/\s+/g," ").trim();
-  const sectionSelector="li.section, .course-section, [data-sectionid]";
+  const sectionSelector="li.section, .course-section, [data-sectionid], [data-for='section']";
   const cleanUrl=raw=>{try{const u=new URL(raw,location.href);u.username="";u.password="";for(const key of [...u.searchParams.keys()])if(/sesskey|token|password/i.test(key))u.searchParams.delete(key);return u.href;}catch{return "";}};
   const cleanHtml=node=>{if(!node)return "";const copy=node.cloneNode(true);copy.querySelectorAll("script,style,form,input,button,select,textarea,iframe,object,embed,link,meta").forEach(n=>n.remove());for(const n of [copy,...copy.querySelectorAll("*")])for(const a of [...n.attributes]){if(/^on/i.test(a.name))n.removeAttribute(a.name);if(["href","src"].includes(a.name)&&/sesskey|token|password/i.test(a.value))n.removeAttribute(a.name);}return copy.innerHTML;};
   const sectionNodes=[...body.querySelectorAll(sectionSelector)].filter(n=>!n.parentElement?.closest(sectionSelector)||n.hasAttribute("data-sectionid")&&n.getAttribute("data-sectionid")!==n.parentElement.closest(sectionSelector)?.getAttribute("data-sectionid"));
   const sections=sectionNodes.map((section,index)=>{
-    const modules=[...section.querySelectorAll("li.activity, .activity-item, [data-activityname]")].filter(n=>n.closest(sectionSelector)===section&&!n.parentElement?.closest("li.activity, .activity-item, [data-activityname]"));
+    const moduleSelector="li.activity, .activity-item, [data-activityname], [data-for='cmitem']";
+    const modules=[...section.querySelectorAll(moduleSelector)].filter(n=>n.closest(sectionSelector)===section&&!n.parentElement?.closest(moduleSelector));
     const summary=section.querySelector(".summary, .section-summary, [data-for='sectionsummary']");
     const summaryHtml=cleanHtml(summary);
-    return {index,id:section.getAttribute("data-sectionid")||section.id||"",number:section.getAttribute("data-number")||section.id.match(/^section-(\d+)$/)?.[1]||"",
-      title:text(section.querySelector(".sectionname,h3,h2"))||`Sección ${index+1}`,sourceUrl:cleanUrl(location.href),summaryText:text(summary),summaryHtml:summaryHtml.slice(0,100000),summaryTruncated:summaryHtml.length>100000,
+    return {index,id:section.getAttribute("data-sectionid")||section.getAttribute("data-id")||section.id||"",number:section.getAttribute("data-number")||section.id.match(/^section-(\d+)$/)?.[1]||"",
+      title:text(section.querySelector("[data-for='section_title'],.sectionname,h3,h2"))||`Sección ${index+1}`,sourceUrl:cleanUrl(location.href),summaryText:text(summary),summaryHtml:summaryHtml.slice(0,100000),summaryTruncated:summaryHtml.length>100000,
       modules:modules.map(item=>{const link=item.querySelector("a[href*='/mod/'][href*='view.php']")||item.querySelector(".activityname a,.instancename a,a[href]");const html=cleanHtml(item);return {id:item.getAttribute("data-id")||item.id||"",title:text(item.querySelector(".activityname,.instancename,a"))||text(item).slice(0,150),type:[...item.classList].find(name=>name.startsWith("modtype_"))?.slice(8)||"resource",url:link?cleanUrl(link.href):"",...(!link?{text:text(item),html:html.slice(0,100000),htmlTruncated:html.length>100000}:{})};}).filter(item=>item.title)};
   });
   const formatClass=[...body.classList].find(c=>/^format[-_]/.test(c));
   const format=formatClass?.replace(/^format[-_]/,"")||(body.querySelector(".format_onetopic-tabs,.format_onetopic-subtabs,.onetopic")?"onetopic":"unknown");
   const canonical=raw=>{
     try{const u=new URL(raw,location.href);if(u.origin!==base.origin)return "";
-      if([...u.searchParams.keys()].some(k=>!/^(id|section|sectionid|sesskey)$/.test(k)))return "";
       if(u.pathname==="/course/view.php"&&u.searchParams.get("id")===base.searchParams.get("id")){
         const out=new URL(base.origin+u.pathname);out.searchParams.set("id",base.searchParams.get("id"));
         for(const k of ["section","sectionid"])if(/^\d+$/.test(u.searchParams.get(k)||""))out.searchParams.set(k,u.searchParams.get(k));
@@ -73,8 +73,10 @@ async function settleCourse(page,pending=new Set()){
   return false;
 }
 
-async function collectTabbedCourse(page,courseUrl,{cancelled=()=>false,progress=()=>{},snapshot=async()=>{},maxViews=250}={}){
+async function collectTabbedCourse(page,courseUrl,{cancelled=()=>false,progress=()=>{},snapshot=async()=>{},maxViews=250,scope=""}={}){
   const pending=new Set();
+  const normalizedScope=String(scope||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+  const matchesScope=value=>!normalizedScope||String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").includes(normalizedScope);
   const request=req=>{if(["xhr","fetch","document"].includes(req.resourceType()))pending.add(req);};
   const finished=req=>pending.delete(req);
   page.on("request",request);page.on("requestfinished",finished);page.on("requestfailed",finished);
@@ -84,6 +86,7 @@ async function collectTabbedCourse(page,courseUrl,{cancelled=()=>false,progress=
   const inventory={...initial,tabs:[],warnings:[]};
   if(!initialStable)inventory.warnings.push({code:"course-loading",message:"La vista inicial no terminó de estabilizarse; puede faltar contenido."});
   const sections=new Map(),tabs=new Map(),visited=new Set(),queue=[];
+  const tabInScope=tab=>{if(!normalizedScope)return true;const seen=new Set();let current=tab;while(current&&!seen.has(current.key)){seen.add(current.key);if(matchesScope(current.title))return true;current=tabs.get(current.parentKey);}return false;};
   const merge=data=>{
     for(const section of data.sections){
       const key=section.id||section.number||section.title;
@@ -92,11 +95,13 @@ async function collectTabbedCourse(page,courseUrl,{cancelled=()=>false,progress=
       else sections.set(key,{...old,...section,summaryHtml:section.summaryHtml||old.summaryHtml,summaryText:section.summaryText||old.summaryText,
         modules:[...new Map([...old.modules,...section.modules].map(m=>[m.id||m.url||m.title,m])).values()]});
     }
+    const candidates=[];
     for(const tab of data.tabs){
       const old=tabs.get(tab.key);
       tabs.set(tab.key,{...old,...tab,parentKey:tab.parentKey||old?.parentKey||null,level:Math.max(tab.level,old?.level||0)});
-      if(!old&&!tab.disabled&&tab.status!=="read")queue.push(tab.key);
+      if(!old)candidates.push(tab.key);
     }
+    for(const key of candidates){const tab=tabs.get(key);if(!tab.disabled&&tab.status!=="read"&&tabInScope(tab))queue.push(key);}
   };
   merge(initial);
   while(queue.length&&!cancelled()){
@@ -127,13 +132,17 @@ async function collectTabbedCourse(page,courseUrl,{cancelled=()=>false,progress=
     }catch(error){tabs.get(key).status="unread";inventory.warnings.push({url:tab.url||tab.sourceUrl,code:"tab-unreadable",message:`${tab.title}: ${error.message}`});}
   }
   for(const tab of tabs.values())if(!tab.status){tab.status=tab.disabled?"restricted":"pending";if(tab.disabled)inventory.warnings.push({code:"tab-restricted",message:`${tab.title}: pestaña sin enlace accesible o restringida.`});}
-  inventory.sections=[...sections.values()];inventory.tabs=[...tabs.values()];
+  const scopedTabs=[...tabs.values()].filter(tab=>tabInScope(tab));
+  const scopedSectionIds=new Set(scopedTabs.flatMap(tab=>tab.sectionIds||[]).map(String));
+  inventory.sections=[...sections.values()].filter(section=>!normalizedScope||matchesScope(section.title)||scopedSectionIds.has(String(section.id||section.number||section.title)));
+  inventory.tabs=normalizedScope?scopedTabs:[...tabs.values()];
+  if(normalizedScope&&!inventory.sections.length)inventory.warnings.push({code:"scope-not-found",message:`No se encontró ${scope} en la estructura visible del curso.`});
   for(const tab of inventory.tabs){
     const ancestors=[],seen=new Set([tab.key]);let parent=tabs.get(tab.parentKey);
     while(parent&&!seen.has(parent.key)){seen.add(parent.key);ancestors.unshift(parent.title);parent=tabs.get(parent.parentKey);}
     tab.path=[...ancestors,tab.title];tab.level=Math.max(tab.level,ancestors.length);
   }
-  inventory.tabCoverage={discovered:tabs.size,read:inventory.tabs.filter(t=>t.status==="read").length,complete:initialStable&&!cancelled()&&inventory.tabs.every(t=>t.status==="read")};
+  inventory.tabCoverage={discovered:inventory.tabs.length,read:inventory.tabs.filter(t=>t.status==="read").length,complete:initialStable&&!cancelled()&&inventory.sections.length>0&&inventory.tabs.every(t=>t.status==="read")};
   inventory.url=courseUrl;
   return inventory;
   }finally{page.off("request",request);page.off("requestfinished",finished);page.off("requestfailed",finished);}

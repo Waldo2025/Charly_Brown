@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="es" data-schroeder-theme="dark">
+<head>
+  <script src="js/cache-version-loader.js"></script>
+  <meta charset="UTF-8">
+  <script>
+    (() => {
+      const saved = localStorage.getItem("schroeder-sound-lab-theme");
+      document.documentElement.dataset.schroederTheme = ["light", "mid", "dark"].includes(saved) ? saved : "dark";
+    })();
+  </script>
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schroeder Sound Lab</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="header.css">
+  <link rel="stylesheet" href="schroeder-sound-lab/styles.css">
+</head>
+<body data-page="schroederSoundLab.html">
+  <header class="main-header"><div class="header-content"><!-- chromeLayout.js --></div></header>
+  <div id="sidebar"><div class="sidebar-menu"><!-- chromeLayout.js --></div></div>
+
+  <main class="ssl-shell" aria-label="Schroeder Sound Lab">
+    <div class="ssl-grid">
+      <aside class="ssl-panel ssl-sessions" aria-label="Sesiones">
+        <header class="ssl-header">
+          <div class="ssl-header-title">
+            <span class="ssl-brand-mark" aria-hidden="true"><img src="schroeder-sound-lab/assets/schroeder-adult-piano.png" alt=""></span>
+            <div><h1>Schroeder Sound Lab</h1></div>
+          </div>
+        </header>
+        <div class="ssl-sessions-body">
+          <header class="ssl-panel-header">
+            <div><span class="ssl-panel-kicker">Historial</span><h2>Sesiones</h2></div>
+            <button id="sslNewSessionBtn" class="ssl-icon-action ssl-spotlight" style="--ssl-spot-delay:0s" type="button" data-tooltip="Nueva sesión" aria-label="Nueva sesión"><i class="fas fa-plus"></i></button>
+          </header>
+          <div class="ssl-search"><i class="fas fa-search" aria-hidden="true"></i><input id="sslSessionSearch" type="search" placeholder="Buscar"></div>
+          <div id="sslOwnerFilter" class="ssl-owner-filter" hidden>
+            <select id="sslOwnerSelect" aria-label="Usuario"><option value="">Mis sesiones</option></select>
+          </div>
+          <div id="sslSessionList" class="ssl-session-list" aria-live="polite"></div>
+        </div>
+      </aside>
+
+      <button id="sslLeftResizer" class="ssl-panel-resizer is-left" type="button" role="separator" aria-label="Cambiar ancho del panel de sesiones" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="400"></button>
+
+      <section class="ssl-panel ssl-chat" aria-label="Chat de creación">
+        <header class="ssl-chat-header" aria-label="Herramientas de creación">
+          <div class="ssl-chat-mode-actions" role="tablist" aria-label="Tipo de creación">
+            <button class="ssl-icon-action ssl-chat-mode-button is-active" type="button" data-mode="music" data-tooltip="Canción" aria-label="Crear canción" role="tab" aria-selected="true"><i class="fas fa-music"></i></button>
+            <button class="ssl-icon-action ssl-chat-mode-button" type="button" data-mode="voice" data-tooltip="Voz" aria-label="Crear voz" role="tab" aria-selected="false"><i class="fas fa-microphone-lines"></i></button>
+          </div>
+          <div class="ssl-chat-header-actions">
+            <div class="ssl-action-group" aria-label="Acciones de creación">
+              <button id="sslAgentSettingsBtn" class="ssl-icon-action ssl-spotlight" style="--ssl-spot-delay:3.2s" type="button" data-tooltip="Configurar creación" aria-label="Configurar creación"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+              <button id="sslNewCreationBtn" class="ssl-icon-action ssl-spotlight" style="--ssl-spot-delay:1.6s" type="button" data-tooltip="Nueva canción" aria-label="Nueva canción"><i class="fas fa-file-circle-plus"></i></button>
+            </div>
+            <span class="ssl-action-separator" aria-hidden="true"></span>
+            <div class="ssl-header-actions ssl-action-group" aria-label="Preferencias del estudio">
+              <button id="sslAdminBtn" class="ssl-icon-action" type="button" data-tooltip="Creaciones de usuarios" aria-label="Creaciones de usuarios" hidden><i class="fas fa-users" aria-hidden="true"></i></button>
+              <button id="sslThemeBtn" class="ssl-icon-action" type="button" data-tooltip="Cambiar tema" aria-label="Cambiar tema"><i class="fas fa-circle-half-stroke" aria-hidden="true"></i></button>
+              <button id="sslGeneralSettingsBtn" class="ssl-icon-action" type="button" data-tooltip="Configuración general" aria-label="Abrir configuración general"><i class="fas fa-gear" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <span id="sslSessionTitle" hidden>Nueva sesión</span>
+          <span id="sslChatModeLabel" hidden>Canción</span>
+          <span id="sslCreationSummary" hidden>Canción completa · Con voz</span>
+        </header>
+
+        <div id="sslChatFeed" class="ssl-chat-feed" aria-live="polite"></div>
+
+        <form id="sslComposer" class="ssl-composer">
+          <div class="ssl-composer-input-shell">
+            <div id="sslRecordedReference" class="ssl-recorded-reference" aria-label="Audio grabado" hidden>
+              <button id="sslRecordedPlayBtn" class="ssl-icon-action" type="button" data-tooltip="Reproducir grabación" aria-label="Reproducir grabación"><i class="fas fa-play"></i></button>
+              <div class="ssl-recorded-copy"><span id="sslRecordedLabel">Grabación</span><small id="sslRecordedDuration">0:00</small></div>
+              <input id="sslRecordedProgress" type="range" min="0" max="1000" value="0" aria-label="Progreso de la grabación">
+              <button id="sslRecordedRemoveBtn" class="ssl-icon-action" type="button" data-tooltip="Quitar grabación" aria-label="Quitar grabación"><i class="fas fa-xmark"></i></button>
+              <audio id="sslRecordedAudio" preload="metadata"></audio>
+            </div>
+            <textarea id="sslPrompt" rows="2" placeholder="Pregunta o describe lo que quieres crear"></textarea>
+            <footer class="ssl-composer-input-footer">
+              <div class="ssl-composer-toolbar" role="toolbar" aria-label="Herramientas de creación">
+                <div class="ssl-composer-toolbar-group">
+                  <button id="sslRecordIdeaBtn" class="ssl-icon-action ssl-record-button" type="button" data-tooltip="Grabar melodía o sonido" aria-label="Grabar melodía o sonido"><i class="fas fa-microphone"></i></button>
+                  <label id="sslGeminiModelPicker" class="ssl-composer-model-picker" data-tooltip="Lyria 3.5">
+                    <i class="fas fa-wave-square" aria-hidden="true"></i>
+                    <select id="sslGeminiModel" aria-label="Modelo de música">
+                      <option value="lyria-3.5">Lyria 3.5</option>
+                      <option value="lyria-3-pro-preview">Lyria 3 Pro</option>
+                      <option value="lyria-3-clip-preview">Lyria 3 Clip</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="sslQuickVoiceSettings" class="ssl-composer-quick-settings ssl-composer-toolbar-group" aria-label="Opciones rápidas de voz" hidden>
+                  <label data-tooltip="Formato"><i class="fas fa-text-width" aria-hidden="true"></i><select id="sslToolbarVoiceFormat" aria-label="Formato de voz"><option value="word">Palabra</option><option value="phrase">Frase</option><option value="dialogue">Diálogo</option></select></label>
+                  <label data-tooltip="Voz"><i class="fas fa-microphone-lines" aria-hidden="true"></i><select id="sslToolbarVoiceName" aria-label="Seleccionar voz"></select></label>
+                  <label data-tooltip="Idioma"><i class="fas fa-language" aria-hidden="true"></i><select id="sslToolbarVoiceLanguage" aria-label="Idioma de voz"></select></label>
+                  <label data-tooltip="Estilo"><i class="fas fa-sliders" aria-hidden="true"></i><select id="sslToolbarVoiceStyle" aria-label="Estilo de voz"><option value="natural y clara">Natural</option><option value="cálida y cercana">Cálida</option><option value="enérgica y dinámica">Enérgica</option><option value="serena y pausada">Serena</option><option value="dramática y expresiva">Dramática</option><option value="informativa y precisa">Informativa</option><option value="tono dinámico según el texto">Tono dinámico</option></select></label>
+                </div>
+                <div id="sslQuickMusicSettings" class="ssl-composer-quick-settings ssl-composer-toolbar-group" aria-label="Opciones rápidas de canción">
+                  <label id="sslQuickGenrePicker" class="ssl-composer-model-picker ssl-composer-genre-picker" data-tooltip="Elegir género">
+                    <i class="fas fa-record-vinyl" aria-hidden="true"></i>
+                    <select id="sslQuickGenre" aria-label="Elegir género">
+                      <option value="">Género</option>
+                      <option value="Pop alternativo">Pop alternativo</option>
+                      <option value="Cinemático">Cinemático</option>
+                      <option value="Reggaetón">Reggaetón</option>
+                      <option value="Afrobeat">Afrobeat</option>
+                      <option value="Regional mexicano">Regional mexicano</option>
+                      <option value="Lo-fi">Lo-fi</option>
+                      <option value="Electrónica">Electrónica</option>
+                      <option value="Soul y R&amp;B">Soul y R&amp;B</option>
+                      <option value="Rock">Rock</option>
+                      <option value="Jazz">Jazz</option>
+                      <option value="Orquestal">Orquestal</option>
+                      <option value="Fusión latina">Fusión latina</option>
+                    </select>
+                  </label>
+                  <label data-tooltip="Duración"><i class="fas fa-clock" aria-hidden="true"></i><select id="sslQuickDuration" aria-label="Duración"><option value="30">30 s</option><option value="60">1 min</option><option value="90">1:30</option><option value="120">2 min</option><option value="180">3 min</option></select></label>
+                  <div class="ssl-voice-menu-wrap">
+                    <input id="sslQuickMusicType" type="hidden" value="vocal">
+                    <input id="sslSingerProfile" type="hidden" value="">
+                    <button id="sslVoiceMenuBtn" class="ssl-voice-menu-button" type="button" data-tooltip="Voz" aria-label="Voz" aria-haspopup="menu" aria-expanded="false"><i class="fas fa-microphone-lines" aria-hidden="true"></i></button>
+                    <div id="sslVoiceMenu" class="ssl-voice-menu" role="menu" hidden>
+                      <button type="button" role="menuitemradio" data-voice-mode="instrumental" aria-checked="false"><span>Sin voz</span></button>
+                      <button type="button" role="menuitemradio" data-voice-mode="vocal" aria-checked="true"><span>Con voz</span></button>
+                      <div class="ssl-voice-menu-divider"></div>
+                      <button class="ssl-voice-config-trigger" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false"><span>Configurar voz</span><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                      <div id="sslSingerMenu" class="ssl-singer-menu" role="menu" hidden>
+                        <div class="ssl-singer-menu-heading"><span>Perfil vocal</span><small id="sslSingerLanguageLabel">Español</small></div>
+                        <span class="ssl-singer-group-label">Mujer</span>
+                        <button type="button" role="menuitemradio" data-singer-profile="female-soprano" aria-checked="false"><span>Soprano</span><small>Clara y brillante</small></button>
+                        <button type="button" role="menuitemradio" data-singer-profile="female-alto" aria-checked="false"><span>Alto</span><small>Cálida y profunda</small></button>
+                        <span class="ssl-singer-group-label">Hombre</span>
+                        <button type="button" role="menuitemradio" data-singer-profile="male-tenor" aria-checked="false"><span>Tenor</span><small>Ágil y expresiva</small></button>
+                        <button type="button" role="menuitemradio" data-singer-profile="male-baritone" aria-checked="false"><span>Barítono</span><small>Grave y resonante</small></button>
+                        <button type="button" role="menuitemradio" data-singer-profile="weathered-rocker" aria-checked="false"><span>Rockero áspero</span><small>Rasposa e intensa</small></button>
+                      </div>
+                    </div>
+                  </div>
+                  <label data-tooltip="Idioma"><i class="fas fa-language" aria-hidden="true"></i><select id="sslQuickLanguage" aria-label="Idioma"><option>Español</option><option>Inglés</option><option>Francés</option><option>Portugués</option><option>Alemán</option><option>Italiano</option><option>Japonés</option></select></label>
+                  <label data-tooltip="BPM"><i class="fas fa-gauge-high" aria-hidden="true"></i><input id="sslQuickBpm" type="number" min="40" max="220" value="100" aria-label="BPM"></label>
+                </div>
+              </div>
+              <button class="ssl-icon-action ssl-send-button ssl-spotlight" style="--ssl-spot-delay:4.8s" type="submit" data-tooltip="Enviar" aria-label="Enviar"><i class="fas fa-arrow-up"></i></button>
+            </footer>
+          </div>
+        </form>
+      </section>
+
+      <button id="sslRightResizer" class="ssl-panel-resizer is-right" type="button" role="separator" aria-label="Cambiar ancho del panel de biblioteca" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="520"></button>
+
+      <aside class="ssl-panel ssl-library" aria-label="Audios aprobados">
+        <header class="ssl-panel-header">
+          <h2>Música aprobada</h2>
+          <span id="sslLibraryCount" hidden>0 audios</span>
+        </header>
+        <div class="ssl-search ssl-library-search"><i class="fas fa-search" aria-hidden="true"></i><input id="sslLibrarySearch" type="search" placeholder="Buscar audio"></div>
+        <div id="sslLibraryList" class="ssl-library-list" aria-live="polite"></div>
+      </aside>
+
+      <footer id="sslNowPlaying" class="ssl-now-playing" aria-label="Reproductor" hidden>
+        <button class="ssl-player-cover" type="button" data-player-action="toggle" data-tooltip="Reproducir" aria-label="Reproducir">
+          <img src="schroeder-sound-lab/assets/schroeder-adult-piano.png" alt=""><span><i class="fas fa-play"></i></span>
+        </button>
+        <div class="ssl-player-copy"><strong id="sslPlayerTitle">Audio</strong><span id="sslPlayerKind">Canción</span></div>
+        <span id="sslPlayerCurrent" class="ssl-player-time">0:00</span>
+        <input id="sslPlayerProgress" class="ssl-player-progress" type="range" min="0" max="1000" value="0" aria-label="Progreso de reproducción">
+        <span id="sslPlayerDuration" class="ssl-player-time">0:00</span>
+        <div class="ssl-menu-wrap">
+          <button class="ssl-icon-action" type="button" data-player-action="menu" data-tooltip="Opciones" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          <div class="ssl-track-menu ssl-player-menu" hidden></div>
+        </div>
+        <button class="ssl-icon-action ssl-player-close" type="button" data-player-action="close" data-tooltip="Cerrar reproductor" aria-label="Cerrar reproductor"><i class="fas fa-xmark"></i></button>
+        <audio id="sslPlayerAudio" preload="metadata"></audio>
+      </footer>
+    </div>
+  </main>
+
+  <div id="sslAgentModal" class="ssl-modal" role="dialog" aria-modal="true" aria-labelledby="sslAgentModalTitle" hidden>
+    <button class="ssl-modal-backdrop" type="button" data-close-modal aria-label="Cerrar"></button>
+    <section class="ssl-modal-card ssl-agent-modal-card">
+      <header class="ssl-modal-header">
+        <div><span class="ssl-panel-kicker">Configuración creativa</span><h2 id="sslAgentModalTitle">Agente de creación</h2></div>
+        <button class="ssl-icon-button" type="button" data-close-modal aria-label="Cerrar"><i class="fas fa-xmark"></i></button>
+      </header>
+      <div class="ssl-modal-body">
+        <div class="ssl-mode-tabs" role="tablist" aria-label="Tipo de creación">
+          <button class="is-active" type="button" data-mode="music" role="tab" aria-selected="true">Canción</button>
+          <button type="button" data-mode="voice" role="tab" aria-selected="false">Voz</button>
+        </div>
+        <section id="sslMusicControls" class="ssl-controls" aria-label="Configuración de canción">
+          <label><span>Tipo</span><select id="sslMusicType"><option value="vocal">Con voz</option><option value="instrumental">Instrumental</option></select></label>
+          <label><span>Modelo</span><select id="sslMusicModel"><option value="lyria-3.5">Lyria 3.5 · Canción completa</option><option value="lyria-3-pro-preview">Lyria 3 Pro · Canción completa</option><option value="lyria-3-clip-preview">Lyria 3 Clip · 30 segundos</option></select></label>
+          <label><span>Duración</span><select id="sslMusicDuration"><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="90">1:30 minutos</option><option value="120" selected>2 minutos</option><option value="180">3 minutos</option></select></label>
+          <label class="ssl-span-two"><span>Género o mezcla</span><input id="sslGenre" type="text" placeholder="Pop alternativo, soul"></label>
+          <label><span>Idioma</span><select id="sslMusicLanguage"><option>Español</option><option>Inglés</option><option>Francés</option><option>Portugués</option><option>Alemán</option><option>Italiano</option><option>Japonés</option></select></label>
+          <div class="ssl-genre-section ssl-wide"><span>Propuestas rápidas</span><div class="ssl-genre-chips"><button type="button" data-genre-family="pop" data-genre-preset="Pop alternativo">Pop alternativo</button><button type="button" data-genre-family="cinematic" data-genre-preset="Cinemático">Cinemático</button><button type="button" data-genre-family="latin" data-genre-preset="Reggaetón">Reggaetón</button><button type="button" data-genre-family="latin" data-genre-preset="Afrobeat">Afrobeat</button><button type="button" data-genre-family="latin" data-genre-preset="Regional mexicano">Regional mexicano</button><button type="button" data-genre-family="electronic" data-genre-preset="Lo-fi">Lo-fi</button><button type="button" data-genre-family="electronic" data-genre-preset="Electrónica">Electrónica</button><button type="button" data-genre-family="soul" data-genre-preset="Soul y R&B">Soul y R&amp;B</button><button type="button" data-genre-family="rock" data-genre-preset="Rock">Rock</button><button type="button" data-genre-family="soul" data-genre-preset="Jazz">Jazz</button><button type="button" data-genre-family="cinematic" data-genre-preset="Orquestal">Orquestal</button><button type="button" data-genre-family="latin" data-genre-preset="Fusión latina">Fusión latina</button></div></div>
+          <label><span>BPM</span><input id="sslBpm" type="number" min="40" max="220" value="100"></label>
+          <label><span>Tonalidad</span><input id="sslKey" type="text" placeholder="C mayor"></label>
+          <label class="ssl-wide"><span>Letra</span><textarea id="sslLyrics" rows="5" placeholder="Vacío para generar letra"></textarea></label>
+        </section>
+        <section id="sslVoiceControls" class="ssl-controls" aria-label="Configuración de voz" hidden>
+          <label><span>Formato</span><select id="sslVoiceFormat"><option value="word">Palabra</option><option value="phrase">Frase</option><option value="dialogue">Diálogo</option></select></label>
+          <label><span>Idioma</span><select id="sslVoiceLanguage"></select></label>
+          <label><span>Voz</span><select id="sslVoiceName"></select></label>
+          <label><span>Estilo</span><select id="sslVoiceStyle"><option value="natural y clara">Natural</option><option value="cálida y cercana">Cálida</option><option value="enérgica y dinámica">Enérgica</option><option value="serena y pausada">Serena</option><option value="dramática y expresiva">Dramática</option><option value="informativa y precisa">Informativa</option><option value="tono dinámico según el texto">Tono dinámico</option></select></label>
+          <div class="ssl-custom-voice-row ssl-wide"><span id="sslCustomVoiceStatus">Voz propia</span><button id="sslCloneVoiceBtn" class="ssl-button" type="button"><i class="fas fa-wave-square" aria-hidden="true"></i> Crear voz</button></div>
+          <label class="ssl-wide"><span>Texto</span><textarea id="sslVoiceText" rows="8" placeholder="Texto o diálogo"></textarea></label>
+        </section>
+      </div>
+      <footer class="ssl-modal-footer"><button class="ssl-button ssl-primary" type="button" data-close-modal>Aplicar</button></footer>
+    </section>
+  </div>
+
+  <div id="sslVoiceCloneModal" class="ssl-modal" role="dialog" aria-modal="true" aria-labelledby="sslVoiceCloneTitle" hidden>
+    <button class="ssl-modal-backdrop" type="button" data-close-modal aria-label="Cerrar"></button>
+    <section class="ssl-modal-card ssl-voice-clone-card">
+      <header class="ssl-modal-header">
+        <div class="ssl-voice-clone-heading"><span class="ssl-voice-clone-mark"><i class="fas fa-microphone-lines" aria-hidden="true"></i></span><div><span class="ssl-panel-kicker">Voz propia</span><h2 id="sslVoiceCloneTitle">Crear voz</h2><p>Dos muestras, una voz consistente.</p></div></div>
+        <span class="ssl-voice-clone-badge"><i class="fas fa-shield-halved" aria-hidden="true"></i> Verificación protegida</span>
+        <button class="ssl-icon-button" type="button" data-close-modal aria-label="Cerrar"><i class="fas fa-xmark"></i></button>
+      </header>
+      <form id="sslVoiceCloneForm" class="ssl-modal-body ssl-voice-clone-form">
+        <div class="ssl-voice-clone-intro ssl-wide"><span class="ssl-voice-clone-step">01 — Perfil</span><p>Define el nombre y el idioma de la voz.</p></div>
+        <label><span>Nombre</span><input id="sslVoiceCloneName" type="text" maxlength="80" value="Mi voz" required></label>
+        <label><span>Idioma</span><select id="sslVoiceCloneLanguage"><option value="es-US">Español</option><option value="en-US">English</option><option value="fr-FR">Français</option><option value="pt-BR">Português</option><option value="de-DE">Deutsch</option><option value="it-IT">Italiano</option><option value="ja-JP">日本語</option></select></label>
+        <div class="ssl-voice-clone-intro ssl-wide"><span class="ssl-voice-clone-step">02 — Muestras</span><p>Graba ambas con el mismo micrófono y en el mismo lugar.</p></div>
+        <div class="ssl-wide ssl-voice-record-field"><span>Primera muestra · lee el texto durante 10–30 s</span><div class="ssl-voice-record-actions"><button id="sslRecordVoiceSampleBtn" class="ssl-button" type="button"><i class="fas fa-microphone"></i><span>Grabar muestra</span></button><span id="sslVoiceSampleStatus">Sin grabación</span></div><div class="ssl-voice-record-meter" aria-live="polite"><span id="sslVoiceSampleTimer">00:00 / 00:30</span><div class="ssl-voice-record-track"><i id="sslVoiceSampleMeter"></i></div><small id="sslVoiceSamplePace">Lee con ritmo natural: una frase cada 3–4 segundos.</small></div><audio id="sslVoiceSamplePreview" controls preload="metadata" hidden></audio></div>
+        <div class="ssl-sample-script ssl-wide"><span>Texto sugerido para la muestra · léelo con naturalidad</span><p id="sslVoiceSampleScript">Hola, esta es una muestra de mi voz. Hoy estoy preparando una grabación clara y natural, con pausas breves y distintos tonos para que el resultado conserve mi forma de hablar.</p><small>No es el texto de consentimiento.</small></div>
+        <div class="ssl-voice-clone-intro ssl-wide"><span class="ssl-voice-clone-step">03 — Consentimiento</span><p>Lee la frase exacta para confirmar que la voz es tuya.</p></div>
+        <div class="ssl-consent-copy ssl-wide"><span>Consentimiento · lee esta frase exacta</span><p id="sslVoiceConsentPhrase">Soy el propietario de esta voz y doy mi consentimiento para que Google la utilice para crear un modelo de voz sintética.</p><small>Léela tal cual está escrita, con voz clara y sin música de fondo.</small></div>
+        <div class="ssl-wide ssl-voice-record-field"><span>Segunda muestra · lee el consentimiento exacto</span><div class="ssl-voice-record-actions"><button id="sslRecordConsentBtn" class="ssl-button" type="button"><i class="fas fa-microphone"></i><span>Grabar consentimiento</span></button><span id="sslVoiceConsentStatus">Sin grabación</span></div><div class="ssl-voice-record-meter" aria-live="polite"><span id="sslVoiceConsentTimer">00:00 / 00:30</span><div class="ssl-voice-record-track"><i id="sslVoiceConsentMeter"></i></div><small id="sslVoiceConsentPace">Lee la frase exacta con pausas breves y ritmo natural.</small></div><audio id="sslVoiceConsentPreview" controls preload="metadata" hidden></audio></div>
+        <label class="ssl-wide ssl-confirm-field"><input id="sslVoiceOwnership" type="checkbox" required><span>Confirmo que soy una persona adulta y propietaria de esta voz.</span></label>
+      </form>
+      <footer class="ssl-modal-footer"><button class="ssl-button" type="button" data-close-modal>Cancelar</button><button id="sslCreateVoiceBtn" class="ssl-button ssl-primary" type="submit" form="sslVoiceCloneForm">Crear voz</button></footer>
+    </section>
+  </div>
+
+  <div id="sslGeneralModal" class="ssl-modal" role="dialog" aria-modal="true" aria-labelledby="sslGeneralModalTitle" hidden>
+    <button class="ssl-modal-backdrop" type="button" data-close-modal aria-label="Cerrar"></button>
+    <section class="ssl-modal-card ssl-general-modal-card">
+      <header class="ssl-modal-header">
+        <div><span class="ssl-panel-kicker">Preferencias</span><h2 id="sslGeneralModalTitle">Configuración general</h2></div>
+        <button class="ssl-icon-button" type="button" data-close-modal aria-label="Cerrar"><i class="fas fa-xmark"></i></button>
+      </header>
+      <div class="ssl-modal-body ssl-general-settings">
+        <section><h3>Apariencia</h3><div class="ssl-theme-options"><button type="button" data-theme-option="light"><i></i>Claro</button><button type="button" data-theme-option="mid"><i></i>Medio</button><button type="button" data-theme-option="dark"><i></i>Oscuro</button></div><label><span>Tamaño de texto</span><select id="sslFontSize"><option value="compact">Compacto</option><option value="normal" selected>Normal</option><option value="large">Grande</option></select></label></section>
+        <section><h3>Creación predeterminada</h3><label><span>Modelo de música</span><select id="sslDefaultMusicModel"><option value="lyria-3.5">Lyria 3.5 · Canción completa</option><option value="lyria-3-pro-preview">Lyria 3 Pro · Canción completa</option><option value="lyria-3-clip-preview">Lyria 3 Clip · 30 segundos</option></select></label></section>
+      </div>
+      <footer class="ssl-modal-footer"><button class="ssl-button ssl-primary" type="button" data-close-modal>Guardar</button></footer>
+    </section>
+  </div>
+
+  <script type="module" data-cache-src="js/chromeLayout.js"></script>
+  <script type="module" data-cache-src="js/sidebar.js"></script>
+  <script type="module" data-cache-src="schroeder-sound-lab/app.js"></script>
+  <script data-cache-src="js/update-banner-loader.js" defer></script>
+</body>
+</html>

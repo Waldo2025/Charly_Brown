@@ -120,12 +120,14 @@ var require_podcaster_media_state = __commonJS({
         ...incoming,
         rowId: key,
         type: kind,
-        ...context.kind === "audio" ? { playbackRate: current?.playbackRate || incoming.playbackRate || 1 } : {},
+        ...context.kind === "audio" ? { playbackRate: String(incoming.model || "") === "uploaded" ? incoming.playbackRate || 1 : current?.playbackRate || incoming.playbackRate || 1 } : {},
         updatedAt,
         selectionOperationId: String(context.requestId || incoming.selectionOperationId || ""),
         selectionRevision: String(context.requestId || incoming.selectionRevision || `${updatedAt}:${incoming.storagePath || incoming.downloadUrl || incoming.localMediaCacheKey}`)
       };
-      const next = { ...target, [field]: { ...target[field] || {}, [key]: clip }, updatedAt };
+      const deletedAtMap = { ...target[deletedField] || {} };
+      delete deletedAtMap[key];
+      const next = { ...target, [field]: { ...target[field] || {}, [key]: clip }, [deletedField]: deletedAtMap, updatedAt };
       if (context.kind !== "audio") {
         const config = target.podcastVideoConfig || {};
         const oldTimelineClip = config.timelineClipsByRowId?.[key] || {};
@@ -142,9 +144,20 @@ var require_podcaster_media_state = __commonJS({
       }
       if (context.kind === "audio") {
         const config = target.podcastVideoConfig || {};
+        const textClips = config.timelineOnScreenTextClipsByRowId || {};
+        const wasImported = String(current?.model || "") === "uploaded";
+        const isImported = String(clip.model || "") === "uploaded";
+        if (isImported) {
+          clip.previousOnScreenTextClip = wasImported ? current?.previousOnScreenTextClip ?? null : textClips[key] ? { ...textClips[key] } : null;
+        }
         const track = config.geminiDialogueTrack || {};
         const prior = track.segments || [];
-        const replaceSegment = (segment) => ({ ...segment, audioSrc: clip.downloadUrl || "", downloadUrl: clip.downloadUrl || "", storagePath: clip.storagePath || "", localMediaCacheKey: clip.localMediaCacheKey || "" });
+        const replaceSegment = (segment) => {
+          const sourceMs = Math.max(1, Math.round(Number(clip.durationSec || 0) * 1e3) || Number(segment.trimOutMs || segment.durationMs || 8e3));
+          const startMs = Number(segment.startMs || 0);
+          const durationMs = Math.round(sourceMs / Math.max(0.1, Number(clip.playbackRate || 1)));
+          return { ...segment, audioSrc: clip.downloadUrl || "", downloadUrl: clip.downloadUrl || "", storagePath: clip.storagePath || "", localMediaCacheKey: clip.localMediaCacheKey || "", durationMs, endMs: startMs + durationMs, trimInMs: 0, trimOutMs: sourceMs };
+        };
         const segments = prior.map((segment) => String(segment.rowId) === key ? replaceSegment(segment) : segment);
         if (!segments.some((segment) => String(segment.rowId) === key)) {
           const index = rows.findIndex((row) => String(row.id) === key);
@@ -153,7 +166,14 @@ var require_podcaster_media_state = __commonJS({
           const durationMs = Math.round(sourceMs / Number(clip.playbackRate || 1));
           segments.push(replaceSegment({ rowId: key, sceneIndex: index + 1, startMs, anchorStartMs: startMs, durationMs, endMs: startMs + durationMs, trimInMs: 0, trimOutMs: sourceMs }));
         }
-        next.podcastVideoConfig = { ...config, geminiDialogueTrack: {
+        const nextTextClips = { ...textClips };
+        if (isImported) {
+          nextTextClips[key] = { ...textClips[key], rowId: key, hidden: true, autoHidden: false };
+        } else if (wasImported) {
+          if (current?.previousOnScreenTextClip) nextTextClips[key] = { ...current.previousOnScreenTextClip };
+          else delete nextTextClips[key];
+        }
+        next.podcastVideoConfig = { ...config, timelineOnScreenTextClipsByRowId: nextTextClips, geminiDialogueTrack: {
           ...track,
           enabled: prior.length ? track.enabled !== false : true,
           updatedAt,

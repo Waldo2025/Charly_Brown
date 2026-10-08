@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "style": "illustrated-realism",
+  "generatedAt": "2026-09-25",
+  "assets": {
+    "rail-background.webp": {"status": "ready", "source": "imagegen", "role": "background", "aspect": "16:9"},
+    "harbor-background.webp": {"status": "ready", "source": "imagegen", "role": "background", "aspect": "16:9"},
+    "living-background.webp": {"status": "ready", "source": "imagegen", "role": "background", "aspect": "16:9"},
+    "math-background.webp": {"status": "ready", "source": "imagegen", "role": "background", "aspect": "16:9"},
+    "optics-background.webp": {"status": "ready", "source": "imagegen", "role": "background", "aspect": "16:9"},
+    "workbench-background.svg": {"status": "ready", "source": "bundled-svg", "role": "background", "aspect": "16:9"},
+    "micro-background.svg": {"status": "ready", "source": "bundled-svg", "role": "background", "aspect": "16:9"},
+    "thermal-background.svg": {"status": "ready", "source": "bundled-svg", "role": "background", "aspect": "16:9"},
+    "rail-primary.svg": {"status": "ready", "source": "bundled-svg", "role": "primary", "alpha": true},
+    "harbor-primary.svg": {"status": "ready", "source": "bundled-svg", "role": "primary", "alpha": true},
+    "living-primary.svg": {"status": "ready", "source": "bundled-svg", "role": "primary", "alpha": true}
+  },
+  "policy": "Bundled backgrounds and primary layers are available offline; MCP-generated replacements remain subject to visual review before production approval."
+}

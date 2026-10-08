@@ -7,14 +7,12 @@
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 .sally-app [hidden] { display:none!important; }
-.sally-app h1,.sally-app h2,.sally-app h3,.sally-brand__mark {
-  font-family:Inter,system-ui,sans-serif; font-weight:600; letter-spacing:-.035em;
+.sally-app h1,.sally-app h2,.sally-app h3 {
+  font-family:Inter,system-ui,sans-serif; font-weight:600; letter-spacing:0;
 }
 .sally-app button,.sally-app input,.sally-app textarea { font-family:inherit; }
 .sally-app input,.sally-app textarea { font-size:12px; line-height:1.6; }
 .sally-topbar { height:64px; box-shadow:none; background:#fff; }
-.sally-brand__mark { background:transparent;color:var(--sally-ink);font-size:24px; }
-.sally-brand p { color:#9196a3;letter-spacing:.12em; }
 .sally-brand h1 { font-size:15px; }
 .sally-pane-head h2 { font-size:16px; }
 .sally-app button,.sally-file-button {
@@ -35,8 +33,8 @@
 .sally-model-help { font-size:11px;line-height:1.6;color:var(--sally-muted);margin:0 0 16px; }
 .sally-pane { padding-top:22px; }
 .sally-browser-pane { background:#fff;position:relative; }
-.sally-browser-stage { background:#fff;display:flex;align-items:center;justify-content:center; }
-.sally-browser-stage img { width:100%;height:auto;max-height:none;box-shadow:none; }
+.sally-browser-stage { background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden; }
+.sally-browser-stage img { width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;box-shadow:none; }
 .sally-browser-empty h2 { font-size:21px; }
 .sally-browser-empty p { font-size:12px; }
 .sally-orbit { background:transparent;box-shadow:none;color:#919aaf; }
@@ -47,7 +45,7 @@
 }
 .sally-tool-divider { height:18px;border-left:1px solid var(--sally-line); }
 @media(max-width:480px){.sally-canvas-tools{gap:1px;padding:4px 6px;}.sally-canvas-tools button{min-width:30px;}}
-.sally-browser-footer { display:none; }
+.sally-browser-footer { display:flex;min-height:36px; }
 .sally-evidence-strip { display:none!important; }
 .sally-notice { position:absolute;bottom:12px;left:12px;right:12px;z-index:3;background:#f8f9fc;color:#7c8392;border:0;border-radius:9px; }
 .sally-approval-bar { display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;background:#fff; }
@@ -84,5 +82,60 @@
 .sally-app .sally-task-picker-body { display:grid; gap:16px; padding:20px; min-width:0; overflow:auto; }
 .sally-app .sally-task-picker-list { display:grid; gap:8px; max-height:220px; overflow:auto; }
 .sally-app .sally-task-picker-list button { background:none; border:0; border-bottom:1px solid #e2e5eb; padding:12px 4px; text-align:left; color:#17202f; font:inherit; cursor:pointer; }
-.sally-app .sally-task-picker-body iframe { width:100%; height:260px; border:1px solid #e2e5eb; border-radius:12px; background:#fff; }
+.sally-app .sally-task-picker-body .sally-safe-preview { width:100%; min-height:260px; border:1px solid #e2e5eb; border-radius:12px; background:#fff; }
+
+/* Unified Sally chat */
+.sally-app .sally-brief-pane { display:grid; grid-template-rows:auto minmax(0,1fr) auto; height:100%; max-height:100%; min-height:0; padding:0; overflow:hidden; background:#fff; color:#18181b; }
+.sally-app .sally-chat-header { position:sticky; top:0; z-index:12; min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid #e4e4e7; background:rgba(255,255,255,.96); backdrop-filter:blur(12px); }
+.sally-app .sally-chat-header__identity { min-width:0; flex:1; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:10px; }
+.sally-app .sally-chat-header__identity h2 { margin:0; font:600 14px/1 Inter,Arial,sans-serif; letter-spacing:0; }
+.sally-app .sally-chat-header__identity select { min-width:0; width:100%; height:32px; padding:0 28px 0 9px; border:1px solid transparent; border-radius:6px; background:#f4f4f5; color:#3f3f46; font:500 11px/1 Inter,Arial,sans-serif; text-overflow:ellipsis; }
+.sally-app .sally-chat-header__identity select:hover,.sally-app .sally-chat-header__identity select:focus { border-color:#d4d4d8; background:#fff; }
+.sally-app .sally-chat-header__actions { display:flex; align-items:center; gap:6px; }
+.sally-app .sally-chat-state { max-width:82px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#71717a; font-size:10px; }
+.sally-app .sally-chat-header .sally-icon,.sally-app .sally-quick-menu>.sally-icon { width:32px; height:32px; border-color:transparent; border-radius:6px; background:transparent; display:grid; place-items:center; }
+.sally-app .sally-chat-header .sally-icon:hover,.sally-app .sally-quick-menu>.sally-icon:hover { background:#f4f4f5; }
+.sally-app .sally-menu,.sally-app .sally-quick-menu { position:relative; }
+.sally-app .sally-menu>summary,.sally-app .sally-quick-menu>summary { list-style:none; cursor:pointer; }
+.sally-app .sally-menu>summary::-webkit-details-marker,.sally-app .sally-quick-menu>summary::-webkit-details-marker { display:none; }
+.sally-app .sally-menu__content,.sally-app .sally-quick-actions { position:absolute; z-index:40; display:grid; padding:5px; border:1px solid #e4e4e7; border-radius:7px; background:#fff; box-shadow:0 12px 30px rgba(24,24,27,.12); }
+.sally-app .sally-menu__content { top:38px; right:0; width:218px; }
+.sally-app .sally-menu:not([open]) .sally-menu__content,.sally-app .sally-quick-menu:not([open]) .sally-quick-actions { display:none; }
+.sally-app .sally-menu__content button,.sally-app .sally-menu__check,.sally-app .sally-quick-actions button { width:100%; min-height:34px; display:flex; align-items:center; gap:10px; padding:7px 9px; border:0; border-radius:5px; background:transparent; color:#27272a; font:500 12px/1.25 Inter,Arial,sans-serif; text-align:left; cursor:pointer; }
+.sally-app .sally-menu__content button:hover,.sally-app .sally-menu__check:hover,.sally-app .sally-quick-actions button:hover { background:#f4f4f5; }
+.sally-app .sally-menu__content i,.sally-app .sally-quick-actions i { width:14px; color:#71717a; text-align:center; }
+.sally-app .sally-menu__check { border-top:1px solid #e4e4e7; margin-top:4px; padding-top:9px; }
+.sally-app .sally-menu__check input { width:14px; height:14px; margin:0; accent-color:#18181b; }
+.sally-app .sally-endpoints { margin:10px 12px 2px; padding:8px; gap:6px; border:1px solid #e4e4e7; border-radius:7px; background:#fafafa; }
+.sally-app .sally-endpoints[hidden] { display:none!important; }
+.sally-app .sally-endpoint { padding:8px; border:0; border-radius:5px; background:#fff; box-shadow:inset 0 0 0 1px #e4e4e7; }
+.sally-app .sally-endpoint--model { border-left:2px solid #64748b; }
+.sally-app .sally-endpoint--target { border-left:2px solid #16805c; background:#fbfefc; }
+.sally-app .sally-endpoint__head { margin-bottom:4px; }
+.sally-app .sally-endpoint__head span,.sally-app .sally-endpoint__head strong { font-size:9px; }
+.sally-app .sally-agent-status { margin:0; padding:10px 14px; border-bottom:1px solid #f0f0f1; color:#71717a; font-size:11px; }
+.sally-app .sally-chat-scroll { min-width:0; min-height:0; overflow-y:auto; overscroll-behavior:contain; display:flex; flex-direction:column; scrollbar-width:thin; }
+.sally-app .sally-agent-chat { flex:1 0 auto; height:auto; min-height:0; max-height:none; overflow:visible; padding:14px; border:0; background:#fff; }
+.sally-app .sally-agent-message { width:min(88%,310px); margin:0 0 14px; padding:0; border:0; }
+.sally-app .sally-agent-message strong { margin:0 0 5px; color:#71717a; font-size:10px; font-weight:600; }
+.sally-app .sally-agent-message p { margin:0; padding:9px 11px; border:1px solid #e4e4e7; border-radius:7px; background:#fff; color:#27272a; font-size:12px; line-height:1.5; }
+.sally-app .sally-agent-message--assistant { padding-left:0; border-left:0; }
+.sally-app .sally-agent-message--assistant p { background:#f4f4f5; border-color:#f4f4f5; }
+.sally-app .sally-agent-message--user { margin-left:auto; color:#fafafa; }
+.sally-app .sally-agent-message--user strong { text-align:right; }
+.sally-app .sally-agent-message--user p { background:#18181b; border-color:#18181b; color:#fafafa!important; -webkit-text-fill-color:#fafafa!important; }
+.sally-app .sally-agent-message.is-pending p { opacity:.72; }
+.sally-app #sallySelectionContext,.sally-app #sallyTaskTags,.sally-app #sallyAttachments,.sally-app .sally-template-selection { margin-left:12px; margin-right:12px; }
+.sally-app .sally-chat-composer { position:relative; bottom:auto; z-index:10; min-width:0; align-self:stretch; margin:8px 12px 12px; padding:8px; border:1px solid #d4d4d8; border-radius:8px; background:#fff; box-shadow:0 8px 24px rgba(24,24,27,.12),0 1px 2px rgba(24,24,27,.06); }
+.sally-app .sally-chat-composer:focus-within { border-color:#a1a1aa; box-shadow:0 0 0 3px rgba(24,24,27,.06); }
+.sally-app .sally-chat-composer textarea { min-height:68px; max-height:min(180px,24dvh); resize:none; overflow-y:auto; padding:3px 4px!important; color:#18181b; font:400 13px/1.5 Inter,Arial,sans-serif; }
+.sally-app .sally-chat-composer textarea::placeholder { color:#a1a1aa; }
+.sally-app .sally-chat-composer__actions { justify-content:flex-start; min-height:34px; padding-top:7px; border-top:1px solid #f0f0f1; }
+.sally-app .sally-composer-spacer { flex:1; }
+.sally-app .sally-chat-composer__actions .sally-icon,.sally-app .sally-chat-composer__actions .sally-file-button { width:32px; height:32px; padding:0; border-color:transparent; border-radius:6px; background:transparent; color:#52525b; }
+.sally-app .sally-chat-composer__actions .sally-icon:hover,.sally-app .sally-chat-composer__actions .sally-file-button:hover { background:#f4f4f5; }
+.sally-app .sally-chat-composer__actions .sally-icon--primary { background:#18181b!important; color:#fff!important; }
+.sally-app .sally-chat-composer__actions .sally-icon--primary:hover { background:#27272a!important; }
+.sally-app .sally-quick-actions { bottom:40px; left:0; width:210px; grid-template-columns:1fr; gap:1px; margin:0; }
+@media(max-width:820px){.sally-app .sally-brief-pane{width:min(calc(100vw - var(--cb-sidebar-collapsed-width,64px)),400px)}.sally-app .sally-chat-header{gap:6px;padding:8px}.sally-app .sally-chat-header__identity{grid-template-columns:minmax(0,1fr);gap:0}.sally-app .sally-chat-header__identity h2,.sally-app .sally-chat-state{display:none}.sally-app .sally-chat-header__actions{flex:0 0 auto}.sally-app .sally-agent-chat{height:auto;min-height:0}}
 .sally-app .sally-task-picker-list button:focus-visible { outline:2px solid #445ca0; outline-offset:2px; }

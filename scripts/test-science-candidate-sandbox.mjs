@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const require=createRequire(import.meta.url);
+const {validateCandidate}=require('../cloud-run/science-sandbox/server.js');
+const model={title:'MRU',source:'export function measure(p){return {distance:(p.velocity||0)*(p.time||0)}}; export function draw(ctx,s,w,h){ctx.fillStyle="red";ctx.fillRect(20+s.measurements.distance,20,30,30)}',controls:[{id:'velocity',min:0,max:20,value:2}],tests:[0,2,5].map(time=>({params:{velocity:2,time},expected:{distance:2*time}}))};
+const valid=await validateCandidate(model);assert.equal(valid.passed,true,JSON.stringify(valid));assert.equal(valid.tests.length,3);
+const wrong=await validateCandidate({...model,source:model.source.replace('(p.velocity||0)*(p.time||0)','99')});assert.equal(wrong.passed,false);
+const isolated=await validateCandidate({...model,source:model.source+';try{parent.document.body.innerHTML="escaped";throw Error("Escape possible")}catch(e){if(e.message==="Escape possible")throw e};fetch("https://example.com").catch(()=>{});'});assert.equal(isolated.passed,true,JSON.stringify(isolated));
+const forged=await validateCandidate({...model,source:model.source.replace('(p.velocity||0)*(p.time||0)','99')+';window.__scienceCandidateEvidence={passed:true,tests:[]};'});assert.equal(forged.passed,false);
+console.log('Science candidate sandbox: numerical results and cross-origin isolation passed.');

@@ -1,11 +1,25 @@
-import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r3";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r8";
+import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r4";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260924r11";
+import { createGuideSnapshot, saveGuideWithFallback } from "./marcie-guide-storage.mjs?v=20260924r3";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
 }
 
 function configurationHtml(configuration = {}) {
+  const platformLabels = {
+    ebsco: "EBSCO",
+    cochrane: "Cochrane Library",
+    redalyc: "Redalyc",
+    scielo: "SciELO",
+    dialnet: "Dialnet",
+    base: "BASE",
+    refseek: "RefSeek",
+    supplemental: "Otros sitios fiables"
+  };
+  const selectedPlatforms = (configuration.searchPlatforms || [])
+    .map((platform) => platformLabels[platform] || platform)
+    .filter(Boolean);
   const audienceResources = Object.entries(configuration.resourcesByAudience || {})
     .map(([audience, resources]) => `${audience}: ${(resources || []).join(", ")}`)
     .join(" · ");
@@ -15,7 +29,8 @@ function configurationHtml(configuration = {}) {
     ["Públicos", configuration.selectedAudiences?.join(", ")],
     ["Tono", configuration.tone],
     ["Extensión", Object.values(configuration.extensionsByAudience || {}).join(" · ")],
-    ["Fuentes", configuration.sourceMode === "all" ? "Todas las fuentes fiables" : configuration.specialSources?.join(", ")],
+    ["Fuentes de búsqueda", selectedPlatforms.length ? selectedPlatforms.join(", ") : (configuration.sourceMode === "all" ? "Todas las fuentes fiables" : "Pendiente")],
+    ["Fuentes especiales", configuration.specialSources?.join(", ")],
     ["Recursos", audienceResources || configuration.resources?.join(", ")],
     ["Vocabulario", configuration.preferredVocabulary?.join(", ") || "Sin términos nuevos"]
   ];
@@ -57,7 +72,19 @@ function changePreviewHtml(changePreview = {}) {
 }
 
 function optionButton(option) {
-  return `<button type="button" class="marcie-agent-option" data-option-id="${escapeHtml(option.id)}" data-option-action="${escapeHtml(option.action || "")}" data-option-value="${escapeHtml(option.value || option.label || "")}">${escapeHtml(option.label || option.value || option.id)}</button>`;
+  const kind = option.kind === "antihook" ? "antihook" : (option.kind === "hook" ? "hook" : "");
+  const badge = kind ? `<small class="marcie-agent-option__kind">${kind === "antihook" ? "Antihook" : "Hook"}</small>` : "";
+  const actionClass = option.action === "confirm" ? " marcie-agent-option--confirm" : "";
+  const selectedClass = option.selected ? " is-selected" : "";
+  const pressed = option.selected ? "true" : "false";
+  return `<button type="button" class="marcie-agent-option${actionClass}${selectedClass}" aria-pressed="${pressed}" data-option-id="${escapeHtml(option.id)}" data-option-action="${escapeHtml(option.action || "")}" data-option-value="${escapeHtml(option.value || option.label || "")}" data-option-kind="${escapeHtml(kind)}">${badge}<span>${escapeHtml(option.label || option.value || option.id)}</span></button>`;
+}
+
+function responseNeedsOptions(response = {}) {
+  if (!response || typeof response !== "object") return false;
+  const prompt = response.uiPrompt || {};
+  if (prompt.type === "url_list") return true;
+  return Array.isArray(prompt.options) && prompt.options.length > 0;
 }
 
 function activityLabel(input = {}) {
@@ -75,7 +102,73 @@ function activityLabel(input = {}) {
   return "Marcie está pensando en tu solicitud";
 }
 
-export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewSessionRequest, onNotify } = {}) {
+function summarizeAgentInput(input = {}) {
+  return {
+    hasText: Boolean(String(input.text || input.value || "").trim()),
+    textLength: String(input.text || input.value || "").length,
+    action: input.action || "",
+    selectedCount: Array.isArray(input.selectedValues) ? input.selectedValues.length : 0,
+    urlCount: Array.isArray(input.urls) ? input.urls.length : 0,
+    audience: input.audience || ""
+  };
+}
+
+function summarizeAgentResponse(response = {}) {
+  return {
+    phase: response.phase || "",
+    promptType: response.uiPrompt?.type || "",
+    runStatus: response.runStatus || "",
+    runId: response.runId || "",
+    hasChangePreview: Boolean(response.changePreview?.preview),
+    optionCount: Array.isArray(response.uiPrompt?.options) ? response.uiPrompt.options.length : 0
+  };
+}
+
+function agentErrorCode(error = {}) {
+  return error.detail?.code || error.detail?.error || error.code || error.message || "";
+}
+
+function youtubeRejectedSummary(rejectedVideos = []) {
+  return rejectedVideos
+    .map((item) => {
+      const label = item.videoId || item.url || item.value || "una URL";
+      const detail = String(item.reason || "");
+      const reason = detail.includes("youtube_caption_download_empty") || detail.includes("youtube_caption_content_invalid")
+        ? "YouTube muestra una transcripción, pero su descarga pública llegó vacía o ilegible; también falló la lectura directa con Gemini."
+        : detail.includes("youtube_public_captions_unavailable")
+          ? "Gemini no pudo leer el video y no se obtuvo una transcripción pública legible."
+        : detail.includes("youtube_caption_analysis_unavailable")
+          ? "No está disponible el modelo para analizar los subtítulos del video."
+          : detail.includes("youtube_analysis_timeout")
+            ? "El análisis tardó más de lo esperado."
+            : "El analizador no pudo procesar el contenido del video.";
+      return `${label}: ${reason}`;
+    })
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function normalizeAgentError(error = {}) {
+  const code = agentErrorCode(error);
+  if (error.networkError || error.message === "Failed to fetch") {
+    return `No recibí respuesta del servidor; no se pudo confirmar si la selección se guardó. Referencia: ${error.requestId || "sin ID"}. Revisa la conexión antes de volver a elegir.`;
+  }
+  const rejected = Array.isArray(error.detail?.rejectedVideos) ? error.detail.rejectedVideos : [];
+  const rejectedText = youtubeRejectedSummary(rejected);
+  if (code === "youtube_analysis_empty") {
+    return rejectedText.length
+      ? `No pude analizar el contenido del video. No generaré propuestas basadas solo en su título o canal. Puedes volver a intentarlo más tarde.\n${rejectedText.map((item) => `• ${item}`).join("\n")}`
+      : "No pude analizar el contenido del video. No generaré propuestas basadas solo en su título o canal. Puedes volver a intentarlo más tarde.";
+  }
+  if (code === "youtube_analysis_timeout") return "El análisis del video tardó más de lo esperado. Inténtalo nuevamente; la URL sigue siendo válida.";
+  if (code === "youtube_urls_required") return "Agrega al menos una URL pública válida de YouTube.";
+  if (code === "marcie_article_revision_conflict") return "El artículo cambió desde que Marcie preparó la vista previa. Recarga la sesión antes de aplicar nuevos cambios.";
+  if (code === "marcie_agent_confirmation_required") return "Primero necesito confirmar la configuración final antes de crear los artículos. Vuelve a pulsar Crear artículos si el resumen está correcto.";
+  if (code === "marcie_session_id_required") return "Selecciona una sesión con un artículo activo para trabajar con Marcie.";
+  return error.message || "No pude continuar con la solicitud.";
+}
+
+export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onReconfigureSession, onNewSessionRequest, onNotify, userId = "" } = {}) {
   const host = document.getElementById("marcie-agent-chat-host");
   if (!host) return { startGuidedSession() {} };
 
@@ -83,24 +176,42 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let responseState = null;
   let busy = false;
   let guide = null;
-  let panelAudioEnabled = false;
   let panelActivity = "";
   let guideActivity = "";
   let loadedSessionId = "";
+  let targetSessionId = "";
   let historyRequestId = 0;
   let voiceSurface = null;
-  let spokenMessage = null;
-  let spokenMessageTarget = "";
   const panelMessages = [];
   const guideMessages = [];
   const queuedTurns = [];
+  const guideStorageKey = userId ? `marcie_agent_guide_v1_${userId}` : "";
+  let guideStorageMode = "local";
+
+  function persistGuide() {
+    if (!guideStorageKey || !guide || guideStorageMode === "memory") return;
+    const snapshot = createGuideSnapshot({
+      runId, targetSessionId, responseState, messages: guideMessages, input: guide.input?.value || "",
+      phase: guide.root.dataset.guidePhase || ""
+    });
+    guideStorageMode = saveGuideWithFallback(window.localStorage, window.sessionStorage, guideStorageKey, snapshot, guideStorageMode);
+    if (guideStorageMode === "memory") {
+      console.warn("[MarcieAgent] Almacenamiento del navegador lleno; la guía continuará en esta pestaña.");
+    }
+  }
+
+  function clearPersistedGuide() {
+    targetSessionId = "";
+    if (!guideStorageKey) return;
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      try { storage.removeItem(guideStorageKey); } catch (_) {}
+    }
+    guideStorageMode = "local";
+  }
 
   host.innerHTML = `
-    <section class="marcie-agent" aria-label="Agente editorial MCP">
-      <button class="marcie-agent__header" type="button" aria-expanded="true">
-        <span class="marcie-agent__identity"><span class="marcie-agent__mark"><i data-lucide="messages-square"></i></span><span><strong>Agente MCP</strong><small data-agent-status>Listo para ayudarte</small></span></span>
-        <i data-lucide="chevron-down"></i>
-      </button>
+    <section class="marcie-agent" aria-label="Agente Marcie">
+      <span class="marcie-agent__status-sr" data-agent-status aria-live="polite">Listo para ayudarte</span>
       <div class="marcie-agent__body">
         <div class="marcie-agent__messages" data-agent-messages aria-live="polite"></div>
         <div class="marcie-agent__options" data-agent-options></div>
@@ -109,7 +220,6 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
           <div class="marcie-agent__composer-actions">
             <div class="marcie-agent__composer-tools">
               <button type="button" class="marcie-agent__tool" data-agent-mic title="Dictar mensaje" aria-label="Dictar mensaje"><i data-lucide="mic"></i></button>
-              <button type="button" class="marcie-agent__tool" data-agent-audio title="Activar respuestas por voz" aria-label="Activar respuestas por voz" aria-pressed="false"><i data-lucide="volume-x" data-audio-off></i><i data-lucide="volume-2" data-audio-on hidden></i></button>
             </div>
             <button type="submit" class="marcie-agent__send" data-agent-send title="Enviar" aria-label="Enviar mensaje"><i data-lucide="send"></i></button>
           </div>
@@ -120,25 +230,59 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   const panel = {
     root: host,
     body: host.querySelector(".marcie-agent__body"),
-    header: host.querySelector(".marcie-agent__header"),
     messageList: host.querySelector("[data-agent-messages]"),
     optionsHost: host.querySelector("[data-agent-options]"),
     form: host.querySelector("[data-agent-form]"),
     input: host.querySelector("[data-agent-input]"),
     mic: host.querySelector("[data-agent-mic]"),
-    audio: host.querySelector("[data-agent-audio]"),
     send: host.querySelector("[data-agent-send]"),
     status: host.querySelector("[data-agent-status]")
   };
 
-  function updatePanelAudioControl() {
-    panel.audio.setAttribute("aria-pressed", String(panelAudioEnabled));
-    panel.audio.setAttribute("aria-label", panelAudioEnabled ? "Desactivar respuestas por voz" : "Activar respuestas por voz");
-    panel.audio.title = panelAudioEnabled ? "Desactivar respuestas por voz" : "Activar respuestas por voz";
-    panel.audio.querySelector("[data-audio-off]").hidden = panelAudioEnabled;
-    panel.audio.querySelector("[data-audio-on]").hidden = !panelAudioEnabled;
-    window.lucide?.createIcons?.();
+  function closeOptionsDialog(surface) {
+    if (!surface?.optionsDialog) return;
+    surface.optionsDialog.hidden = true;
+    if (!surface.optionsTrigger?.hidden) surface.optionsTrigger.focus();
   }
+
+  function openOptionsDialog(surface) {
+    if (!surface?.optionsDialog || !surface.optionsHost.children.length) return;
+    surface.optionsDialog.hidden = false;
+    surface.optionsDialog.querySelector("[data-options-close]")?.focus();
+  }
+
+  function installOptionsDialog(surface) {
+    const inlineHost = surface.optionsHost;
+    inlineHost.replaceChildren();
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "marcie-agent-options-trigger";
+    trigger.textContent = "Elegir opciones";
+    trigger.hidden = true;
+    inlineHost.appendChild(trigger);
+    const dialog = document.createElement("div");
+    dialog.className = "marcie-agent-options-backdrop";
+    dialog.hidden = true;
+    const titleId = surface === panel ? "marcie-panel-options-title" : "marcie-guide-options-title";
+    dialog.innerHTML = `<section class="marcie-agent-options-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}" aria-describedby="${titleId}-question"><header><div><span>AGENTE MARCIE</span><h2 id="${titleId}">Elige cómo continuar</h2><p id="${titleId}-question" class="marcie-agent-options-dialog__question" data-options-question></p></div><button type="button" data-options-close aria-label="Cerrar opciones"><i data-lucide="x"></i></button></header><div class="marcie-agent-options-dialog__content" data-options-content></div></section>`;
+    (document.fullscreenElement || document.body).appendChild(dialog);
+    trigger.addEventListener("click", () => openOptionsDialog(surface));
+    dialog.querySelector("[data-options-close]").addEventListener("click", () => closeOptionsDialog(surface));
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) closeOptionsDialog(surface); });
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); closeOptionsDialog(surface); return; }
+      if (event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled])")].filter(element => !element.hidden);
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
+      else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+    });
+    surface.optionsTrigger = trigger;
+    surface.optionsDialog = dialog;
+    surface.optionsHost = dialog.querySelector("[data-options-content]");
+  }
+
+  installOptionsDialog(panel);
 
   function activeSurface() {
     return guide || panel;
@@ -164,10 +308,9 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   }
 
   function setStatus(value) {
-    panel.status.textContent = statusLabel(value);
+    if (panel.status) panel.status.textContent = statusLabel(value);
     panel.root.dataset.agentState = value;
     if (guide) {
-      guide.status.textContent = statusLabel(value);
       guide.root.dataset.agentState = value;
     }
     updateMicControl(voiceSurface || activeSurface(), value);
@@ -185,37 +328,77 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       surface.input.value = String(value).trim();
       surface.form.requestSubmit();
     },
-    onSpokenText(value) {
-      const spoken = String(value || "").trim();
-      if (!spoken || !spokenMessage) return;
-      spokenMessage.text = spoken;
-      if (spokenMessageTarget === "guide" && guide) {
-        guide.question.textContent = spoken;
-        renderGuideMessages();
-      } else if (spokenMessageTarget === "panel") {
-        renderPanelMessages();
-      }
-    },
     onStateChange: setStatus,
     onError(error) {
-      if (!guide && panelAudioEnabled) {
-        panelAudioEnabled = false;
-        updatePanelAudioControl();
-      }
       onNotify?.(error.message, "warning");
       setStatus("idle");
       voiceSurface = null;
     }
   });
 
+  function renderAgentMessage(message, index) {
+    const queued = message.queued ? '<small>En cola</small>' : "";
+    const actions = message.role === "user"
+      ? `<div class="marcie-agent-message__actions" aria-label="Acciones del mensaje">
+          <button type="button" class="marcie-agent-message__action" data-agent-message-action="copy" data-agent-message-index="${index}" title="Copiar mensaje" aria-label="Copiar mensaje"><i data-lucide="copy"></i></button>
+          <button type="button" class="marcie-agent-message__action" data-agent-message-action="edit" data-agent-message-index="${index}" title="Editar y volver a enviar" aria-label="Editar y volver a enviar"><i data-lucide="pencil"></i></button>
+        </div>`
+      : "";
+    return `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}"><div class="marcie-agent-message__text">${escapeHtml(message.text)}</div>${queued}${actions}</div>`;
+  }
+
+  async function copyAgentMessage(text) {
+    const value = String(text || "");
+    if (!value) return false;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  }
+
+  function bindAgentMessageActions(surface, target) {
+    if (!surface?.messageList) return;
+    surface.messageList.onclick = async (event) => {
+      const button = event.target.closest("[data-agent-message-action]");
+      if (!button) return;
+      const messages = target === "guide" ? guideMessages : panelMessages;
+      const message = messages[Number(button.dataset.agentMessageIndex)];
+      if (!message?.text) return;
+      if (button.dataset.agentMessageAction === "edit") {
+        surface.input.value = message.text;
+        surface.input.focus();
+        surface.input.setSelectionRange(message.text.length, message.text.length);
+        onNotify?.("Mensaje listo para editar y volver a enviar.", "info");
+        return;
+      }
+      try {
+        const copied = await copyAgentMessage(message.text);
+        onNotify?.(copied ? "Mensaje copiado." : "No se pudo copiar el mensaje.", copied ? "success" : "warning");
+      } catch (_) {
+        onNotify?.("No se pudo copiar el mensaje.", "warning");
+      }
+    };
+  }
+
   function renderPanelMessages() {
     const conversation = panelMessages.length
-      ? panelMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}">${escapeHtml(message.text)}${message.queued ? '<small>En cola</small>' : ""}</div>`).join("")
+      ? panelMessages.map((message, index) => renderAgentMessage(message, index)).join("")
       : `<div class="marcie-agent__empty"><i data-lucide="wand-sparkles"></i><p>Puedo revisar, verificar y mejorar los artículos creados.</p></div>`;
     const activity = panelActivity
       ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(panelActivity)}</span></div>`
       : "";
     panel.messageList.innerHTML = conversation + activity;
+    bindAgentMessageActions(panel, "panel");
     panel.messageList.scrollTop = panel.messageList.scrollHeight;
     window.lucide?.createIcons?.();
   }
@@ -223,14 +406,15 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   function renderGuideMessages() {
     if (!guide?.messageList) return;
     const historyMessages = guideMessages.filter((message) => !message.queued);
-    const visibleMessages = historyMessages.at(-1)?.role === "assistant" ? historyMessages.slice(0, -1) : historyMessages;
     const activity = guideActivity
       ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(guideActivity)}</span></div>`
       : "";
-    guide.messageList.innerHTML = visibleMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}">${escapeHtml(message.text)}${message.queued ? '<small>En cola</small>' : ""}</div>`).join("") + activity;
-    guide.messageList.hidden = visibleMessages.length === 0 && !activity;
+    guide.messageList.innerHTML = guideMessages.map((message, index) => message.queued ? "" : renderAgentMessage(message, index)).join("") + activity;
+    bindAgentMessageActions(guide, "guide");
+    guide.messageList.hidden = historyMessages.length === 0 && !activity;
     guide.messageList.scrollTop = guide.messageList.scrollHeight;
     renderGuideQueue();
+    persistGuide();
   }
 
   function renderGuideQueue() {
@@ -247,23 +431,35 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
 
   function renderGuideQuestion(response) {
     if (!guide) return;
-    guide.phase.textContent = response.phase === "summary" ? "Revisión final" : "Configurando tus artículos";
-    guide.question.textContent = response.message;
+    guide.root.dataset.guidePhase = response.phase || "";
   }
 
   function bindOptionEvents(surface, prompt, wrapper) {
+    if (prompt.type === "change_preview") {
+      wrapper.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-option-id]");
+        if (!button) return;
+        const action = button.dataset.optionAction || button.dataset.optionId;
+        if (!action) return;
+        surface.optionsHost.replaceChildren();
+        responseState = null;
+        submit({ action, value: button.dataset.optionId, text: button.dataset.optionValue });
+      });
+      return;
+    }
     if (prompt.type === "multi_choice") {
       const continueButton = document.createElement("button");
       continueButton.type = "button";
       continueButton.className = "marcie-agent-continue";
       continueButton.textContent = "Continuar";
-      continueButton.disabled = true;
+      continueButton.disabled = !wrapper.querySelector(".is-selected");
       continueButton.addEventListener("click", () => submit({ selectedValues: [...wrapper.querySelectorAll(".is-selected")].map((button) => button.dataset.optionId) }));
       surface.optionsHost.appendChild(continueButton);
       wrapper.addEventListener("click", (event) => {
         const button = event.target.closest("[data-option-id]");
         if (!button) return;
         button.classList.toggle("is-selected");
+        button.setAttribute("aria-pressed", button.classList.contains("is-selected") ? "true" : "false");
         continueButton.disabled = !wrapper.querySelector(".is-selected");
       });
       return;
@@ -272,7 +468,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       const button = event.target.closest("[data-option-id]");
       if (!button) return;
       const action = button.dataset.optionAction || undefined;
-      if (action === "confirm") return executeRun();
+      if (action === "confirm") return confirmAndExecuteRun(surface === guide ? "guide" : "panel");
       return submit({ action, value: button.dataset.optionId, text: button.dataset.optionValue });
     });
   }
@@ -282,18 +478,32 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     if (!surface) return;
     const prompt = response.uiPrompt || {};
     const options = Array.isArray(prompt.options) ? prompt.options : [];
-    surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}${prompt.type === "change_preview" ? changePreviewHtml(response.changePreview) : ""}`;
+    surface.optionsDialog.querySelector("[data-options-question]").textContent = String(prompt.question || response.message || "Selecciona una opción.");
+    surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}`;
     if (prompt.type === "url_list") {
       renderYoutubeUrlList(surface, response.configuration?.sourceInputs?.youtube || []);
+      surface.optionsTrigger.hidden = false;
+      openOptionsDialog(surface);
       window.lucide?.createIcons?.();
       return;
     }
     if (!options.length) return;
     const wrapper = document.createElement("div");
-    wrapper.className = `marcie-agent-option-list${target === "guide" ? " marcie-voice-guide__option-list" : ""}`;
-    wrapper.innerHTML = options.map(optionButton).join("");
+    wrapper.className = `${prompt.type === "change_preview" ? "marcie-agent-change-actions" : "marcie-agent-option-list"}${prompt.type === "summary" ? " marcie-agent-option-list--summary" : ""}${target === "guide" ? " marcie-voice-guide__option-list" : ""}`;
+    if (response.phase === "sources") {
+      wrapper.setAttribute("role", "group");
+      wrapper.setAttribute("aria-label", "Elegir plataforma de investigación");
+    }
+    const regularOptions = prompt.type === "summary" ? options.filter((option) => option.action !== "confirm") : options;
+    const confirmOption = prompt.type === "summary" ? options.find((option) => option.action === "confirm") : null;
+    const optionHtml = prompt.type === "summary"
+      ? `<div class="marcie-agent-option-list__secondary">${regularOptions.map(optionButton).join("")}</div>${confirmOption ? `<div class="marcie-agent-final-actions">${optionButton(confirmOption)}</div>` : ""}`
+      : options.map(optionButton).join("");
+    wrapper.innerHTML = `${prompt.type === "change_preview" ? changePreviewHtml(response.changePreview) : ""}${optionHtml}`;
     surface.optionsHost.appendChild(wrapper);
     bindOptionEvents(surface, prompt, wrapper);
+    surface.optionsTrigger.hidden = false;
+    openOptionsDialog(surface);
   }
 
   function renderYoutubeUrlList(surface, existing = []) {
@@ -308,15 +518,21 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       row.querySelector("button").addEventListener("click", () => { row.remove(); if (!rows.children.length) addRow(); });
       rows.appendChild(row);
     };
-    (existing.length ? existing : [{ url: "" }]).slice(0, 5).forEach((item) => addRow(item.url || item));
+    (existing.length ? existing : [{ url: "" }]).slice(0, 5).forEach((item) => {
+      const url = typeof item === "string" ? item : item?.url || (item?.videoId ? `https://www.youtube.com/watch?v=${item.videoId}` : "");
+      addRow(url);
+    });
     editor.querySelector("[data-add-youtube]").addEventListener("click", () => { addRow(); window.lucide?.createIcons?.(); });
     editor.querySelector("[data-analyze-youtube]").addEventListener("click", () => {
       const urls = [...rows.querySelectorAll("input")].map((input) => input.value.trim()).filter(Boolean);
       if (!urls.length) return onNotify?.("Agrega al menos una URL de YouTube.", "warning");
       rows.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Analizando"; });
-      if (guide) {
-        guide.phase.textContent = "Analizando videos";
-      }
+      if (guide) guide.root.dataset.guidePhase = "video_analysis";
+      console.info("[MarcieAgent] youtube analyze requested", {
+        target: surface === guide ? "guide" : "panel",
+        runId: runId || "",
+        urlCount: urls.length
+      });
       submit({ urls });
     });
     surface.optionsHost.appendChild(editor);
@@ -330,6 +546,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   function closeGuide({ cancelSpeech = true } = {}) {
     if (!guide) return;
     if (cancelSpeech) voice.cancelSpeech();
+    guide.optionsDialog?.remove();
     guide.root.remove();
     guide = null;
   }
@@ -388,14 +605,10 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
         else beginListening("auto");
       });
     }
-    surface.audio?.addEventListener("click", () => {
-      panelAudioEnabled = !panelAudioEnabled;
-      if (!panelAudioEnabled) voice.cancelSpeech();
-      updatePanelAudioControl();
-    });
     surface.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); surface.form.requestSubmit(); }
     });
+    if (surface === guide) surface.input.addEventListener("input", persistGuide);
   }
 
   function openVoiceGuide() {
@@ -406,33 +619,30 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       <section class="marcie-voice-guide" role="dialog" aria-modal="true" aria-labelledby="marcie-voice-guide-title">
         <header class="marcie-voice-guide__header">
           <div class="marcie-voice-guide__brand">
-            <span class="marcie-voice-guide__avatar"><i data-lucide="audio-lines"></i></span>
-            <div><span>Agente editorial MCP</span><h2 id="marcie-voice-guide-title">Marcie te guía por voz</h2></div>
+            <img class="marcie-voice-guide__avatar" src="/MarcieBlogEditorLogo2.png" alt="" />
+            <div><h2 id="marcie-voice-guide-title">Agente Marcie</h2></div>
           </div>
           <button type="button" class="marcie-voice-guide__close" aria-label="Cerrar configuración por voz"><i data-lucide="x"></i></button>
         </header>
         <div class="marcie-voice-guide__content">
           <div class="marcie-voice-guide__presence" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-          <p class="marcie-voice-guide__phase" data-guide-phase>Preparando la conversación</p>
-          <p class="marcie-voice-guide__question" data-guide-question aria-live="polite">Conectando con Marcie…</p>
-          <div class="marcie-voice-guide__status"><span class="marcie-voice-guide__status-dot"></span><span data-agent-status>Procesando</span></div>
           <div class="marcie-voice-guide__messages" data-guide-messages aria-label="Conversación de configuración" aria-live="polite" hidden></div>
           <div class="marcie-voice-guide__options" data-agent-options></div>
           <div class="marcie-voice-guide__transcript" aria-live="polite" hidden><span>Mensajes en cola</span><div data-guide-queue></div></div>
         </div>
-        <form class="marcie-voice-guide__composer" data-agent-form>
-          <button type="button" class="marcie-voice-guide__mic" data-agent-mic><i data-lucide="mic"></i><span>Pulsar para hablar</span></button>
-          <div class="marcie-voice-guide__write">
-            <textarea rows="2" maxlength="4000" placeholder="También puedes escribir tu respuesta" aria-label="Respuesta para Marcie" data-agent-input></textarea>
-            <button type="submit" data-agent-send aria-label="Enviar respuesta"><i data-lucide="arrow-up"></i></button>
+        <form class="marcie-agent__composer marcie-voice-guide__composer" data-agent-form>
+          <textarea rows="3" maxlength="4000" placeholder="Escribe una respuesta para Marcie" aria-label="Respuesta para Marcie" data-agent-input></textarea>
+          <div class="marcie-agent__composer-actions">
+            <div class="marcie-agent__composer-tools">
+              <button type="button" class="marcie-agent__tool marcie-voice-guide__mic" data-agent-mic title="Pulsar para hablar" aria-label="Pulsar para hablar"><i data-lucide="mic"></i></button>
+            </div>
+            <button type="submit" class="marcie-agent__send" data-agent-send title="Enviar respuesta" aria-label="Enviar respuesta"><i data-lucide="send"></i></button>
           </div>
         </form>
       </section>`;
     (document.fullscreenElement || document.body).appendChild(root);
     guide = {
       root,
-      question: root.querySelector("[data-guide-question]"),
-      phase: root.querySelector("[data-guide-phase]"),
       messageList: root.querySelector("[data-guide-messages]"),
       transcriptContainer: root.querySelector(".marcie-voice-guide__transcript"),
       queueList: root.querySelector("[data-guide-queue]"),
@@ -441,8 +651,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       input: root.querySelector("[data-agent-input]"),
       mic: root.querySelector("[data-agent-mic]"),
       send: root.querySelector("[data-agent-send]"),
-      status: root.querySelector("[data-agent-status]")
     };
+    installOptionsDialog(guide);
     root.querySelector(".marcie-voice-guide__close").addEventListener("click", () => closeGuide());
     bindComposer(guide);
     renderGuideMessages();
@@ -458,18 +668,29 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   function queueTurn(inputPayload, target, message) {
     if (message) message.queued = true;
     queuedTurns.push({ inputPayload, target, message });
+    console.info("[MarcieAgent] turn queued", {
+      target,
+      queueLength: queuedTurns.length,
+      input: summarizeAgentInput(inputPayload)
+    });
     renderTarget(target);
   }
 
   function drainQueue() {
     if (busy || !queuedTurns.length) return;
     const next = queuedTurns.shift();
+    console.info("[MarcieAgent] draining queued turn", {
+      target: next.target,
+      queueLength: queuedTurns.length,
+      input: summarizeAgentInput(next.inputPayload)
+    });
     void submit(next.inputPayload, { target: next.target, message: next.message, fromQueue: true });
   }
 
   async function submit(inputPayload, options = {}) {
     const target = options.target || (guide ? "guide" : "panel");
     const surface = target === "guide" ? guide : panel;
+    closeOptionsDialog(surface);
     const activeMessages = target === "guide" ? guideMessages : panelMessages;
     const userText = inputPayload.text || inputPayload.value || "";
     const message = options.message || (userText ? { role: "user", text: userText } : null);
@@ -490,21 +711,44 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       const contextualInput = activeSession
         ? { ...inputPayload, audience: activeSession.audience || activeSession.article?.audience || activeSession.selectedAudiences?.[0] || "" }
         : inputPayload;
-      const response = await sendAgentTurn(runId, contextualInput, {
-        mode: target === "guide" ? "configuration" : "assistant",
-        sessionId: activeSession?.id || ""
+      const mode = target === "guide" ? "configuration" : "assistant";
+      const sessionId = activeSession?.id || "";
+      console.info("[MarcieAgent] submit start", {
+        target,
+        mode,
+        runId: runId || "",
+        sessionId,
+        fromQueue: Boolean(options.fromQueue),
+        input: summarizeAgentInput(contextualInput)
       });
+      const response = await sendAgentTurn(runId, contextualInput, {
+        mode,
+        sessionId
+      });
+      console.info("[MarcieAgent] submit success", summarizeAgentResponse(response));
       if (target === "guide") guideActivity = "";
       else panelActivity = "";
       showResponse(response, { target });
+      return response;
     } catch (error) {
+      const userMessage = normalizeAgentError(error);
+      console.warn("[MarcieAgent] submit error", {
+        target,
+        status: error.status || "",
+        code: agentErrorCode(error),
+        message: error.message || "",
+        requestId: error.requestId || "",
+        userMessage,
+        rejectedVideos: Array.isArray(error.detail?.rejectedVideos) ? error.detail.rejectedVideos : [],
+        detail: error.detail || null
+      });
       if (target === "guide") guideActivity = "";
       else panelActivity = "";
-      activeMessages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
-      if (target === "guide" && guide) guide.question.textContent = `No pude continuar: ${error.message}`;
-      if (responseState) renderOptions(responseState, target);
+      activeMessages.push({ role: "assistant", text: `No pude continuar: ${userMessage}` });
+      if (responseNeedsOptions(responseState)) renderOptions(responseState, target);
       renderTarget(target);
-      onNotify?.(error.message, "error");
+      onNotify?.(userMessage, "error");
+      return null;
     } finally {
       busy = false;
       if (surface?.root?.isConnected) setSurfaceBusy(surface, false);
@@ -516,11 +760,10 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     }
   }
 
-  function showResponse(response, { speak = true, target = guide ? "guide" : "panel" } = {}) {
-    responseState = response;
+  function showResponse(response, { target = guide ? "guide" : "panel" } = {}) {
+    responseState = responseNeedsOptions(response) ? response : null;
     runId = response.runId || runId;
-    const shouldSpeak = speak && ((target === "guide" && guide) || (target === "panel" && panelAudioEnabled));
-    const visibleText = shouldSpeak ? (response.speechText || response.message) : response.message;
+    const visibleText = response.message;
     const message = { role: "assistant", text: visibleText };
     (target === "guide" ? guideMessages : panelMessages).push(message);
     if (target === "guide") {
@@ -529,12 +772,14 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     } else {
       renderPanelMessages();
     }
-    renderOptions(response, target);
-    if (shouldSpeak) {
-      spokenMessage = message;
-      spokenMessageTarget = target;
-      voice.speak(visibleText);
+    if (responseState) renderOptions(response, target);
+    else {
+      const surface = target === "guide" ? guide : panel;
+      surface?.optionsHost?.replaceChildren();
+      if (surface?.optionsTrigger) surface.optionsTrigger.hidden = true;
+      closeOptionsDialog(surface);
     }
+    if (target === "guide") persistGuide();
   }
 
   async function executeRun() {
@@ -542,37 +787,79 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     busy = true;
     setStatus("processing");
     if (guide) {
-      guide.question.textContent = "Perfecto. Investigaré las fuentes y prepararé los artículos. Puedes seguir el avance aquí.";
-      guide.phase.textContent = "Creando tus artículos";
+      guide.root.dataset.guidePhase = "creating_articles";
       guide.optionsHost.replaceChildren();
     }
     try {
       const result = await startAgentRun(runId);
       (guide ? guideMessages : panelMessages).push({ role: "assistant", text: "Perfecto. Investigaré las fuentes y prepararé los artículos." });
-      const sessionId = await onCreateSession?.(result.sessionRequest, runId);
+      const sessionId = targetSessionId
+        ? await onReconfigureSession?.(targetSessionId, result.sessionRequest, runId)
+        : await onCreateSession?.(result.sessionRequest, runId);
+      if (!sessionId) {
+        await updateAgentRun(runId, "cancelled", { sessionId: targetSessionId || "" });
+        (guide ? guideMessages : panelMessages).push({ role: "assistant", text: "No se aplicaron cambios a la sesión." });
+        renderGuideMessages();
+        return;
+      }
+      const createdSession = getActiveSession?.();
+      const automationStatus = createdSession?.id === sessionId ? createdSession.automation?.status : "";
+      if (["failed", "cancelled"].includes(automationStatus)) {
+        const message = createdSession.automation?.message || "La producción se detuvo; los avances guardados se conservaron.";
+        await updateAgentRun(runId, automationStatus, { sessionId, error: message });
+        (guide ? guideMessages : panelMessages).push({ role: "assistant", text: message });
+        renderGuideMessages();
+        renderPanelMessages();
+        return;
+      }
       await updateAgentRun(runId, "completed", { sessionId });
       responseState = { ...(responseState || {}), runStatus: "completed", phase: "completed" };
       (guide ? guideMessages : panelMessages).push({ role: "assistant", text: "Los artículos están listos. Puedo ayudarte a revisarlos, verificarlos o preparar cambios." });
       panel.body.hidden = false;
-      panel.header.setAttribute("aria-expanded", "true");
       document.getElementById("right-panel")?.classList.remove("hidden");
       document.getElementById("right-resizer")?.classList.remove("hidden");
       closeGuide({ cancelSpeech: false });
+      clearPersistedGuide();
       renderPanelMessages();
     } catch (error) {
-      await updateAgentRun(runId, "failed", { error: error.message }).catch(() => {});
-      (guide ? guideMessages : panelMessages).push({ role: "assistant", text: `La creación se detuvo: ${error.message}` });
-      if (guide) guide.question.textContent = `La creación se detuvo: ${error.message}`;
+      const userMessage = normalizeAgentError(error);
+      console.warn("[MarcieAgent] run execution error", {
+        runId,
+        status: error.status || "",
+        code: agentErrorCode(error),
+        message: error.message || "",
+        userMessage
+      });
+      if (agentErrorCode(error) !== "marcie_agent_confirmation_required") {
+        await updateAgentRun(runId, "failed", { error: userMessage }).catch(() => {});
+      }
+      (guide ? guideMessages : panelMessages).push({ role: "assistant", text: `La creación se detuvo: ${userMessage}` });
       renderPanelMessages();
-      onNotify?.(error.message, "error");
+      onNotify?.(userMessage, "error");
     } finally {
       busy = false;
       setStatus("idle");
     }
   }
 
-  async function startGuidedSession() {
-    voice.prime();
+  async function confirmAndExecuteRun(target = guide ? "guide" : "panel") {
+    if (!runId || busy) return;
+    console.info("[MarcieAgent] final confirmation requested", { target, runId });
+    const response = await submit({ action: "confirm", value: "confirm", text: "Crear artículos" }, { target });
+    const isReady = response?.phase === "ready" || response?.runStatus === "ready" || response?.status === "ready";
+    console.info("[MarcieAgent] final confirmation response", {
+      target,
+      runId,
+      phase: response?.phase || "",
+      runStatus: response?.runStatus || response?.status || "",
+      isReady
+    });
+    if (isReady) await executeRun();
+  }
+
+  async function startGuidedSession({ sessionId = "" } = {}) {
+    clearPersistedGuide();
+    targetSessionId = String(sessionId || "").trim();
     runId = "";
     loadedSessionId = "";
     responseState = null;
@@ -582,8 +869,18 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     try {
       showResponse(await startAgentConversation());
     } catch (error) {
-      if (guide) guide.question.textContent = `No pude iniciar la guía por voz: ${error.message}`;
-      onNotify?.(error.message, "error");
+      const userMessage = normalizeAgentError(error);
+      console.warn("[MarcieAgent] guided session start error", {
+        status: error.status || "",
+        code: agentErrorCode(error),
+        message: error.message || "",
+        userMessage
+      });
+      if (guide) {
+        guideMessages.push({ role: "assistant", text: `No pude iniciar la guía por voz: ${userMessage}` });
+        renderGuideMessages();
+      }
+      onNotify?.(userMessage, "error");
     } finally {
       if (guide && guide.root.dataset.agentState !== "speaking") setStatus("idle");
     }
@@ -635,13 +932,32 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     }
   }
 
-  panel.header.addEventListener("click", () => {
-    panel.body.hidden = !panel.body.hidden;
-    panel.header.setAttribute("aria-expanded", String(!panel.body.hidden));
-    panel.header.closest(".marcie-agent")?.classList.toggle("is-collapsed", panel.body.hidden);
-  });
   bindComposer(panel, { allowNewSession: true });
-  updatePanelAudioControl();
+  if (guideStorageKey) {
+    try {
+      const localSaved = JSON.parse(window.localStorage.getItem(guideStorageKey) || "null");
+      const sessionSaved = JSON.parse(window.sessionStorage.getItem(guideStorageKey) || "null");
+      const saved = Number(sessionSaved?.updatedAt || 0) > Number(localSaved?.updatedAt || 0) ? sessionSaved : localSaved;
+      if (saved === sessionSaved && saved) guideStorageMode = "session";
+      if (saved?.runId && Date.now() - Number(saved.updatedAt || 0) < 7 * 24 * 60 * 60 * 1000) {
+        runId = saved.runId;
+        targetSessionId = String(saved.targetSessionId || "").trim();
+        responseState = saved.responseState || null;
+        guideMessages.push(...(Array.isArray(saved.messages) ? saved.messages.filter((message) => ["user", "assistant"].includes(message?.role) && typeof message.text === "string") : []));
+        openVoiceGuide();
+        guide.input.value = String(saved.input || "").slice(0, 4000);
+        guide.root.dataset.guidePhase = saved.phase || responseState?.phase || "";
+        if (responseState) renderOptions(responseState, "guide");
+        persistGuide();
+      }
+    } catch (error) { console.warn("[MarcieAgent] No se pudo recuperar la configuración local:", error); }
+  }
   renderPanelMessages();
-  return { loadSession, startGuidedSession };
+  function resolveEvidenceClaim(claim = {}) {
+    const id = String(claim.id || "").trim();
+    const text = String(claim.text || claim.claim || "").trim();
+    if (!id || !text) return null;
+    return submit({ action: "resolve_evidence", value: id, text: `Resuelve esta afirmación sin respaldo: ${text}` }, { target: "panel" });
+  }
+  return { loadSession, startGuidedSession, resolveEvidenceClaim };
 }

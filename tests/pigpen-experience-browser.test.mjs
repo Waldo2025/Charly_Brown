@@ -11,10 +11,11 @@ test('All 18 interactions playable by clicking, perfect reward and six final cha
  try {
   for(const [i,d] of E.definitions.entries()) {
    const page=await browser.newPage({viewport:{width:i%2?390:1000,height:850}});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(5000);
-   const primary=E.rewards[i%E.rewards.length].id,p=projectFor([d.id],primary,['pista','coleccionable']);p.modo_presentacion='salas';p.reward_plan=R.bindPlan(null,p);
+   const primary=E.rewards[i%E.rewards.length].id,p=projectFor([d.id],primary,['pista','coleccionable']);p.modo_presentacion='salas';if(primary==='imagen')p.experience_config.reward_image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6G1sAAAAASUVORK5CYII=';if(d.id==='respuesta_coordenadas')p.misiones[0].preguntas[0].interaction_data.start_option='b';p.reward_plan=R.bindPlan(null,p);
    await page.setContent(buildPreviewDocument(p),{waitUntil:'load'});
    await page.locator('[data-game-start]:visible').first().click();
    if(!await page.locator('[data-exp-board]:visible').count()) await page.locator('[data-gallery-next]:visible').first().click();
+   if(d.id==='respuesta_coordenadas'){const start=page.locator('.exp-start-indicator:visible');await start.waitFor();assert.equal(await start.innerText(),'Inicio');assert.match(await page.locator('.exp-coordinate-cell.is-start:visible').getAttribute('aria-label'),/B \(2, 1\), Inicio/);}
    const q=p.misiones[0].preguntas[0];
    await page.locator('[data-question-verify]:visible').click();
    for(const answer of q.interaction_data.solutions[0].answers)for(const id of answer.options)await page.locator(`[data-exp-target="${answer.target}"][data-exp-option="${id}"]:visible`).click();
@@ -24,7 +25,7 @@ test('All 18 interactions playable by clicking, perfect reward and six final cha
    if(primary==='letras'){
     const order=await page.locator('[data-final-passcode-token]').allTextContents();
     for(let x=0;x<3;x++){const chars=await page.locator('[data-final-passcode-token]').allTextContents();const j=chars.indexOf('SOL'[x]);if(j!==x){await page.locator('[data-final-passcode-token]').nth(j).focus();for(let k=j;k>x;k--)await page.keyboard.press('ArrowLeft');}}
-   }else if(primary==='imagen')await page.locator('[data-reward-action="choice"][data-reward-value="SOL"]').click();
+   }else if(primary==='imagen')for(let x=0;x<p.reward_plan.rooms.length;x++){await page.locator(`[data-reward-action="select"][data-reward-value="${x}"]`).click();await page.locator(`[data-reward-action="place"][data-reward-value="${x}"]`).click();}
    else if(primary==='patron')for(const sym of p.reward_plan.rooms.flatMap(r=>r.pattern))await page.locator(`[data-reward-action="symbol"][data-reward-value="${sym}"]`).click();
    else for(let x=0;x<3;x++)await page.locator(`[data-reward-position="${x}"]`).selectOption('SOL'[x]);
    await page.locator('#btnVerifyMasterPasscode').click();
@@ -45,7 +46,7 @@ test('Configuration modal defaults, validation, persistence and explicit confirm
    return route.fulfill({contentType:path.endsWith('.css')?'text/css':'text/javascript',body:await readFile(new URL('../public'+path,import.meta.url),'utf8')});
   });
   await page.goto('http://pigpen.test');
-  await page.evaluate(async()=>{const {mountExperienceModal}=await import('/js/pigpen-experience-modal.mjs');window.events=[];window.config={};window.modal=mountExperienceModal({getConfig:()=>window.config,onSave:c=>{window.config=c;window.events.push('save');}});window.modal.open().then(ok=>window.events.push(ok?'continue':'cancel'));});
+  await page.evaluate(async()=>{const {mountExperienceModal}=await import('/js/pigpen-experience-modal.mjs');window.events=[];window.config={};window.modal=mountExperienceModal({presetStore:{subscribe:fn=>fn({uid:'teacher',presets:[],busy:false,ready:true,source:'cloud'}),load:async()=>{},saveDraft:()=>{}},getConfig:()=>window.config,onSave:c=>{window.config=c;window.events.push('save');}});window.modal.open().then(ok=>window.events.push(ok?'continue':'cancel'));});
   await page.locator('#erExperienceModal.show').waitFor();
   assert.equal(await page.locator('input[name="classic"]:checked').count(),8);assert.equal(await page.locator('input[name^="new_"]:checked').count(),0);assert.equal(await page.locator('input[value="letras"]').isChecked(),true);
   await page.locator('[data-experience-none="classic"]').click();assert.equal(await page.locator('[data-experience-save]').isDisabled(),true);
@@ -76,7 +77,7 @@ test('Rewards and selected answers survive reload; consuming a hint prevents a p
   await page.locator('[data-game-start]:visible').click();if(!await page.locator('[data-exp-board]:visible').count())await page.locator('[data-gallery-next]:visible').click();
   await page.locator('[data-exp-option="a"]:visible').click();await page.reload();assert.equal(await page.locator('[data-exp-option="a"]:visible').getAttribute('aria-pressed'),'true');
   await page.locator('[data-question-verify]:visible').click();await page.locator('[data-room-unlock-continue]').click();
-  const bonus=page.locator('[data-exp-bonus="pista"]:visible');assert.match(await bonus.getAttribute('aria-label'),/\(1\)/);await page.reload();assert.equal(await bonus.isEnabled(),true);await bonus.click();assert.equal(await bonus.count(),0);assert.match(await page.locator('[data-exp-bonus-empty]:visible').innerText(),/No tienes ayudas/);
+  const bonus=page.locator('[data-exp-bonus="pista"]:visible');assert.match(await bonus.getAttribute('aria-label'),/\(1\)/);await page.reload();assert.equal(await bonus.isEnabled(),true);await bonus.click();assert.equal(await bonus.count(),0);assert.match(await page.locator('#experienceBonusDialog [data-exp-bonus-status]:visible').innerText(),/Contrasta las propiedades antes de decidir/);await page.locator('#experienceBonusDialog [data-bonus-close]').click();
   await page.locator('[data-exp-option="a"]:visible').click();await page.locator('[data-question-verify]:visible').click();await page.locator('[data-room-unlock-continue]').click();
   await page.locator('#expInventory summary').click();
   const cards=page.locator('#expInventory article');assert.equal(await cards.count(),2);assert.match(await cards.nth(0).innerText(),/Sala perfecta/);assert.doesNotMatch(await cards.nth(1).innerText(),/Sala perfecta/);

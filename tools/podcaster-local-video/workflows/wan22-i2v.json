@@ -1,0 +1,69 @@
+{
+  "1": {
+    "class_type": "__UNET_CLASS__",
+    "inputs": { "unet_name": "__UNET__", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "__CLIP_CLASS__",
+    "inputs": { "clip_name": "__CLIP__", "type": "wan" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "__VAE__" }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "__PROMPT__" }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "__NEGATIVE__" }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "__IMAGE_NAME__" }
+  },
+  "7": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "inputs": {
+      "vae": ["3", 0],
+      "width": "__WIDTH__",
+      "height": "__HEIGHT__",
+      "length": "__LENGTH__",
+      "batch_size": 1,
+      "start_image": ["6", 0]
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "seed": "__SEED__",
+      "steps": "__STEPS__",
+      "cfg": "__CFG__",
+      "sampler_name": "__SAMPLER__",
+      "scheduler": "__SCHEDULER__",
+      "denoise": "__DENOISE__",
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["7", 0]
+    }
+  },
+  "9": {
+    "class_type": "__VAE_DECODE_CLASS__",
+    "inputs": { "samples": ["8", 0], "vae": ["3", 0], "__TILED_ARGS__": null }
+  },
+  "10": {
+    "class_type": "CreateVideo",
+    "inputs": { "images": ["9", 0], "fps": "__FPS__" }
+  },
+  "11": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["10", 0],
+      "filename_prefix": "podcaster_local/clip",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "Charly": [
+      "get_session_context",
+      "list_units",
+      "read_attachment_pages",
+      "read_unit",
+      "get_unit_curriculum",
+      "design_sya_change",
+      "list_unit_content",
+      "read_content_item",
+      "list_readings",
+      "read_reading",
+      "get_unit_workflow",
+      "list_activity_sections",
+      "draft_activity_section",
+      "create_activity_section",
+      "update_activity_section",
+      "restore_activity_section",
+      "propose_next_section",
+      "propose_content_change",
+      "design_reading_stage",
+      "create_teacher_notes",
+      "design_teacher_note",
+      "design_activity",
+      "design_worksheet",
+      "design_annex",
+      "design_cutout",
+      "design_video_script",
+      "validate_resource_artifact",
+      "list_unit_citations",
+      "format_bibliography_apa7",
+      "search_teaching_memory",
+      "propose_teaching_memory",
+      "confirm_teaching_memory",
+      "list_teaching_memory",
+      "archive_teaching_memory",
+      "research_topic",
+      "read_research_run"
+    ],
+    "Marcie": [
+      "start_production",
+      "get_production",
+      "resume_production",
+      "cancel_production",
+      "get_session_context",
+      "get_trending_topics",
+      "create_editorial_session",
+      "generate_audience_proposals",
+      "analyze_youtube_videos",
+      "research_sources",
+      "draft_articles",
+      "verify_article_claims",
+      "resolve_evidence_issue",
+      "format_bibliography_apa7",
+      "review_article",
+      "revise_article",
+      "manage_vocabulary",
+      "prepare_wordpress_draft"
+    ],
+    "Science": [
+      "list_generations",
+      "list_science_topics",
+      "get_activity_template",
+      "get_generation",
+      "plan_activity",
+      "revise_plan",
+      "approve_plan",
+      "start_generation",
+      "cancel_generation",
+      "retry_task",
+      "regenerate_asset",
+      "validate_activity"
+    ],
+    "Sally": [
+      "moodle_session_status",
+      "moodle_read_course",
+      "moodle_read_module",
+      "moodle_describe_page",
+      "moodle_discover_capabilities",
+      "moodle_find_users",
+      "moodle_inspect_roles",
+      "moodle_prepare_course_batch",
+      "moodle_prepare_module_batch",
+      "moodle_prepare_user_import",
+      "moodle_prepare_meta_link",
+      "moodle_prepare_browser_workflow",
+      "moodle_execute_approved_batch",
+      "moodle_verify_batch"
+    ],
+    "Charly annex": [
+      "design_annex"
+    ],
+    "Charly cutout": [
+      "design_cutout"
+    ],
+    "Charly worksheet": [
+      "design_worksheet"
+    ],
+    "Charly video-script": [
+      "design_video_script"
+    ],
+    "PigPen": [
+      "plan_objective",
+      "generate_escape_room",
+      "get_generation",
+      "cancel_generation",
+      "resume_generation",
+      "retry_failed"
+    ]
+  }
+}

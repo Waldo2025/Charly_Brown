@@ -44,9 +44,13 @@ test("maps legacy model settings but never returns a retired model", () => {
   assert.equal(normalizeVideoModel("veo-3.0-generate-001", "veo"), "veo-3.1-generate-preview");
   assert.equal(normalizeVideoModel("veo-3.0-fast-generate-001", "veo"), "veo-3.1-fast-generate-preview");
   assert.equal(normalizeVideoModel("veo-2.0-generate-001", "auto"), "veo-3.1-generate-preview");
-  assert.equal(normalizeVideoModel("", "auto"), OMNI_VIDEO_MODEL);
+  assert.equal(normalizeVideoModel("", "auto"), "veo-3.1-fast-generate-preview");
   assert.equal(normalizeVideoModel("auto", "omni"), OMNI_VIDEO_MODEL);
-  assert.equal(normalizeVideoModel("auto", "veo"), DEFAULT_VEO_VIDEO_MODEL);
+  assert.equal(normalizeVideoModel("auto", "veo"), "veo-3.1-fast-generate-preview");
+  assert.equal(normalizeVideoModel("auto", "veo", "final", { highQuality: true }), DEFAULT_VEO_VIDEO_MODEL);
+  assert.equal(normalizeVideoModel("veo-3.1-fast-generate-001", "veo"), "veo-3.1-fast-generate-preview");
+  assert.equal(normalizeVideoModel("veo-3.1-generate-001", "veo"), DEFAULT_VEO_VIDEO_MODEL);
+  assert.equal(normalizeVideoModel("veo-3.1-lite-generate-001", "veo", "draft"), "veo-3.1-lite-generate-preview");
   assert.equal(normalizeVideoModel("veo-3.1-fast-generate-preview", "veo"), "veo-3.1-fast-generate-preview");
   assert.equal(
     normalizeVideoModel("veo-3.1-fast-generate-preview", "veo", "final", { highQuality: true }),
@@ -68,9 +72,9 @@ test("maps legacy model settings but never returns a retired model", () => {
   );
 });
 
-test("automatic routing uses Omni generally and Veo only for video-specific controls", () => {
-  assert.equal(resolveVideoGenerator({ generator: "auto" }), "omni");
-  assert.equal(resolveVideoGenerator({ generator: "auto", hasImage: true }), "omni");
+test("automatic scene routing uses Veo Fast and preserves explicit model choices", () => {
+  assert.equal(resolveVideoGenerator({ generator: "auto" }), "veo");
+  assert.equal(resolveVideoGenerator({ generator: "auto", hasImage: true }), "veo");
   assert.equal(resolveVideoGenerator({ generator: "auto", model: OMNI_VIDEO_MODEL }), "omni");
   assert.equal(resolveVideoGenerator({ generator: "auto", model: "veo-3.1-fast-generate-preview" }), "veo");
   assert.equal(resolveVideoGenerator({ generator: "auto", model: "veo-3.0-generate-001" }), "veo");

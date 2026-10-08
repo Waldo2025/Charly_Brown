@@ -1,3 +1,4 @@
+import { animate } from "../vendor/animejs/anime.esm.min.js";
 import { userStatus } from "./pigpen-user-status.mjs?v=20260912-v1";
 import { expressionRiddleIssues, coordinateRiddleIssues, MECHANIC_COHERENCE_INSTRUCTION } from "./pigpen-mechanic-coherence.mjs?v=20260912-text-pieces-v5";
 import { PEDAGOGY_VERSION, PEDAGOGY_INSTRUCTION, BRIEFING_NARRATIVE_INSTRUCTION, selectedExperienceInstruction, composePedagogicalRoom, pedagogicalRoomIssues } from "./pigpen-pedagogy.mjs?v=20260912-author-narrative-v4";
@@ -11,6 +12,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   getFirestore,
   orderBy,
   query,
@@ -58,11 +60,11 @@ import {
   resolveFinalPasscode,
   validateQuestionAnswer,
   stripPrivateGenerationFields
-} from "./escape-room-creator-model.mjs?v=20260912-jigsaw-v63";
+} from "./escape-room-creator-model.mjs?v=20260925-signed-answers-v64";
 import {
   buildEscapeRoomPackage,
   buildPreviewDocument
-} from "./escape-room-package-builder.mjs?v=20260912-jigsaw-v106";
+} from "./escape-room-package-builder.mjs?v=20260925-sequence-column-v1";
 import {
   findEscapeRoomManifestPath,
   isSafeArchivePath,
@@ -86,7 +88,13 @@ import {
   ESCAPE_ROOM_INTERACTION_CATALOG,
   buildInteractionPlan
 } from "./escape-room-interaction-plan.mjs?v=20260904-unlimited-questions-v44";
-import { normalizeGameLocale } from "./escape-room-game-i18n.mjs?v=20260904-ai-editorial-source-v36";
+import { normalizeGameLocale } from "./escape-room-game-i18n.mjs?v=20261002-manual-template-v1";
+import {
+  buildManualTemplateInteractionData,
+  buildManualTemplatePlan,
+  buildManualTemplateQuestions
+} from "./pigpen-manual-template.mjs?v=20261002-manual-template-v1";
+import { claimSavings, completeSavings, releaseSavings } from "./savings-client.js";
 import { CLOSED_ANSWER_SUBTYPES, DRAG_DROP_AUTHORING_TEMPLATE, QUESTION_BRIEF_GROUNDING, QUESTION_AUTHORING_TEMPLATES, buildQuestionAuthoringTemplate, QUESTION_DIVERSITY_INSTRUCTION, findRepeatedQuestionPlans, closeGeneratedAnswer, questionInteractionIssues, repairAnswerEntryInstruction, answerDisclosureIssues, matchingPromptIssues, normalizeFillBlankMarkers } from "./escape-room-question-policy.mjs?v=20260912-choice-banks-v23";
 import { buildDifficultyInstruction, getQuestionDifficulty } from "./escape-room-difficulty-policy.mjs?v=20260909-b1-cognitive-demand-v3";
 import {
@@ -113,12 +121,14 @@ import {
 
 import { experience } from "./escape-room-experience.mjs?v=20260914-attributes-v10";
 import { objectiveCheckpointStore } from "./pigpen-objective-checkpoint.mjs";
-import { readQuestionPreferences, saveQuestionPreferences } from "./pigpen-question-preferences.mjs";
+import { readQuestionPreferences as readAccountQuestionPreferences, saveQuestionPreferences as saveAccountQuestionPreferences } from "./pigpen-question-preferences.mjs?v=20261006-account-presets-v2";
+import { createPresetStore } from "./pigpen-experience-presets.mjs?v=20261006-account-presets-v2";
+import { createFirestorePresetAdapter } from "./pigpen-experience-presets-firestore.mjs?v=20261006-account-presets-v2";
 import { experienceContractSchema, experienceAuthoringInstruction, renderExperienceEditor, updateExperienceEditor } from "./escape-room-experience-authoring.mjs?v=20260914-attributes-v12";
-import { mountExperienceModal } from "./pigpen-experience-modal.mjs?v=20260917-presets-v1";
+import { mountExperienceModal } from "./pigpen-experience-modal.mjs?v=20261006-account-presets-v2";
 import { createRewardEngine } from "./escape-room-rewards.mjs?v=20260912-jigsaw-v3";
 const rewardEngine = createRewardEngine(experience);
-let experienceConfig = readQuestionPreferences();
+let experienceConfig = experience.config({});
 let experienceConfirmationRequired = false;
 let experienceModal;
 
@@ -126,13 +136,24 @@ const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const presetStore = createPresetStore({adapter: createFirestorePresetAdapter(db, {doc,collection,getDocsFromServer,runTransaction,serverTimestamp})});
+function readQuestionPreferences(base = {}) {return readAccountQuestionPreferences(base, undefined, state.currentUser?.uid || "");}
+function saveQuestionPreferences(config) {return saveAccountQuestionPreferences(config, undefined, state.currentUser?.uid || "");}
 
-const TEXT_MODEL_DEFAULT = "gemini-2.5-flash";
+// Let, not const: once the model catalog reports the AI Studio free tier, loadGeminiModelCatalog
+// points this at the free model so every "the author never chose a model" fallback in this
+// module means the plan gratuito. The paid id below is only the built-in starting value.
+const BUILTIN_TEXT_MODEL_DEFAULT = "gemini-2.5-flash";
+let TEXT_MODEL_DEFAULT = BUILTIN_TEXT_MODEL_DEFAULT;
 const CONTENT_GENERATION_CONTRACT_VERSION = 38;
 const OBJECTIVE_ROOM_GENERATION_CONTRACT_VERSION = 3;
-// Flash Image reduce la latencia interactiva; el proxy cambia a Pro si se agota
-// la cuota del modelo principal.
-const IMAGE_MODEL_DEFAULT = "gemini-3.1-flash-image";
+// Cloudflare Workers AI crea imágenes dentro de su bolsa diaria gratuita. El id es virtual:
+// el proxy lo reconoce, extrae el prompt del payload forma-Gemini y responde con inlineData;
+// nunca es un modelo real de Gemini. Como BUILTIN_TEXT_MODEL_DEFAULT, el paid id sigue siendo
+// el valor inicial: solo se vuelve default cuando el catálogo confirma la oferta gratuita.
+const CLOUDFLARE_IMAGE_MODEL_ID = "cloudflare-flux-1-schnell";
+const BUILTIN_IMAGE_MODEL_DEFAULT = "gemini-3.1-flash-image";
+let IMAGE_MODEL_DEFAULT = BUILTIN_IMAGE_MODEL_DEFAULT;
 const FALLBACK_TEXT_MODELS = Object.freeze([
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
@@ -142,6 +163,7 @@ const FALLBACK_TEXT_MODELS = Object.freeze([
   "gemini-flash-latest"
 ]);
 const FALLBACK_IMAGE_MODELS = Object.freeze([
+  CLOUDFLARE_IMAGE_MODEL_ID,
   "gemini-3.1-flash-image",
   "gemini-3-pro-image"
 ]);
@@ -272,6 +294,7 @@ const elements = {
   missionEmpty: document.getElementById("erMissionEmpty"),
   btnGenerar: document.getElementById("btnGenerar"),
   btnGenerarBottom: document.getElementById("btnGenerarBottom"),
+  btnCrearPlantilla: document.getElementById("btnCrearPlantilla"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
   btnShareEscapeRoom: document.getElementById("btnShareEscapeRoom"),
@@ -1053,11 +1076,13 @@ function hideBootSpinner() {
 }
 
 onAuthStateChanged(auth, async (user) => {
+  presetStore.setUser(user?.uid || "");
   try {
     if (user) {
       state.currentUser = user;
       setHeaderUserEmail(user.email || "");
       await user.getIdToken();
+      await presetStore.load();
       await loadSessionsFromFirebase();
       schedulePendingAssetRetry(800);
     } else {
@@ -1659,6 +1684,11 @@ function serializeFormState() {
     formState[elements.imagenModeloSelect.id] = elements.imagenModeloSelect.dataset.pendingModelValue
       || elements.imagenModeloSelect.value;
   }
+  formState.__manualModelSelections = Object.fromEntries(
+    [elements.objetivoModeloSelect, elements.imagenModeloSelect]
+      .filter(Boolean)
+      .map(select => [select.id, select.dataset.manualModelSelection === "true"])
+  );
   const durationInput = document.getElementById("duracionInput");
   formState.__durationMode = durationInput?.dataset.durationMode === "manual" ? "manual" : "auto";
   if (state.objectiveBlueprint && state.objectiveBlueprintKey) {
@@ -1673,6 +1703,18 @@ function applyFormState(formState = {}) {
   experienceConfig = experience.config(formState.__experienceConfig);
   experienceConfirmationRequired = formState.__experienceConfirmationRequired === true;
   if (!elements.form || !formState || typeof formState !== "object") return;
+  [elements.objetivoModeloSelect, elements.imagenModeloSelect].forEach(select => {
+    if (!select) return;
+    delete select.dataset.pendingModelValue;
+    // Older snapshots did not distinguish a manual choice from a default.
+    // Preserve their saved model rather than silently replacing it.
+    const savedModel = formState[select.id]
+      || (select === elements.objetivoModeloSelect ? formState.modeloSelect : "");
+    const manual = formState.__manualModelSelections
+      ? formState.__manualModelSelections[select.id] === true
+      : Boolean(savedModel);
+    select.dataset.manualModelSelection = String(manual);
+  });
   formState = {
     ...formState,
     objetivoModeloSelect: formState.objetivoModeloSelect || formState.modeloSelect || TEXT_MODEL_DEFAULT
@@ -1685,7 +1727,16 @@ function applyFormState(formState = {}) {
       const field = document.getElementById(fieldId);
       if (!field) return;
       if (["objetivoModeloSelect", "imagenModeloSelect"].includes(fieldId) && value) {
-        field.dataset.pendingModelValue = String(value);
+        value = normalizeGeminiCatalogModelId(value);
+        field.dataset.pendingModelValue = value;
+        const content = fieldId === "objetivoModeloSelect";
+        const valid = content ? isGeminiTextContentModel(value) : isGeminiImageContentModel(value);
+        if (valid) {
+          if (!Array.from(field.options).some(option => option.value === value)) {
+            field.add(new Option(formatGeminiCatalogModelLabel({ name: value }), value));
+          }
+          (content ? ALLOWED_TEXT_MODELS : ALLOWED_IMAGE_MODELS).add(value);
+        }
       }
       if (field.type === "checkbox") {
         field.checked = Boolean(value);
@@ -2659,7 +2710,7 @@ function resetEditorState({ preserveForm = false } = {}) {
       document.getElementById("ritmoSelect").value = "progresivo";
       document.getElementById("dificultadSelect").value = "equilibrada";
       document.getElementById("pistasSelect").value = "moderadas";
-      if (elements.objetivoModeloSelect) elements.objetivoModeloSelect.value = TEXT_MODEL_DEFAULT;
+      resetModelSelection(elements.objetivoModeloSelect, TEXT_MODEL_DEFAULT);
     } finally {
       state.formPersistenceSuspended = false;
     }
@@ -4400,26 +4451,43 @@ function initializeAccessibleModalFocus() {
   if (accessibleModalFocusWired) return;
   accessibleModalFocusWired = true;
 
+  document.addEventListener("click", (event) => {
+    const dismissBtn = event.target.closest('[data-bs-dismiss="modal"]');
+    if (dismissBtn) {
+      const modal = dismissBtn.closest('.modal');
+      const returnTarget = modal ? modalReturnFocusTargets.get(modal) : null;
+      dismissBtn.blur();
+      if (returnTarget?.isConnected && !returnTarget.disabled) {
+        returnTarget.focus({ preventScroll: true });
+      }
+    }
+  }, true);
+
   document.querySelectorAll(".modal").forEach((modal) => {
+    if (modal.hasAttribute("aria-hidden")) modal.removeAttribute("aria-hidden");
     if (!modal.classList.contains("show")) modal.inert = true;
+
     modal.addEventListener("show.bs.modal", (event) => {
       const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const relatedTarget = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null;
       const returnTarget = relatedTarget && !modal.contains(relatedTarget) ? relatedTarget : activeElement;
       if (returnTarget && !modal.contains(returnTarget)) modalReturnFocusTargets.set(modal, returnTarget);
       modal.inert = false;
+      modal.removeAttribute("aria-hidden");
     });
 
     modal.addEventListener("hide.bs.modal", () => {
       const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      if (!activeElement || !modal.contains(activeElement)) return;
-      activeElement.blur();
+      if (activeElement && modal.contains(activeElement)) {
+        activeElement.blur();
+      }
       const returnTarget = modalReturnFocusTargets.get(modal);
       if (returnTarget?.isConnected && !returnTarget.disabled) returnTarget.focus({ preventScroll: true });
     });
 
     modal.addEventListener("hidden.bs.modal", () => {
       modal.inert = true;
+      modal.removeAttribute("aria-hidden");
       const returnTarget = modalReturnFocusTargets.get(modal);
       if (returnTarget?.isConnected && !returnTarget.disabled && document.activeElement === document.body) {
         returnTarget.focus({ preventScroll: true });
@@ -4828,13 +4896,313 @@ function setStatus(message = "", type = "info", { actionLabel = "", onAction = n
   syncActivityIndicator();
 }
 
+let gamingHudAnimations = null;
+let gamingHudDismissable = false;
+let gamingHudMinimized = false;
+
+function initGamingHudModal() {
+  const modal = elements.loading;
+  if (!modal) return;
+
+  const card = modal.querySelector(".er-loading-hud-card");
+  const header = modal.querySelector(".er-hud-header");
+  const closeBtn = document.getElementById("erLoadingCloseBtn");
+  const dismissBtn = document.getElementById("erHudDismissBtn");
+  const minimizeBtn = document.getElementById("erLoadingMinimizeBtn");
+
+  const closeModal = () => {
+    if (!gamingHudDismissable) return;
+    hideGamingHudModal();
+  };
+
+  const toggleMinimize = (e) => {
+    e?.stopPropagation();
+    gamingHudMinimized = !gamingHudMinimized;
+    card?.classList.toggle("is-minimized", gamingHudMinimized);
+    if (minimizeBtn) {
+      minimizeBtn.innerHTML = gamingHudMinimized
+        ? '<i class="fas fa-expand" aria-hidden="true"></i>'
+        : '<i class="fas fa-minus" aria-hidden="true"></i>';
+      minimizeBtn.setAttribute("aria-label", gamingHudMinimized ? "Expandir panel" : "Minimizar panel");
+      minimizeBtn.title = gamingHudMinimized ? "Expandir" : "Minimizar";
+    }
+  };
+
+  card?.addEventListener("click", (e) => {
+    if (gamingHudMinimized && !e.target.closest("#erLoadingCloseBtn")) {
+      toggleMinimize(e);
+    }
+  });
+
+  minimizeBtn?.addEventListener("click", toggleMinimize);
+  closeBtn?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
+  dismissBtn?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden") && gamingHudDismissable) {
+      closeModal();
+    }
+  });
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let initialLeft = 0;
+  let initialTop = 0;
+
+  const onPointerDown = (e) => {
+    if (e.target.closest("button, a, input, select, textarea")) return;
+    if (!card) return;
+    isDragging = true;
+    const rect = card.getBoundingClientRect();
+    startX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    startY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    initialLeft = rect.left;
+    initialTop = rect.top;
+
+    card.style.position = "fixed";
+    card.style.left = `${initialLeft}px`;
+    card.style.top = `${initialTop}px`;
+    card.style.margin = "0";
+    card.classList.add("is-dragging");
+
+    const onPointerMove = (moveEvent) => {
+      if (!isDragging || !card) return;
+      const currentX = moveEvent.clientX ?? moveEvent.touches?.[0]?.clientX ?? 0;
+      const currentY = moveEvent.clientY ?? moveEvent.touches?.[0]?.clientY ?? 0;
+      const deltaX = currentX - startX;
+      const deltaY = currentY - startY;
+
+      const newLeft = Math.max(10, Math.min(window.innerWidth - card.offsetWidth - 10, initialLeft + deltaX));
+      const newTop = Math.max(10, Math.min(window.innerHeight - card.offsetHeight - 10, initialTop + deltaY));
+
+      card.style.left = `${newLeft}px`;
+      card.style.top = `${newTop}px`;
+    };
+
+    const onPointerUp = () => {
+      isDragging = false;
+      card?.classList.remove("is-dragging");
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  };
+
+  header?.addEventListener("pointerdown", onPointerDown);
+}
+
+function startGamingHudAnimations() {
+  if (gamingHudAnimations) return;
+  const outerRing = document.querySelector(".er-hud-ring-outer");
+  const midRing = document.querySelector(".er-hud-ring-mid");
+  const hexInner = document.querySelector(".er-hud-hex-inner");
+  const coreIcon = document.querySelector(".er-hud-core-icon");
+
+  try {
+    const outerAnim = outerRing ? animate(outerRing, { rotate: 360, duration: 8000, loop: true, ease: "linear" }) : null;
+    const midAnim = midRing ? animate(midRing, { rotate: -360, duration: 6000, loop: true, ease: "linear" }) : null;
+    const hexAnim = hexInner ? animate(hexInner, { scale: [0.95, 1.05], opacity: [0.6, 1], duration: 1800, loop: true, alternate: true, ease: "inOutQuad" }) : null;
+    const coreAnim = coreIcon ? animate(coreIcon, { scale: [0.9, 1.1], duration: 1200, loop: true, alternate: true, ease: "inOutSine" }) : null;
+
+    gamingHudAnimations = { outerAnim, midAnim, hexAnim, coreAnim };
+  } catch (err) {
+    console.warn("[GamingHUD] Animation error:", err);
+  }
+}
+
+function stopGamingHudAnimations() {
+  if (!gamingHudAnimations) return;
+  try {
+    gamingHudAnimations.outerAnim?.pause?.();
+    gamingHudAnimations.midAnim?.pause?.();
+    gamingHudAnimations.hexAnim?.pause?.();
+    gamingHudAnimations.coreAnim?.pause?.();
+  } catch {}
+  gamingHudAnimations = null;
+}
+
+function showGamingHudModal() {
+  const modal = elements.loading;
+  if (!modal) return;
+  if (modal.classList.contains("hidden")) {
+    modal.classList.remove("hidden");
+    const card = modal.querySelector(".er-loading-hud-card");
+    if (card) animate(card, { scale: [0.88, 1], opacity: [0, 1], translateY: [24, 0], duration: 400, ease: "outCubic" });
+  }
+  startGamingHudAnimations();
+}
+
+function hideGamingHudModal() {
+  const modal = elements.loading;
+  if (!modal || modal.classList.contains("hidden")) return;
+  const card = modal.querySelector(".er-loading-hud-card");
+  if (card) {
+    animate(card, { scale: [1, 0.9], opacity: [1, 0], translateY: [0, 16], duration: 250, ease: "inQuad" });
+    window.setTimeout(() => {
+      modal.classList.add("hidden");
+      stopGamingHudAnimations();
+    }, 260);
+  } else {
+    modal.classList.add("hidden");
+    stopGamingHudAnimations();
+  }
+}
+
+function updateGamingHudProgress(message = "", type = "info") {
+  const progressBar = document.getElementById("erHudProgressBar");
+  const progressPercent = document.getElementById("erHudProgressPercent");
+  const title = document.getElementById("erLoadingTitle");
+  const statusTag = document.getElementById("erHudStatusTag");
+  const coreIcon = document.getElementById("erHudCoreIcon");
+  const buildingNote = document.getElementById("erHudBuildingNote");
+  const closeBtn = document.getElementById("erLoadingCloseBtn");
+  const dismissBtn = document.getElementById("erHudDismissBtn");
+  const card = document.querySelector(".er-loading-hud-card");
+  const roomNodes = document.getElementById("erHudRoomNodes");
+
+  const totalRooms = Math.max(1, Number(getFormData()?.misiones) || 4);
+
+  if (roomNodes && (!roomNodes.children.length || roomNodes.children.length !== totalRooms)) {
+    roomNodes.replaceChildren(...Array.from({ length: totalRooms }, (_, i) => {
+      const chip = document.createElement("span");
+      chip.className = "er-hud-room-chip";
+      chip.id = `erHudRoomChip_${i + 1}`;
+      chip.innerHTML = `<i class="fas fa-lock"></i> SALA ${i + 1}`;
+      return chip;
+    }));
+  }
+
+  let percent = 15;
+  let stageLabel = "Preparando arquitectura...";
+  let isComplete = false;
+  let isError = type === "error";
+
+  if (type === "success" || /escape room listo/i.test(message) || /objetivo (creado|recreado)/i.test(message)) {
+    percent = 100;
+    stageLabel = "¡Escape Room Listo!";
+    isComplete = true;
+
+    for (let r = 1; r <= totalRooms; r += 1) {
+      const chip = document.getElementById(`erHudRoomChip_${r}`);
+      if (chip) {
+        chip.className = "er-hud-room-chip is-done";
+        chip.innerHTML = `<i class="fas fa-check"></i> SALA ${r}`;
+      }
+    }
+  } else if (/preparando el objetivo/i.test(message)) {
+    percent = 20;
+    stageLabel = "Diseñando arco narrativo y objetivo...";
+  } else if (/completando la sala (\d+)/i.test(message)) {
+    const match = message.match(/completando la sala (\d+)/i);
+    const roomNum = match ? Number(match[1]) : 1;
+    percent = Math.min(90, Math.round(20 + (roomNum / totalRooms) * 65));
+    stageLabel = `Construyendo Sala ${roomNum} de ${totalRooms}…`;
+
+    for (let r = 1; r <= totalRooms; r += 1) {
+      const chip = document.getElementById(`erHudRoomChip_${r}`);
+      if (!chip) continue;
+      if (r < roomNum) {
+        chip.className = "er-hud-room-chip is-done";
+        chip.innerHTML = `<i class="fas fa-check"></i> SALA ${r}`;
+      } else if (r === roomNum) {
+        chip.className = "er-hud-room-chip is-active";
+        chip.innerHTML = `<i class="fas fa-spinner fa-spin"></i> SALA ${r}`;
+      } else {
+        chip.className = "er-hud-room-chip";
+        chip.innerHTML = `<i class="fas fa-lock"></i> SALA ${r}`;
+      }
+    }
+  } else if (/comprobando las preguntas/i.test(message)) {
+    percent = 88;
+    stageLabel = "Verificando coherencia pedagógica y enigmas…";
+  } else if (/imágenes|imagenes|portada/i.test(message)) {
+    percent = 95;
+    stageLabel = "Sintetizando escenarios visuales…";
+  }
+
+  if (progressBar) {
+    progressBar.style.width = `${percent}%`;
+    if (isComplete) {
+      progressBar.style.background = "linear-gradient(90deg, #10b981 0%, #34d399 100%)";
+      progressBar.style.boxShadow = "0 0 15px rgba(16, 185, 129, 0.8)";
+    } else if (isError) {
+      progressBar.style.background = "linear-gradient(90deg, #ef4444 0%, #f87171 100%)";
+      progressBar.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.8)";
+    } else {
+      progressBar.style.background = "linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%)";
+      progressBar.style.boxShadow = "0 0 10px rgba(56, 189, 248, 0.7)";
+    }
+  }
+
+  if (progressPercent) {
+    progressPercent.textContent = `${percent}% · ${stageLabel}`;
+  }
+
+  if (isComplete) {
+    gamingHudDismissable = true;
+    card?.classList.add("is-ready");
+    if (title) title.textContent = "¡Escape Room Listo!";
+    if (statusTag) statusTag.textContent = "PIGPEN FORGE // MISIÓN OPERATIVA";
+    if (coreIcon) coreIcon.className = "fas fa-trophy er-hud-core-icon";
+    if (buildingNote) buildingNote.classList.add("hidden");
+    if (closeBtn) closeBtn.disabled = false;
+    if (dismissBtn) {
+      dismissBtn.classList.remove("hidden");
+      dismissBtn.innerHTML = '<i class="fas fa-gamepad"></i> <span>¡Explorar Escape Room!</span>';
+      try { animate(dismissBtn, { scale: [0.9, 1], opacity: [0, 1], duration: 300, ease: "outQuad" }); } catch {}
+    }
+  } else if (isError) {
+    gamingHudDismissable = true;
+    card?.classList.remove("is-ready");
+    if (title) title.textContent = "Error al Generar";
+    if (statusTag) statusTag.textContent = "PIGPEN FORGE // ERROR DETECTADO";
+    if (coreIcon) coreIcon.className = "fas fa-triangle-exclamation er-hud-core-icon";
+    if (buildingNote) buildingNote.classList.add("hidden");
+    if (closeBtn) closeBtn.disabled = false;
+    if (dismissBtn) {
+      dismissBtn.classList.remove("hidden");
+      dismissBtn.innerHTML = '<i class="fas fa-times"></i> <span>Cerrar y Revisar</span>';
+    }
+  } else {
+    gamingHudDismissable = false;
+    card?.classList.remove("is-ready");
+    if (title) title.textContent = "Armando Escape Room";
+    if (statusTag) statusTag.textContent = "PIGPEN FORGE // ESCAPE ROOM MATRIX";
+    if (coreIcon) coreIcon.className = "fas fa-dungeon er-hud-core-icon";
+    if (buildingNote) buildingNote.classList.remove("hidden");
+    if (closeBtn) closeBtn.disabled = true;
+    if (dismissBtn) dismissBtn.classList.add("hidden");
+  }
+}
+
 function syncActivityIndicator() {
   if (!elements.loading) return;
+  const isBusy = state.isLoading || state.isGenerating || state.isGeneratingImagesInBackground;
   const hasMessage = Boolean(elements.statusBanner?.textContent?.trim());
-  const isBusy = state.isLoading || state.isGeneratingImagesInBackground;
-  elements.loading.classList.toggle("hidden", !isBusy && !hasMessage);
-  elements.loading.classList.toggle("is-loading", isBusy);
-  elements.loading.setAttribute("aria-busy", String(isBusy));
+  const bannerType = elements.statusBanner?.className?.includes("is-error") ? "error"
+    : elements.statusBanner?.className?.includes("is-success") ? "success" : "info";
+  const currentMsg = elements.statusBanner?.textContent?.trim() || "";
+
+  if (isBusy) {
+    showGamingHudModal();
+    updateGamingHudProgress(currentMsg, bannerType);
+    elements.loading.classList.remove("hidden");
+    elements.loading.classList.add("is-loading");
+    elements.loading.setAttribute("aria-busy", "true");
+  } else if (hasMessage) {
+    updateGamingHudProgress(currentMsg, bannerType);
+    elements.loading.classList.remove("hidden");
+    elements.loading.classList.remove("is-loading");
+    elements.loading.setAttribute("aria-busy", "false");
+  } else {
+    hideGamingHudModal();
+    elements.loading.classList.add("hidden");
+    elements.loading.classList.remove("is-loading");
+    elements.loading.setAttribute("aria-busy", "false");
+  }
 }
 
 function hasCreatorWorkToProtect() {
@@ -5063,6 +5431,9 @@ function syncActionButtons() {
 
   elements.btnGenerar.disabled = state.isLoading || generationBusy;
   if (elements.btnGenerarBottom) elements.btnGenerarBottom.disabled = state.isLoading || generationBusy;
+  if (elements.btnCrearPlantilla) {
+    elements.btnCrearPlantilla.disabled = state.isLoading || generationBusy || state.activeSessionMeta?.status === "published";
+  }
   elements.btnLimpiar.disabled = state.isLoading || generationBusy;
   elements.btnAddMission.disabled = state.isLoading || generationBusy;
   if (elements.btnAddTopic) {
@@ -5153,6 +5524,9 @@ function supportsGeminiContentGeneration(model = {}) {
 
 function isGeminiImageContentModel(id = "") {
   const value = normalizeGeminiCatalogModelId(id).toLowerCase();
+  // The Cloudflare id is virtual (the proxy answers it), but restored selections must be
+  // recognised as valid image choices just like the Gemini ones.
+  if (value === CLOUDFLARE_IMAGE_MODEL_ID) return true;
   return value.startsWith("gemini-") && (value.includes("-image") || value.includes("image-generation"));
 }
 
@@ -5177,22 +5551,38 @@ function sanitizeRestoredModelSelections() {
   if (pendingContent && !isGeminiTextContentModel(pendingContent)) {
     elements.objetivoModeloSelect.value = TEXT_MODEL_DEFAULT;
     delete elements.objetivoModeloSelect.dataset.pendingModelValue;
+    elements.objetivoModeloSelect.dataset.manualModelSelection = "false";
     changed = true;
   }
   const pendingImage = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.pendingModelValue || "");
   if (pendingImage && !isGeminiImageContentModel(pendingImage)) {
     elements.imagenModeloSelect.value = IMAGE_MODEL_DEFAULT;
     delete elements.imagenModeloSelect.dataset.pendingModelValue;
+    elements.imagenModeloSelect.dataset.manualModelSelection = "false";
     changed = true;
   }
   if (changed) saveFormState();
   return changed;
 }
 
+function resetModelSelection(select, value) {
+  if (!select) return;
+  delete select.dataset.pendingModelValue;
+  select.dataset.manualModelSelection = "false";
+  select.value = value;
+}
+
 function renderGeminiModelOptions(select, models = [], selectedValue = "", fallbackValue = "") {
   if (!select) return;
   const selected = normalizeGeminiCatalogModelId(selectedValue || fallbackValue);
   const catalog = new Map(models.map((model) => [model.id, model]));
+  const validSavedModel = select === elements.objetivoModeloSelect
+    ? isGeminiTextContentModel(selected)
+    : isGeminiImageContentModel(selected);
+  if (select.dataset.manualModelSelection === "true" && validSavedModel && !catalog.has(selected)) {
+    catalog.set(selected, { id: selected, label: `${formatGeminiCatalogModelLabel({ name: selected })} · selección guardada` });
+    (select === elements.objetivoModeloSelect ? ALLOWED_TEXT_MODELS : ALLOWED_IMAGE_MODELS).add(selected);
+  }
   select.replaceChildren(...[...catalog.values()].map((model) => {
     const option = document.createElement("option");
     option.value = model.id;
@@ -5206,14 +5596,16 @@ function renderGeminiModelOptions(select, models = [], selectedValue = "", fallb
 }
 
 async function loadGeminiModelCatalog() {
-  const selectedObjectiveModel = normalizeGeminiCatalogModelId(elements.objetivoModeloSelect?.dataset.pendingModelValue || elements.objetivoModeloSelect?.value || TEXT_MODEL_DEFAULT);
-  const selectedImageModel = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.pendingModelValue || elements.imagenModeloSelect?.value || IMAGE_MODEL_DEFAULT);
+  let selectedObjectiveModel = normalizeGeminiCatalogModelId(elements.objetivoModeloSelect?.dataset.pendingModelValue || elements.objetivoModeloSelect?.value || TEXT_MODEL_DEFAULT);
+  let selectedImageModel = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.pendingModelValue || elements.imagenModeloSelect?.value || IMAGE_MODEL_DEFAULT);
   if (elements.geminiModelCatalogStatus) elements.geminiModelCatalogStatus.textContent = "Consultando todos los modelos disponibles en la API…";
   if (elements.objetivoModeloSelect) elements.objetivoModeloSelect.disabled = true;
   if (elements.imagenModeloSelect) elements.imagenModeloSelect.disabled = true;
   try {
     geminiModelCatalogPromise ||= authFetchJson(buildGeminiApiUrl("/api/gemini/models"), { method: "GET" });
     const payload = await geminiModelCatalogPromise;
+    selectedObjectiveModel = normalizeGeminiCatalogModelId(elements.objetivoModeloSelect?.dataset.pendingModelValue || elements.objetivoModeloSelect?.value || TEXT_MODEL_DEFAULT);
+    selectedImageModel = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.pendingModelValue || elements.imagenModeloSelect?.value || IMAGE_MODEL_DEFAULT);
     const unique = new Map();
     (Array.isArray(payload?.models) ? payload.models : []).forEach((model) => {
       const id = normalizeGeminiCatalogModelId(model?.name || model?.model || "");
@@ -5223,28 +5615,79 @@ async function loadGeminiModelCatalog() {
     const available = [...unique.values()].sort((a, b) => a.label.localeCompare(b.label, "es", { numeric: true, sensitivity: "base" }));
     const apiTextModels = available.filter((model) => isGeminiTextContentModel(model.id));
     const apiImageModels = available.filter((model) => isGeminiImageContentModel(model.id));
-    const textModels = apiTextModels.length
+    // Vertex only publishes paid models, so the free one arrives as its own offer and is
+    // listed first. From here on the free model is the default and a paid id can only be
+    // reached by changing the selector on purpose.
+    const freeModel = normalizeGeminiCatalogModelId(payload?.freeTier?.enabled ? payload.freeTier.model : "");
+    if (elements.objetivoModeloSelect) {
+      if (freeModel) elements.objetivoModeloSelect.dataset.freeTierModel = freeModel;
+      else delete elements.objetivoModeloSelect.dataset.freeTierModel;
+    }
+    if (freeModel) TEXT_MODEL_DEFAULT = freeModel;
+    // Cloudflare is the mirror image of the free text offer: the proxy advertises it only
+    // when its token+account are configured, and without the offer the selector stays on
+    // paid Gemini with the manual-image contract armed, exactly as before.
+    const freeImageModel = normalizeGeminiCatalogModelId(payload?.freeImage?.enabled ? payload.freeImage.model : "");
+    if (elements.imagenModeloSelect) {
+      if (freeImageModel) elements.imagenModeloSelect.dataset.freeImageModel = freeImageModel;
+      else delete elements.imagenModeloSelect.dataset.freeImageModel;
+    }
+    if (freeImageModel) IMAGE_MODEL_DEFAULT = freeImageModel;
+    const paidTextModels = apiTextModels.length
       ? apiTextModels
       : FALLBACK_TEXT_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
-    const imageModels = apiImageModels.length
+    const textModels = freeModel
+      ? [{ id: freeModel, label: `${formatGeminiCatalogModelLabel({ name: freeModel })} · plan gratuito, sin costo` }, ...paidTextModels.filter((model) => model.id !== freeModel)]
+      : paidTextModels;
+    const paidImageModels = apiImageModels.length
       ? apiImageModels
-      : FALLBACK_IMAGE_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+      : FALLBACK_IMAGE_MODELS.filter((id) => id !== CLOUDFLARE_IMAGE_MODEL_ID).map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+    const imageModels = freeImageModel
+      ? [{ id: freeImageModel, label: `${formatGeminiCatalogModelLabel({ name: freeImageModel })} · plan gratuito, sin costo` }, ...paidImageModels.filter((model) => model.id !== freeImageModel)]
+      : paidImageModels;
 
     ALLOWED_TEXT_MODELS.clear();
     textModels.forEach((model) => ALLOWED_TEXT_MODELS.add(model.id));
     ALLOWED_IMAGE_MODELS.clear();
     imageModels.forEach((model) => ALLOWED_IMAGE_MODELS.add(model.id));
-    renderGeminiModelOptions(elements.objetivoModeloSelect, textModels, selectedObjectiveModel, TEXT_MODEL_DEFAULT);
-    renderGeminiModelOptions(elements.imagenModeloSelect, imageModels, selectedImageModel, IMAGE_MODEL_DEFAULT);
+    // Only automatic defaults yield to the free offer. A manual choice also
+    // remains manual when it happens to equal the page's original default.
+    const restoredBuiltInDefault = elements.objetivoModeloSelect?.dataset.manualModelSelection !== "true"
+      && selectedObjectiveModel === normalizeGeminiCatalogModelId(BUILTIN_TEXT_MODEL_DEFAULT);
+    renderGeminiModelOptions(
+      elements.objetivoModeloSelect,
+      textModels,
+      freeModel && restoredBuiltInDefault ? freeModel : selectedObjectiveModel,
+      TEXT_MODEL_DEFAULT
+    );
+    const restoredImageBuiltIn = elements.imagenModeloSelect?.dataset.manualModelSelection !== "true"
+      && selectedImageModel === normalizeGeminiCatalogModelId(BUILTIN_IMAGE_MODEL_DEFAULT);
+    renderGeminiModelOptions(elements.imagenModeloSelect, imageModels, freeImageModel && restoredImageBuiltIn ? freeImageModel : selectedImageModel, IMAGE_MODEL_DEFAULT);
     saveFormState();
     if (elements.geminiModelCatalogStatus) {
       const fallbackNote = !apiTextModels.length || !apiImageModels.length ? " Los tipos no publicados por Vertex usan el catálogo de respaldo." : "";
-      elements.geminiModelCatalogStatus.textContent = `${apiTextModels.length} modelos de texto y ${apiImageModels.length} modelos de imagen disponibles desde la API.${fallbackNote}`;
+      const freeNote = freeModel ? " El texto usa el plan gratuito de AI Studio por defecto." : "";
+      const freeImageNote = freeImageModel ? " Las imágenes usan la bolsa gratuita de Cloudflare por defecto." : "";
+      // The proxy answers this endpoint even when Vertex refuses the paid catalog, so say so
+      // instead of reporting an empty list as if there were no models of cobro at all.
+      const outageNote = payload?.catalogError ? " Vertex no devolvió su catálogo; se muestran los modelos de respaldo." : "";
+      elements.geminiModelCatalogStatus.textContent = `${apiTextModels.length} modelos de texto y ${apiImageModels.length} modelos de imagen disponibles desde la API.${freeNote}${freeImageNote}${fallbackNote}${outageNote}`;
     }
   } catch (error) {
     geminiModelCatalogPromise = null;
     const textModels = FALLBACK_TEXT_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
-    const imageModels = FALLBACK_IMAGE_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+    // Keep the free default selectable even when the catalog call failed, otherwise a
+    // dropped refresh would silently move the author back onto a model of cobro.
+    const remembered = normalizeGeminiCatalogModelId(elements.objetivoModeloSelect?.dataset.freeTierModel || "");
+    if (remembered && !textModels.some((model) => model.id === remembered)) {
+      textModels.unshift({ id: remembered, label: `${formatGeminiCatalogModelLabel({ name: remembered })} · plan gratuito, sin costo` });
+    }
+    const rememberedImage = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.freeImageModel || "");
+    if (rememberedImage) IMAGE_MODEL_DEFAULT = rememberedImage;
+    const imageModels = FALLBACK_IMAGE_MODELS.map((id) => ({
+      id,
+      label: `${formatGeminiCatalogModelLabel({ name: id })}${id === rememberedImage ? " · plan gratuito, sin costo" : ""}`
+    }));
     ALLOWED_TEXT_MODELS.clear();
     textModels.forEach((model) => ALLOWED_TEXT_MODELS.add(model.id));
     ALLOWED_IMAGE_MODELS.clear();
@@ -5772,6 +6215,16 @@ function cleanGeminiSchema(schema) {
   ]);
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedKeywords.has(key)) continue;
+    // Gemini solo admite enums de texto (convención del repo: enum acompaña a type:"string").
+    // Un enum numérico (p. ej. version:{type:'integer',enum:[1]}) provoca 400 TYPE_STRING;
+    // se descarta el enum y el type + validación local siguen fijando el valor.
+    if (key === "enum") {
+      if (!Array.isArray(value)) continue;
+      const stringType = schema.type === undefined || String(schema.type).toLowerCase() === "string";
+      if (!stringType) continue;
+      sanitized[key] = value.map((entry) => (typeof entry === "string" ? entry : String(entry)));
+      continue;
+    }
     if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
       const sanitizedProps = {};
       for (const [propKey, propVal] of Object.entries(value)) {
@@ -5787,6 +6240,9 @@ function cleanGeminiSchema(schema) {
   return sanitized;
 }
 
+// The proxy only routes a turn to the AI Studio free tier when it carries one of these two
+// PigPen profiles; an untagged turn would silently bill Vertex. Image turns send no profile
+// on purpose, because image generation has no free-tier path here.
 async function requestQualityJson(prompt, formData, temperature = 0.25, { responseJsonSchema = null, singleAttempt = false, minimalPayload = false, textOnly = false, expectedContent = null, validateContent = null } = {}) {
   let activeModel = (textOnly && formData._quotaFallbackModel) || formData.modelo || TEXT_MODEL_DEFAULT;
   let modelFallbackUsed = false;
@@ -5796,7 +6252,7 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
     body: {
       model: activeModel,
       ...(singleAttempt ? { singleAttempt: true } : {}),
-      ...(textOnly ? { generationProfile: "pigpen-fixed-content" } : {}),
+      generationProfile: textOnly ? "pigpen-fixed-content" : "pigpen-text",
       payload: compatibilityMode
         ? {
             contents: [{ role: "user", parts: [{ text: `${jsonDirective}\n\n${prompt}` }] }]
@@ -5833,9 +6289,11 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
   let response;
   let quotaRetries = 0;
   let timeoutRetries = 0;
+  let onFreeTier = false;
   while (!response) {
     try {
       response = await performRequest();
+      if (response?.charlyProvider === "aistudio-free") onFreeTier = true;
       if (textOnly && expectedContent) {
         try {
           const candidates = response?.candidates || response?.response?.candidates || [];
@@ -5843,10 +6301,12 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
           fillContentDocument(expectedContent, extractGeminiText(response));
           if(validateContent){const issues=validateContent(extractGeminiText(response));if(issues?.length)throw new Error(issues.join(' · '));}
         } catch (cause) {
+          const rawText = typeof extractGeminiText === "function" ? extractGeminiText(response) : "";
           response = null;
           const invalidContent = new Error(cause.message);
           invalidContent.code = 'pigpen_invalid_text_content';
           invalidContent.cause = cause;
+          if (typeof console !== "undefined") console.warn("[PigPenCreator] Respuesta fija rechazada. Inicio:", rawText.slice(0, 240), "… Final:", rawText.slice(-240));
           throw invalidContent;
         }
       }
@@ -5859,16 +6319,21 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
         throw disconnected;
       }
       if (singleAttempt) {
-        if (textOnly && (isGeminiQuotaExhausted(error) || error?.code === 'pigpen_invalid_text_content') && !modelFallbackUsed) {
+        // A turn the proxy answered from AI Studio (or refused as free-tier) stops here: the
+        // model ladder below would re-ask the same content of a model of cobro.
+        const freeTierTurn = onFreeTier || error?.detail?.freeTier === true;
+        if (textOnly && !freeTierTurn && (isGeminiQuotaExhausted(error) || error?.code === 'pigpen_invalid_text_content') && !modelFallbackUsed) {
           const cleanModel = String(activeModel).replace(/^.*\/models\//, '').replace(/^models\//, '');
           activeModel = ['gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'].includes(cleanModel)
-            ? 'gemini-3.6-flash' : 'gemini-3.5-flash-lite';
+            ? 'gemini-3.8-flash' : 'gemini-3.5-flash-lite';
           modelFallbackUsed = true;
           setStatus(`${error?.code === 'pigpen_invalid_text_content' ? 'La respuesta del modelo no superó la revisión.' : 'El modelo anterior devolvió 429.'} Probando ${activeModel} para este mismo contenido…`, 'info');
           continue;
         }
         if (error?.code === 'pigpen_invalid_text_content') {
-          error.message = `No se pudo obtener contenido válido tras dos intentos secuenciales. ${error.message} Las salas ya guardadas se conservan.`;
+          error.message = freeTierTurn
+            ? `El modelo gratuito no devolvió contenido válido y no se usó ningún modelo de cobro. ${error.message} Las salas ya guardadas se conservan.`
+            : `No se pudo obtener contenido válido tras dos intentos secuenciales. ${error.message} Las salas ya guardadas se conservan.`;
           throw error;
         }
         if (isGeminiUpstreamTimeout(error)) {
@@ -5877,15 +6342,23 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
         }
         if (isGeminiQuotaExhausted(error)) {
           error.modelFallbackUsed = modelFallbackUsed;
-          error.message = modelFallbackUsed
-            ? "El último modelo devolvió 429. El proceso se detuvo tras dos intentos secuenciales sin completar el contenido; los avances guardados se conservan. Intenta continuar más tarde."
-            : "Gemini devolvió 429. El proceso se detuvo sin reintentos automáticos. Las salas terminadas se conservaron; vuelve a iniciar para continuar con la pendiente.";
+          if (freeTierTurn) {
+            error.message = "El plan gratuito de Gemini agotó su cupo de texto y no se usó ningún modelo de cobro. Las salas terminadas se conservan; reintenta cuando se renueve el cupo.";
+          } else {
+            error.message = modelFallbackUsed
+              ? "El último modelo devolvió 429. El proceso se detuvo tras dos intentos secuenciales sin completar el contenido; los avances guardados se conservan. Intenta continuar más tarde."
+              : "Gemini devolvió 429. El proceso se detuvo sin reintentos automáticos. Las salas terminadas se conservaron; vuelve a iniciar para continuar con la pendiente.";
+          }
         }
         throw error;
       }
       if (isGeminiQuotaExhausted(error)) {
-        if (quotaRetries >= 2) {
-          const persistentQuota = new Error("Gemini mantuvo agotada la cuota después de tres intentos. Las salas completadas permanecen guardadas en el borrador para continuar después.");
+        if (quotaRetries >= 2 || (error?.detail?.freeTier === true && error?.detail?.permanentToday === true)) {
+          // The free tier will not recover before the daily reset, so this is not "three tries";
+          // saying so would invite the author to keep burning the same exhausted bucket.
+          const persistentQuota = new Error(error?.detail?.freeTier === true && error?.detail?.permanentToday === true
+            ? "El plan gratuito de Gemini agotó su cupo de texto para hoy y no se usó ningún modelo de cobro. Las salas completadas permanecen guardadas en el borrador para continuar cuando se renueve el cupo."
+            : "Gemini mantuvo agotada la cuota después de tres intentos. Las salas completadas permanecen guardadas en el borrador para continuar después.");
           persistentQuota.code = "gemini_quota_exhausted";
           persistentQuota.status = 429;
           persistentQuota.detail = error?.detail;
@@ -5932,6 +6405,7 @@ async function requestQualityJson(prompt, formData, temperature = 0.25, { respon
 
 function extractGeminiText(rawResponse = {}) {
   return (rawResponse?.candidates?.[0]?.content?.parts || [])
+    .filter((part) => part?.thought !== true)
     .map((part) => typeof part?.text === "string" ? part.text : "")
     .join("")
     .trim()
@@ -5945,6 +6419,7 @@ async function repairQualityJsonSyntax(malformed, formData = {}, { responseJsonS
   const buildRepairRequest = ({ compatibilityMode = false } = {}) => ({
     method: "POST",
     body: {
+      generationProfile: "pigpen-text",
       model: formData.modelo || TEXT_MODEL_DEFAULT,
       payload: compatibilityMode
         ? {
@@ -8233,6 +8708,7 @@ async function repairGeneratedEscapeRoomJson(rawText, formData) {
   const repairedResponse = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
+      generationProfile: "pigpen-text",
       model: formData.modelo || TEXT_MODEL_DEFAULT,
       payload: {
         systemInstruction: {
@@ -8371,27 +8847,54 @@ function buildQuestionVisualPrompt({ data, mission, question, roomIndex, questio
 }
 
 async function generateGeminiImage(prompt, { aspectRatio = "16:9", imageSize = "2K", temperature = 0.58, model = IMAGE_MODEL_DEFAULT } = {}) {
-  const imageModel = ALLOWED_IMAGE_MODELS.has(String(model || "").trim())
-    ? String(model).trim()
-    : IMAGE_MODEL_DEFAULT;
-  const requestOptions = {
-    method: "POST",
-    body: {
-      model: imageModel,
-      payload: {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ["IMAGE"],
-          imageConfig: { aspectRatio, imageSize },
-          temperature
+  const requestedModel = String(model || "").trim() || IMAGE_MODEL_DEFAULT;
+  // The free model is an explicit "never bill for this picture", so its ladder is a single
+  // rung: a Cloudflare failure must not quietly spend money on the paid Gemini list.
+  const candidateModels = requestedModel === CLOUDFLARE_IMAGE_MODEL_ID
+    ? [requestedModel]
+    : [
+        requestedModel,
+        ...Array.from(ALLOWED_IMAGE_MODELS || []),
+        ...FALLBACK_IMAGE_MODELS
+      ];
+  const distinctModels = [...new Set(candidateModels.map(m => String(m || "").trim()).filter(Boolean))];
+
+  let lastError = null;
+  for (let attempt = 0; attempt < distinctModels.length; attempt += 1) {
+    const activeModel = distinctModels[attempt];
+    const requestOptions = {
+      method: "POST",
+      body: {
+        model: activeModel,
+        payload: {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ["IMAGE"],
+            imageConfig: { aspectRatio, imageSize },
+            temperature
+          }
         }
       }
+    };
+
+    try {
+      const response = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), requestOptions);
+      const imageData = extractGeminiImageData(response);
+      if (imageData) return imageData;
+      throw new Error("No se recibieron datos de imagen en la respuesta.");
+    } catch (error) {
+      lastError = error;
+      const isQuota = isGeminiQuotaExhausted(error) || error?.status === 429 || /429|quota|resource_exhausted/i.test(String(error?.message || ""));
+      console.warn(`[PigPenCreator] Falló la generación de imagen con ${activeModel} (${error?.message || "error"}).`);
+      if (attempt < distinctModels.length - 1) {
+        if (isQuota) {
+          await new Promise(resolve => setTimeout(resolve, 1500 * (attempt + 1)));
+        }
+        continue;
+      }
     }
-  };
-  // Una respuesta 429/5xx puede llegar después de que Vertex haya empezado a
-  // producir la imagen. Repetir aquí la misma petición puede duplicar consumo;
-  // el proxy ya gestiona su fallback de modelo antes de devolver la respuesta.
-  return extractGeminiImageData(await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), requestOptions));
+  }
+  throw lastError || new Error("No se pudo generar la imagen tras probar los modelos disponibles.");
 }
 
 function yieldToBrowser() {
@@ -8461,6 +8964,34 @@ async function optimizeGeneratedImageForProject(imageDataUrl = "") {
   }
 }
 
+// AI Studio's free tier answers text only, so a single picture would cost money even while
+// every word is free. While the text selector holds the free model and no free image provider
+// exists, PigPen creates no images at all and leaves each slot empty with its prompt ready for
+// the author. Cloudflare's free daily pool lifts that contract: once the proxy advertises it,
+// images are generated again without billing anyone.
+function manualImageMode(modelId = null) {
+  const freeImageModel = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.freeImageModel || "");
+  if (freeImageModel) return false;
+  const freeModel = normalizeGeminiCatalogModelId(elements.objetivoModeloSelect?.dataset.freeTierModel || "");
+  if (!freeModel) return false;
+  const selected = normalizeGeminiCatalogModelId(modelId ?? elements.objetivoModeloSelect?.value ?? TEXT_MODEL_DEFAULT);
+  return selected === freeModel;
+}
+
+const MANUAL_IMAGE_HINT = "Sin un proveedor de imágenes gratuito activo, el plan gratuito no crea imágenes para no generar cargos. Cada sala conserva su «Prompt de la imagen»: crea la imagen con él y súbela con «Sustituir imagen».";
+
+function blockManualImageAction() {
+  setStatus(MANUAL_IMAGE_HINT, "warning");
+  return true;
+}
+
+// A slot the author must fill by hand is useless without its description, so the generator's
+// own scene line is kept in the editable prompt field whenever the author left it empty.
+function rememberManualImagePrompt(target = {}, prompt = "") {
+  if (!target || normalizeString(target.imagen_prompt, "")) return;
+  target.imagen_prompt = normalizeString(prompt, "");
+}
+
 async function generateValidatedImage(prompt, imageOptions) {
   const image = await generateGeminiImage(prompt, imageOptions);
   return optimizeGeneratedImageForProject(image);
@@ -8509,6 +9040,7 @@ async function ensureRewardImage(project, context) {
 }
 async function retryRewardImage() {
   if(!state.project||state.isGenerating||state.isLoading)return;
+  if (manualImageMode()) return blockManualImageAction();
   const project=state.project;state.isGenerating=true;syncActionButtons();
   try{await ensureRewardImage(project,getFormData());setStatus('Imagen de recompensa lista.','success');}
   catch(error){setStatus('Recompensa visual pendiente: '+error.message,'error',{actionLabel:'Reintentar imagen',onAction:retryRewardImage});}
@@ -8530,6 +9062,7 @@ async function generateEndingImage(project, context) {
 
 async function regenerateEndingImageOnly() {
   if (!state.project || isGenerationBusy() || state.isLoading) return;
+  if (manualImageMode()) return blockManualImageAction();
   const project = state.project;
   state.isGenerating = true;
   renderGeneralContentEditor();
@@ -8559,6 +9092,7 @@ async function regenerateCoverImageOnly() {
     if (!state.project) setStatus("Genera un escape room antes de regenerar la imagen de inicio.", "warning");
     return;
   }
+  if (manualImageMode()) return blockManualImageAction();
   const formData = getFormData();
   state.isGenerating = true;
   renderGeneralContentEditor();
@@ -8655,6 +9189,7 @@ async function regenerateQuestionImageOnly(missionIndex, questionIndex) {
     setStatus("Selecciona una pregunta válida para regenerar su imagen.", "warning");
     return;
   }
+  if (manualImageMode()) return blockManualImageAction();
 
   const formData = getFormData();
   const terms = getPresentationTerminology();
@@ -8727,6 +9262,7 @@ async function regenerateMissionImageOnly(missionIndex) {
     setStatus("Selecciona una sala válida para regenerar su imagen.", "warning");
     return;
   }
+  if (manualImageMode()) return blockManualImageAction();
 
   const formData = getFormData();
   const terms = getPresentationTerminology();
@@ -8863,8 +9399,10 @@ async function generateMissionImages(project, context, onProgress, options = {})
   ]));
   let generated = 0;
   let failed = 0;
+  let deferred = 0;
   let firstError = null;
   let total = 0;
+  const manual = manualImageMode(context?.modelo);
 
   // Calcular total de imágenes a generar de antemano
   for (const [index, mission] of project.misiones.entries()) {
@@ -8893,17 +9431,21 @@ async function generateMissionImages(project, context, onProgress, options = {})
     }
     if (scope.includeMissionImage && (scope.forceMissionImages || !normalizeString(mission.imagen || (mission.media?.tipo === "imagen" ? mission.media?.url : ""), ""))) {
       processed += 1;
+      const missionPrompt = buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index });
       const progress = {
         type: "mission-image",
         missionIndex: index,
-        title: `Creando imagen de ${terms.itemSingular} ${index + 1}`,
+        title: manual ? `Dejando lista la imagen de la ${terms.itemSingular} ${index + 1}` : `Creando imagen de ${terms.itemSingular} ${index + 1}`,
         detail: normalizeString(mission.titulo, `${terms.itemSingularTitle} ${index + 1}`)
       };
       updatePreviewGenerationProgress({ ...progress, current: processed, total });
       if (onProgress) onProgress(processed, total, progress);
 
-      try {
-        const generatedImage = await generateValidatedImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), {
+      if (manual) {
+        rememberManualImagePrompt(mission, missionPrompt);
+        deferred += 1;
+      } else try {
+        const generatedImage = await generateValidatedImage(missionPrompt, {
           aspectRatio: "4:3",
           imageSize: "1K",
           model: context?.modeloImagen
@@ -8941,18 +9483,22 @@ async function generateMissionImages(project, context, onProgress, options = {})
       if (!needsImage) continue;
 
       processed += 1;
+      const questionPrompt = buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex });
       const progress = {
         type: "question-image",
         missionIndex: index,
         questionIndex,
-        title: `Creando imagen de la pregunta ${questionIndex + 1}`,
+        title: manual ? `Dejando lista la imagen de la pregunta ${questionIndex + 1}` : `Creando imagen de la pregunta ${questionIndex + 1}`,
         detail: `${terms.itemSingularTitle} ${index + 1} · ${normalizeString(question.titulo, `Pregunta ${questionIndex + 1}`)}`
       };
       updatePreviewGenerationProgress({ ...progress, current: processed, total });
       if (onProgress) onProgress(processed, total, progress);
 
-      try {
-        const generatedImage = await generateValidatedImage(buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex }), {
+      if (manual) {
+        rememberManualImagePrompt(question, questionPrompt);
+        deferred += 1;
+      } else try {
+        const generatedImage = await generateValidatedImage(questionPrompt, {
           aspectRatio: "4:3",
           imageSize: "1K",
           model: context?.modeloImagen
@@ -8982,7 +9528,7 @@ async function generateMissionImages(project, context, onProgress, options = {})
       await yieldToBrowser();
     }
   }
-  return { generated, failed, total, error: firstError };
+  return { generated, failed, deferred, total, error: firstError };
 }
 
 function getQuestionComparisonText(question = {}) {
@@ -10866,6 +11412,86 @@ function addMission() {
   setStatus(`${terms.itemSingularTitle} añadida al editor.`, "info");
 }
 
+function createManualTemplateProject(roomCount, formData) {
+  const locale = normalizeGameLocale(formData.idioma || "es-419");
+  const questionsPerRoom = Math.max(1, Number(formData.preguntasPorSala) || 1);
+  const plan = buildManualTemplatePlan({
+    rooms: roomCount,
+    questionsPerRoom,
+    questionTypes: experience.config(formData.experience_config).question_types,
+    seed: `${Date.now()}-${Math.random()}`
+  });
+  const project = createProjectFromForm(roomCount);
+  project.misiones.forEach((mission, index) => {
+    mission.preguntas = buildManualTemplateQuestions({ roomIndex: index, types: plan[index] || [], locale });
+  });
+  return withDefaultRoutes(project);
+}
+
+function getNextTopicAcademicNumber() {
+  const numbers = state.topics
+    .map((topic) => Number(topic.academicNumber))
+    .filter((number) => Number.isInteger(number) && number >= 1);
+  if (!numbers.length) return getCurrentAcademicNumber();
+  return Math.min(9, Math.max(...numbers) + 1);
+}
+
+async function createManualTemplateRoom() {
+  if (state.isLoading || isGenerationBusy()) return;
+  if (!state.currentUser?.uid) {
+    setStatus("Inicia sesión para crear la plantilla: sus imágenes se guardan en Storage.", "warning");
+    return;
+  }
+  if (state.activeSessionMeta?.status === "published") {
+    setStatus("Mueve la sesión a Borrador antes de crear una plantilla.", "warning");
+    return;
+  }
+
+  if (!(await experienceModal.open())) return;
+  const formData = getFormData();
+  const terms = getPresentationTerminology(formData.modoPresentacion);
+  if (!Number.isInteger(formData.misiones) || formData.misiones < 1 || formData.misiones > 8) {
+    setStatus(`El número de ${terms.itemPlural} debe estar entre 1 y 8.`, "warning");
+    document.getElementById("numMisionesInput")?.focus();
+    return;
+  }
+  if (!Number.isInteger(formData.preguntasPorSala) || formData.preguntasPorSala < 1) {
+    setStatus(`Las preguntas por ${terms.itemSingular} deben ser un número entero mayor que cero.`, "warning");
+    document.getElementById("preguntasPorSalaInput")?.focus();
+    return;
+  }
+  if (!experience.config(formData.experience_config).question_types.length) {
+    setStatus("Selecciona al menos un tipo de pregunta en la configuración.", "warning");
+    return;
+  }
+
+  try {
+    await flushPendingTopicSave();
+    const sessionId = state.activeSessionId || await ensureActiveRemoteSession();
+    if (!sessionId) throw new Error("No se pudo crear o recuperar la sesión activa.");
+    const template = createManualTemplateProject(formData.misiones, formData);
+    const academicNumber = getNextTopicAcademicNumber();
+    const topic = await createTopicDocument(sessionId, buildTopicPayload({
+      academicNumber,
+      project: template,
+      formState: buildInheritedTopicFormState(academicNumber),
+      title: normalizeString(template.titulo, "") || `Plantilla ${academicNumber}`
+    }));
+    state.activeTopicId = topic.id;
+    await loadTopicIntoEditor(topic, { updateParent: true });
+    state.selectedMissionId = state.project?.misiones[0]?.id || null;
+    if (state.selectedMissionId) state.expandedMissionIds.add(state.selectedMissionId);
+    setInspectorTab("rooms");
+    renderMissionEditor();
+    renderOutputsNow();
+    openStudioPanel("inspector", elements.btnCrearPlantilla);
+    setStatus(`Plantilla creada en el tema ${academicNumber}. Escribe los textos y elige las imágenes.`, "success");
+  } catch (error) {
+    console.error("No se pudo crear la plantilla:", error);
+    setStatus(`No se pudo crear la plantilla: ${error?.message || "error inesperado"}`, "bad");
+  }
+}
+
 function deleteMission(index) {
   if (!state.project) return;
   const deletingSelected = state.project.misiones[index]?.id === state.selectedMissionId;
@@ -11078,7 +11704,16 @@ function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
   if (fieldPath === "tipo_interaccion") {
     if (!experience.config(experienceConfig).question_types.includes(value)) { setStatus('Activa ese tipo en Preguntas y recompensas antes de usarlo.', 'warning'); renderMissionEditor(); return; }
     question.tipo_interaccion = value;
-    if (experience.get(value)) { question.interaction_data = null; question.respuesta_correcta = ''; question.respuestas_aceptadas = []; setStatus('Regenera esta pregunta para crear su nueva interacción.', 'info'); }
+    if (experience.get(value)) {
+      question.interaction_data = buildManualTemplateInteractionData(
+        value,
+        state.project?.idioma || "es-419",
+        String(question.id || value).split("").reduce((sum, character) => sum * 31 + character.charCodeAt(0), 0) >>> 0
+      );
+      question.respuesta_correcta = '';
+      question.respuestas_aceptadas = [];
+      setStatus('Fichas y destinos creados: escribe su contenido en el editor de la pregunta.', 'info');
+    }
     question.interaction_contract_version = ['relacion_columnas', 'completar_espacio'].includes(value) ? 2 : 1;
     if (value === 'completar_espacio') {
       question.parejas = question.parejas?.length ? question.parejas.map((pair, index) => ({ ...pair, izquierda: String(index + 1) })) : [];
@@ -12271,6 +12906,9 @@ async function ensureExportQuestionMedia() {
       if (question.media?.tipo && question.media.tipo !== "imagen") {
         throw new Error(`${location}: añade el recurso de ${question.media.tipo} en el editor de Multimedia antes de exportar`);
       }
+      if (!normalizeString(question.imagen_prompt, "").trim()) {
+        throw new Error(`${location}: elige la imagen con «Sustituir imagen» en el editor antes de exportar`);
+      }
       updateZipExportProgress(`${location}: generando la imagen multimedia faltante…`);
       const result = await generateMissionImages(project, context, null, {
         missionIndexes: [missionIndex],
@@ -12444,6 +13082,9 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
   if (experienceConfirmationRequired && !(await experienceModal.open())) return null;
   event?.preventDefault?.();
   let generationCompleted = false;
+  let savingsCompleted = false;
+  let savingsClaimed = false;
+  const savingsTopicId = `${state.activeSessionId || ""}_${state.activeTopicId || ""}`;
   let objectivePreflightComplete = false;
   if (isGenerationBusy()) {
     setStatus("Ya hay una generación en curso. Espera a que termine antes de iniciar otra.", "info");
@@ -12482,6 +13123,16 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
     setStatus(`Las preguntas por ${terms.itemSingular} deben ser un número entero mayor que cero.`, "warning");
     document.getElementById("preguntasPorSalaInput")?.focus();
     return;
+  }
+
+  if (state.activeSessionId && state.activeTopicId) {
+    try {
+      await claimSavings("pigpenTopics", savingsTopicId);
+      savingsClaimed = true;
+    } catch (error) {
+      setStatus(`No se puede iniciar otro tema hoy: ${error.message}`, "warning");
+      return false;
+    }
   }
 
   elements.btnGenerar.classList.add("is-generating");
@@ -12678,9 +13329,20 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
     // las imágenes no se pierdan al terminar, cerrar o recargar silenciosamente.
     try {
       const imageStorageContext = await resolveGeneratedImageStorageContext();
-      setStatus(`Contenido listo: "${project.titulo}" · generando imagen de portada…`, "info");
+      const manualImages = manualImageMode(formData.modelo);
+      setStatus(
+        manualImages
+          ? `Contenido listo: "${project.titulo}" · el plan gratuito deja las imágenes para crearlas a mano…`
+          : `Contenido listo: "${project.titulo}" · generando imagen de portada…`,
+        "info"
+      );
       const needsCoverImage = !project.backgroundImage;
-      const generatedCoverImage = needsCoverImage ? await generateCoverImage(project, formData) : "";
+      // The cover keeps its prompt in the general editor, so an author who returns to a paid
+      // model — or writes their own scene — still finds the description here.
+      if (manualImages && needsCoverImage && !normalizeString(project.backgroundImagePrompt || project.background_image_prompt, "")) {
+        project.backgroundImagePrompt = buildCoverImagePromptSeed({ ...project, ...formData });
+      }
+      const generatedCoverImage = needsCoverImage && !manualImages ? await generateCoverImage(project, formData) : "";
       const coverImage = project.backgroundImage || await storeGeneratedImage(
         generatedCoverImage,
         `cover_${Date.now()}.webp`,
@@ -12689,7 +13351,7 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
       if (coverImage) project.backgroundImage = coverImage;
 
       const needsEndingImage = project.dedicatedEndingImage && !project.endingImage;
-      if (needsEndingImage) {
+      if (needsEndingImage && !manualImages) {
         setStatus(`Contenido listo: "${project.titulo}" · generando imagen de finalización…`, "info");
         try {
           const generatedEnding = await generateEndingImage(project, formData);
@@ -12701,9 +13363,12 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
       }
 
       let rewardImageError=null;
-      try{await ensureRewardImage(project,formData);}catch(error){rewardImageError=error;console.warn('Imagen de recompensa pendiente',error);}
+      const needsRewardImage = manualImages && formData.experience_config?.primary_reward === 'imagen' && !project.reward_plan?.image;
+      try{if(!manualImages)await ensureRewardImage(project,formData);}catch(error){rewardImageError=error;console.warn('Imagen de recompensa pendiente',error);}
       const imageStats = await generateMissionImages(project, formData, (current, total) => {
-        const progressNote = `Generando imágenes de briefings y preguntas (${current}/${total})…`;
+        const progressNote = manualImages
+          ? `Reservando imágenes de briefings y preguntas (${current}/${total})…`
+          : `Generando imágenes de briefings y preguntas (${current}/${total})…`;
         state.generationNote = `${coverImage ? "Portada lista · " : "Portada no disponible · "}${progressNote}`;
         setStatus(`Generando: "${project.titulo}" · ${state.generationNote}`, "info");
       }, { storageContext: imageStorageContext });
@@ -12711,8 +13376,21 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
       const coverRequested = needsCoverImage;
       const totalImages = imageStats.total + (coverRequested ? 1 : 0) + (needsEndingImage ? 1 : 0);
       const generatedImages = imageStats.generated + (coverRequested && coverImage ? 1 : 0) + (needsEndingImage && project.endingImage ? 1 : 0);
-      const failedImages = imageStats.failed + (coverRequested && !coverImage ? 1 : 0) + (needsEndingImage && !project.endingImage ? 1 : 0);
-      state.generationNote = `${generatedImages}/${totalImages} imágenes listas${failedImages ? ` · ${failedImages} sin imagen` : ""}`;
+      // A slot left for the author is not a failed image: nothing was asked, nothing was charged.
+      const failedImages = imageStats.failed
+        + (coverRequested && !manualImages && !coverImage ? 1 : 0)
+        + (needsEndingImage && !manualImages && !project.endingImage ? 1 : 0);
+      const deferredImages = imageStats.deferred
+        + (manualImages && coverRequested ? 1 : 0)
+        + (manualImages && needsEndingImage ? 1 : 0)
+        + (needsRewardImage ? 1 : 0);
+      if (savingsClaimed && failedImages === 0 && !rewardImageError) {
+        await completeSavings("pigpenTopics", savingsTopicId);
+        savingsCompleted = true;
+      }
+      state.generationNote = manualImages
+        ? `${deferredImages} imágenes para crear a mano · usa el «Prompt de la imagen» de cada sala${needsRewardImage ? " y sube la imagen de recompensa en el panel de experiencia" : ""}`
+        : `${generatedImages}/${totalImages} imágenes listas${failedImages ? ` · ${failedImages} sin imagen` : ""}`;
       state.isGenerating = false;
       state.isGeneratingImagesInBackground = false;
       presentGeneratedEscapeRoom();
@@ -12766,6 +13444,7 @@ async function generateEscapeRoomFromBrief(event = null, { throwOnError = false 
     if (throwOnError) throw error;
     return false;
   } finally {
+    if (savingsClaimed && !savingsCompleted) await releaseSavings("pigpenTopics", savingsTopicId).catch(() => {});
     state.isGenerating = false;
     state.isGeneratingImagesInBackground = false;
     elements.btnGenerar.classList.remove("is-generating");
@@ -14454,9 +15133,31 @@ function materializeFixedRoomContent(document, response, fullSchema, template) {
   return composePedagogicalRoom(hydrateFilteredRoomResponse(value,fullSchema,template), template.question_plans);
 }
 
-function buildFixedRoomTextPrompt(context, sourceContract, foundation, room, template, document) {
+function extractCleanValidationIssues(err) {
+  const rawText = String(err?.cause?.message || err?.message || '');
+  const matchLines = rawText.match(/pregunta \d+:[^·\n\r]+/g);
+  if (matchLines && matchLines.length) {
+    return matchLines.map(m => m.trim());
+  }
+  const stripped = rawText
+    .replace(/^No se pudo obtener contenido válido[^:]*:\s*/i, '')
+    .replace(/Las salas ya guardadas se conservan\./gi, '')
+    .trim();
+  return stripped ? [stripped] : ['Evita repetir conceptos, casos o soluciones de salas previas.'];
+}
+
+function buildFixedRoomTextPrompt(context, sourceContract, foundation, room, template, document, { retryAttempt = 0, retryIssues = [] } = {}) {
   const types=[...new Set([...template.question_plans, ...(template.reserve_opportunity ? [template.reserve_opportunity] : [])].map(slot=>slot.interaction))];
   const {question_plans,reserve_opportunity,...curriculum}=room;
+  const currentRoomNum = Number(room.room_number) || 1;
+  const previousRooms = (foundation.rooms || []).filter((r, idx) => (Number(r.room_number) || 0) < currentRoomNum || idx < currentRoomNum - 1);
+  const previousPlans = previousRooms.flatMap(r => r.question_plans || []);
+  const previousSolutions = [...new Set(previousPlans.map(p => String(p.answer_target || '').trim()).filter(Boolean))];
+  const previousKnowledge = [...new Set(previousPlans.map(p => String(p.knowledge || '').trim()).filter(Boolean))];
+  const usedCasesFormatted = previousPlans.length
+    ? previousPlans.map((p, idx) => `• [${p.plan_id || `r?_p${idx+1}`}] Concepto evaluado (knowledge): "${p.knowledge || ''}" | Caso/Enunciado (application): "${p.application || ''}" | Solución (answer_target): "${p.answer_target || ''}"`).join('\n')
+    : 'Ninguno (primera sala)';
+
   return [
     'Redacta contenido curricular para una sala cuya estructura ya está construida por PigPen. No generes ni modifiques JSON.',
     QUESTION_BRIEF_GROUNDING,PEDAGOGY_INSTRUCTION,BRIEFING_NARRATIVE_INSTRUCTION,MECHANIC_COHERENCE_INSTRUCTION,selectedExperienceInstruction(context),buildDifficultyInstruction(context),resolvePromptLanguageDirective(context.idioma).directive,
@@ -14469,8 +15170,13 @@ function buildFixedRoomTextPrompt(context, sourceContract, foundation, room, tem
     `NARRATIVA ELEGIDA: ${context.narrativa || 'la definida en el proyecto'}. ESCENARIO: ${foundation.project_copy?.setting || ''}`,
     `PLANES INMUTABLES: ${JSON.stringify(template)}`,
     `TIPOS SELECCIONADOS: ${types.map(type=>experience.get(type) ? experienceAuthoringInstruction(type,{filteredTransport:true}) : buildQuestionAuthoringTemplate(type)).join('\n')}`,
-    `CASOS YA USADOS (PROHIBIDO REPETIR O REUTILIZAR): ${JSON.stringify((foundation.rooms||[]).filter(r=>r.room_number<room.room_number).flatMap(r=>(r.question_plans||[]).map(({knowledge,application,answer_target})=>({knowledge,application,answer_target}))))}`,
-    'PROHIBICIÓN ESTRICTA DE REPETICIÓN ENTRE SALAS: La lista CASOS YA USADOS contiene conceptos (knowledge), casos o enunciados (application, case_data) y soluciones (answer_target) de las salas previas. Está estrictamente prohibido reutilizar, copiar o parafrasear cualquiera de estos elementos en esta sala. Cada pregunta de esta sala debe ser completamente original y evaluar conceptos, situaciones, ejemplos, relaciones y soluciones inéditos y no evaluados anteriormente.',
+    `CASOS YA USADOS EN SALAS ANTERIORES:\n${usedCasesFormatted}`,
+    `SOLUCIONES YA UTILIZADAS (ESTRICTAMENTE PROHIBIDO REPETIR O USAR COMO RESPUESTA EN ESTA SALA):\n${previousSolutions.length ? previousSolutions.map(s => `• "${s}"`).join(', ') : 'Ninguna'}`,
+    `CONCEPTOS YA EVALUADOS EN SALAS ANTERIORES (PROHIBIDO REEVALUAR EN ESTA SALA):\n${previousKnowledge.length ? previousKnowledge.map(k => `• "${k}"`).join('\n') : 'Ninguno'}`,
+    'PROHIBICIÓN ESTRICTA DE REPETICIÓN ENTRE SALAS: La lista anterior contiene conceptos (knowledge), casos o enunciados (application, case_data) y soluciones (answer_target) de las salas previas. Está TERMINANTEMENTE PROHIBIDO reutilizar, copiar o parafrasear cualquiera de estos elementos en esta sala. Cada pregunta de esta sala debe ser completamente original y evaluar conceptos, situaciones, ejemplos, relaciones y soluciones inéditos y no evaluados anteriormente. Ninguna solución (answer_target o respuesta_correcta) de esta sala puede coincidir con las soluciones ya utilizadas.',
+    ...(retryIssues.length ? [
+      `⚠️ CORRECCIÓN OBLIGATORIA POR REPETICIÓN O ERROR DETECTADO EN INTENTO ANTERIOR:\n${retryIssues.map(issue => `• ${issue}`).join('\n')}\nDebes cambiar completamente esos conceptos, enunciados, casos y soluciones por contenido inédito.`
+    ] : []),
     ...(sourceContract?.edited_plan_text?[`ESPECIFICACIONES DEL AUTOR: ${sourceContract.edited_plan_text}`]:[]),
     'Application será el enunciado público autosuficiente: datos concretos y una pregunta sin revelar la solución. PigPen lo copia a reto e instruction_outline; copia pista a hint_strategy, feedback correcto a feedback_strategy y reasoning_evidence a evidence. No redactes esas copias. Cada campo de reasoning_steps es un paso distinto. case_data contiene los datos necesarios y application los incorpora literalmente una sola vez, sin una segunda paráfrasis del mismo dato. Evita prefijos administrativos: escribe los hechos como parte de la situación. Usa casos diferentes entre preguntas; un cambio de interfaz no cuenta como caso nuevo. En synthesis combina todos los conocimientos asignados. Evidence y reasoning_evidence justifican la solución.',
     'mission.contexto es la introducción a la lectura. PigPen añadirá knowledge y teaching_example de cada pregunta al briefing visible; por eso esos campos deben enseñar en lenguaje del alumno y no contener metadatos. No los dupliques en mission.contexto. El reto y las pistas no revelan la respuesta; sólo el feedback correcto explica la solución. No incluyas fragmentos del código final ni anuncios de recompensas: PigPen controla su entrega.',
@@ -14945,17 +15651,28 @@ async function compileObjectiveBlueprintFromTemplate(context = {}, sourceContrac
     let combined = null;
     let filled = null;
     let remainingRepeats = [];
-    for (let roomAttempt = 0; roomAttempt < 2; roomAttempt += 1) {
-      const roomText = await requestQualityJson(
-        buildFixedRoomTextPrompt(context, sourceContract, foundation, room, template, fixedContent),
-        context, 0.32, { singleAttempt: true, minimalPayload: true, textOnly: true, expectedContent: fixedContent, validateContent: text => {
-          const preview = materializeFixedRoomContent(fixedContent, text, combinedSchema, template);
-          const issues = template.question_plans.flatMap((slot, index) => expressionRiddleIssues(preview.mission.preguntas[index], { ...preview.plans[slot.plan_id], interaction: slot.interaction }));
-          const previewPlans = template.question_plans.map((slot) => mergeFilledQuestionPlanWithTemplate(preview.plans[slot.plan_id], slot));
-          const repeats = findRepeatedQuestionPlans(previewPlans, previousPlans);
-          if (repeats.length) issues.push(...repeats.map(issue => `pregunta ${issue.index + 1}: ${issue.message}`));
-          return issues;
-        } });
+    let retryIssues = [];
+    for (let roomAttempt = 0; roomAttempt < 3; roomAttempt += 1) {
+      let roomText;
+      try {
+        roomText = await requestQualityJson(
+          buildFixedRoomTextPrompt(context, sourceContract, foundation, room, template, fixedContent, { retryAttempt: roomAttempt, retryIssues }),
+          context, 0.32, { singleAttempt: true, minimalPayload: true, textOnly: true, expectedContent: fixedContent, validateContent: text => {
+            const preview = materializeFixedRoomContent(fixedContent, text, combinedSchema, template);
+            const issues = template.question_plans.flatMap((slot, index) => expressionRiddleIssues(preview.mission.preguntas[index], { ...preview.plans[slot.plan_id], interaction: slot.interaction }));
+            const previewPlans = template.question_plans.map((slot) => mergeFilledQuestionPlanWithTemplate(preview.plans[slot.plan_id], slot));
+            const repeats = findRepeatedQuestionPlans(previewPlans, previousPlans);
+            if (repeats.length) issues.push(...repeats.map(issue => `pregunta ${issue.index + 1}: ${issue.message}`));
+            return issues;
+          } });
+      } catch (err) {
+        if (roomAttempt < 2 && (err?.code === 'pigpen_invalid_text_content' || err?.message?.includes('Repite') || err?.message?.includes('repetida') || err?.cause?.message?.includes('Repite'))) {
+          retryIssues = extractCleanValidationIssues(err);
+          setStatus(`Detectadas preguntas o soluciones repetidas en la sala ${roomIndex + 1}. Regenerando con conceptos alternativos (intento ${roomAttempt + 2} de 3)…`, "info");
+          continue;
+        }
+        throw err;
+      }
       combined = materializeFixedRoomContent(fixedContent, roomText, combinedSchema, template);
       const combinedIssues = validateFixedObjectiveFill(combined, combinedSchema, `Sala ${roomIndex + 1}`);
       if (combinedIssues.length) throw new Error(combinedIssues.join(' · '));
@@ -14977,8 +15694,9 @@ async function compileObjectiveBlueprintFromTemplate(context = {}, sourceContrac
       ));
       remainingRepeats = findRepeatedQuestionPlans(room.question_plans, previousPlans);
       if (!remainingRepeats.length) break;
-      if (roomAttempt === 0) {
-        setStatus(`Detectadas preguntas repetidas en la sala ${roomIndex + 1}. Regenerando con conceptos alternativos…`, "info");
+      if (roomAttempt < 2) {
+        retryIssues = remainingRepeats.map((issue) => `pregunta ${issue.index + 1}: ${issue.message}`);
+        setStatus(`Detectadas preguntas o soluciones repetidas en la sala ${roomIndex + 1}. Regenerando con conceptos alternativos (intento ${roomAttempt + 2} de 3)…`, "info");
       }
     }
     if (remainingRepeats.length) throw new Error(`Sala ${roomIndex + 1}: ${remainingRepeats.map((issue) => `pregunta ${issue.index + 1}: ${issue.message}`).join(" · ")}`);
@@ -15241,8 +15959,8 @@ elements.btnLimpiar.addEventListener("click", () => {
     document.getElementById("ritmoSelect").value = "progresivo";
     document.getElementById("dificultadSelect").value = "equilibrada";
     document.getElementById("pistasSelect").value = "moderadas";
-    if (elements.objetivoModeloSelect) elements.objetivoModeloSelect.value = TEXT_MODEL_DEFAULT;
-    if (elements.imagenModeloSelect) elements.imagenModeloSelect.value = IMAGE_MODEL_DEFAULT;
+    resetModelSelection(elements.objetivoModeloSelect, TEXT_MODEL_DEFAULT);
+    resetModelSelection(elements.imagenModeloSelect, IMAGE_MODEL_DEFAULT);
     state.project = null;
     state.selectedMissionId = null;
     state.selectedQuestionId = null;
@@ -15366,7 +16084,9 @@ if (elements.form) {
 [elements.objetivoModeloSelect, elements.imagenModeloSelect].forEach((select) => {
   select?.addEventListener("change", () => {
     delete select.dataset.pendingModelValue;
+    select.dataset.manualModelSelection = "true";
     saveFormState();
+    scheduleSessionSave();
   });
 });
 elements.modelConfigModal?.addEventListener("show.bs.modal", () => {
@@ -15405,6 +16125,7 @@ async function applyImportedSheetRow(row = {}) {
   saveFormState(); syncActionButtons(); scheduleSessionSave(); return count;
 }
 experienceModal = mountExperienceModal({
+  presetStore,
   getConfig: () => experienceConfig,
   getStructure: () => ({ rooms: Number(document.getElementById("numMisionesInput").value), questionsPerRoom: Number(elements.preguntasPorSalaInput.value) }),
   isBusy: () => state.isGenerating || state.isGeneratingImagesInBackground,
@@ -15424,6 +16145,7 @@ experienceModal = mountExperienceModal({
   }
 });
 document.getElementById('btnExperienceConfig')?.addEventListener('click', () => void experienceModal.open());
+elements.btnCrearPlantilla?.addEventListener("click", () => void createManualTemplateRoom());
 window.PigPenSheetsImport?.init({
   getUser: () => state.currentUser,
   getFormState: serializeFormState,
@@ -15501,3 +16223,4 @@ renderOutputsNow();
 setActiveTab("preview");
 renderSessionList();
 setRemoteSaveState("idle");
+initGamingHudModal();

@@ -56,6 +56,33 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    function savingsEnabled() {
+      return exists(/databases/$(database)/documents/savings_control/global) &&
+        get(/databases/$(database)/documents/savings_control/global).data.level != "off";
+    }
+
+    function hasSavingsPermit(data, category, objectId) {
+      return data.keys().hasAny(["savingsPermit"]) &&
+        data.savingsPermit is string &&
+        exists(/databases/$(database)/documents/savings_permits/$(data.savingsPermit)) &&
+        get(/databases/$(database)/documents/savings_permits/$(data.savingsPermit)).data.ownerId == request.auth.uid &&
+        get(/databases/$(database)/documents/savings_permits/$(data.savingsPermit)).data.category == category &&
+        get(/databases/$(database)/documents/savings_permits/$(data.savingsPermit)).data.objectId == objectId &&
+        get(/databases/$(database)/documents/savings_permits/$(data.savingsPermit)).data.expiresAt > request.time;
+    }
+
+    function isPodcasterVideo(data) {
+      return data.session.get("videoContentType", "") in ["video", "creative", "videopodcast"] ||
+        data.session.get("script", {}).get("videoContentType", "") in ["video", "creative", "videopodcast"] ||
+        data.session.get("podcastStudioUiState", {}).get("composerGenerationMode", "") == "video";
+    }
+
+    match /savings_control/{document=**} { allow read, write: if false; }
+    match /savings_daily_quotas/{document=**} { allow read, write: if false; }
+    match /savings_veo_cooldowns/{document=**} { allow read, write: if false; }
+    match /savings_permits/{document=**} { allow read, write: if false; }
+    match /savings_billing/{document=**} { allow read, write: if false; }
+
     function isEditor() {
       return isAdmin() ||
         hasAnyRole([
@@ -433,8 +460,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() &&
         request.resource.data.ownerId == request.auth.uid &&
-        isPodcasterSessionShape(request.resource.data, sessionId);
+        isPodcasterSessionShape(request.resource.data, sessionId) &&
+        (!savingsEnabled() || hasSavingsPermit(request.resource.data, "podcasterSessions", sessionId));
       allow update: if isSignedIn() &&
+        (!savingsEnabled() ||
+          get(/databases/$(database)/documents/savings_control/global).data.level != "medium" ||
+          isPodcasterVideo(resource.data) || !isPodcasterVideo(request.resource.data) ||
+          hasSavingsPermit(request.resource.data, "videoSessions", sessionId)) &&
         (
           (
             request.resource.data.ownerId == resource.data.ownerId &&
@@ -575,16 +607,27 @@ service cloud.firestore {
     }
 
     match /charlyBrownUnitSessions/{sessionId} {
-      allow read: if isApprovedUser() &&
+      allow read: if (isApprovedUser() || isSallyApprovedUser()) &&
         resource.data.ownerUid == request.auth.uid;
-      allow create: if isSallyApprovedUser() &&
-        request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isApprovedUser() &&
+      allow create: if (isApprovedUser() || isSallyApprovedUser()) &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        (!savingsEnabled() || hasSavingsPermit(request.resource.data, "charlySessions", sessionId));
+      allow update: if (isApprovedUser() || isSallyApprovedUser()) &&
         resource.data.ownerUid == request.auth.uid &&
         request.resource.data.ownerUid == resource.data.ownerUid;
-      allow delete: if isApprovedUser() &&
+      allow delete: if (isApprovedUser() || isSallyApprovedUser()) &&
         resource.data.ownerUid == request.auth.uid;
     }
+
+    match /charlyBrownConfig/{configId} {
+      allow read: if isSignedIn() || isApprovedUser() || isSallyApprovedUser();
+      allow write: if isApprovedUser() || isSallyApprovedUser() || isSignedIn();
+    }
+
+    // Production checkpoints and leases are exclusively server-owned.
+    match /charlyProductionRuns/{document=**} { allow read, write: if false; }
+    match /MarcieProductionRuns/{document=**} { allow read, write: if false; }
+    match /MarcieProductionControl/{document=**} { allow read, write: if false; }
 
     // Reglas para Marcie Blog Editor (sesiones y artículos)
     match /MarcieBlogEditor/{sessionId} {
@@ -597,7 +640,7 @@ service cloud.firestore {
         request.resource.data.ownerId == request.auth.uid ||
         request.resource.data.ownerUid == request.auth.uid ||
         isEditor()
-      );
+      ) && (!savingsEnabled() || hasSavingsPermit(request.resource.data, "marcieSessions", sessionId));
       allow update: if isApprovedUser() && (
         resource.data.ownerId == request.auth.uid ||
         resource.data.ownerUid == request.auth.uid ||
@@ -832,6 +875,52 @@ service cloud.firestore {
       );
 
       allow delete: if isAdmin() || isOwner(uid);
+
+      // Private PigPen preset library; no access inherited from profile reads.
+      match /pigpenExperiencePresets/{presetId} {
+        function validPreset() {
+          let d = request.resource.data;
+          let c = d.config;
+          let s = d.structure;
+          return d.keys().hasAll(['id','name','nameKey','config','structure','version','revision','seeded','createdAt','updatedAt'])
+            && d.keys().hasOnly(['id','name','nameKey','config','structure','version','revision','seeded','createdAt','updatedAt'])
+            && d.id == presetId && presetId.size() <= 100
+            && d.name is string && d.name.size() > 0 && d.name.size() <= 28
+            && d.nameKey is string && d.nameKey.size() > 0 && d.nameKey.size() <= 56
+            && d.version == 1 && d.revision is int && d.revision > 0 && d.seeded is bool
+            && d.createdAt is timestamp && d.updatedAt == request.time
+            && c is map && c.keys().hasAll(['version','question_types','primary_reward','extras','bonus_rule','reward_image_alt'])
+            && c.keys().hasOnly(['version','question_types','primary_reward','extras','bonus_rule','reward_image_alt','reward_image','reward_image_aspect'])
+            && c.version == 1 && c.bonus_rule == 'perfect_room'
+            && c.question_types is list && c.question_types.size() > 0 && c.question_types.size() <= 27
+            && c.question_types.toSet().size() == c.question_types.size()
+            && c.question_types.hasOnly(['texto','opcion_multiple','relacion_columnas','drag_drop','multimedia','verdadero_falso','ordenar_secuencia','completar_espacio','seleccion_multiple','respuesta_justificacion','marcar_evidencia','clasificar_grupos','matriz_deduccion','completar_patron','construir_expresion','construir_solucion','ubicar_escala','corregir_error','predecir_resultado','completar_analogia','seleccionar_contraejemplo','comparar_atributos','completar_diagrama','resolver_restricciones','informacion_suficiente','respuesta_coordenadas','balancear_cantidades'])
+            && c.primary_reward in ['letras','imagen','simbolos','coordenadas','posiciones','patron']
+            && c.extras is list && c.extras.size() <= 5 && c.extras.hasOnly(['descarte','comprobacion','pista','coleccionable','personalizacion'])
+            && c.reward_image_alt is string && c.reward_image_alt.size() <= 500
+            && (!('reward_image' in c) || (c.reward_image is string && c.reward_image.size() <= 350000 && c.reward_image.matches('(data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+|https://[^\\s]+)')))
+            && (!('reward_image_aspect' in c) || (c.reward_image_aspect is number && c.reward_image_aspect > 0))
+            && s is map && s.keys().hasAll(['rooms','questionsPerRoom']) && s.keys().hasOnly(['rooms','questionsPerRoom'])
+            && s.rooms is int && s.rooms >= 1 && s.rooms <= 8
+            && s.questionsPerRoom is int && s.questionsPerRoom >= 1;
+        }
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validPreset() && request.resource.data.revision == 1
+          && request.resource.data.createdAt == request.time
+          && (!request.resource.data.seeded || presetId in ['preset_classic','preset_logic','preset_math','preset_variety']);
+        allow update: if isOwner(uid) && validPreset() && !request.resource.data.seeded
+          && request.resource.data.revision == resource.data.revision + 1
+          && request.resource.data.createdAt == resource.data.createdAt;
+      }
+      match /pigpenExperienceState/{stateId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && stateId == 'library'
+          && request.resource.data.keys().hasAll(['version','initialized','createdAt'])
+          && request.resource.data.keys().hasOnly(['version','initialized','createdAt'])
+          && request.resource.data.version == 1 && request.resource.data.initialized == true
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
 
     }
 

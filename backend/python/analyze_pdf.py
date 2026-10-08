@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
+# Redirect both Python prints and native libraries' writes before importing
+# them. Keep a separate descriptor exclusively for the JSON result.
+RESULT_STREAM = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
+os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+
 import fitz
+
+# MuPDF can report repaired cross-reference tables on stdout. This process's
+# stdout is exclusively the JSON protocol consumed by the Node worker.
+fitz.TOOLS.mupdf_display_warnings(False)
+fitz.TOOLS.mupdf_display_errors(False)
 
 CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
@@ -32,15 +43,19 @@ def main():
         session_payload = Path(args.session_json_file).read_text(encoding="utf-8")
     session = json.loads(session_payload)
     debug_log("session.loaded", session_id=((session or {}).get("id") or ""), title=((session or {}).get("title") or ""))
-    doc = fitz.open(args.input)
-    debug_log("pdf.opened", page_count=len(doc))
-    result = analyze_document(doc, session)
+    with fitz.open(args.input) as doc:
+        debug_log("pdf.opened", page_count=len(doc))
+        result = analyze_document(doc, session)
+    warnings = fitz.TOOLS.mupdf_warnings()
+    if warnings:
+        print(warnings, file=sys.stderr)
     result.setdefault("orthotypographyIssues", [])
     result.setdefault("colorIssues", [])
     stats = result.setdefault("stats", {})
     stats.setdefault("sourceType", "pdf")
     debug_log("done", duration_ms=result["stats"]["durationMs"])
-    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    RESULT_STREAM.write(json.dumps(result, ensure_ascii=False))
+    RESULT_STREAM.flush()
 
 
 if __name__ == "__main__":

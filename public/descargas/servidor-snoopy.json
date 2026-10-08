@@ -1,0 +1,19 @@
+{
+  "name": "Servidor Snoopy",
+  "kind": "app",
+  "appName": "Servidor Snoopy.app",
+  "bundleId": "app.charlybrown.servidorsnoopy",
+  "version": "0.1.0",
+  "codesign": "adhoc",
+  "platform": "macos-apple-silicon",
+  "downloadPath": "/descargas/servidor-snoopy-mac.zip",
+  "requiresDiskGb": 15,
+  "diskGbByTier": {
+    "8gb": 12,
+    "16gb": 15,
+    "grande": 25
+  },
+  "bytes": 1213154,
+  "sha256": "09dd2c7723b2a67d279a3c715b789e3c98f2323a84e632a907c12adfb029ecfc",
+  "builtAt": "2026-10-04T23:53:30.457Z"
+}

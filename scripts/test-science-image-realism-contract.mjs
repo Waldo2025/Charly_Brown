@@ -61,7 +61,8 @@ test("la integración usa el contrato en generación, fallback y cambio de estil
   assert.doesNotMatch(source, /fetch\(imageDataUrl\)/);
   assert.match(source, /Determina qué elemento toca realmente la punta de la flecha principal/);
   assert.match(source, /await alignVisualQuestionToGeneratedImage\(activity, assessment, generatedImageDataUrl\)/);
-  assert.match(source, /analysisVersion: 1/);
+  assert.match(source, /analysisVersion: [1-9]/);
+  assert.match(source, /activity\.imageGenerationContract = ACTIVITY_SCENE_REALISM_CONTRACT/);
   assert.match(source, /const hasVerifiedImage = hasImage\(\) && Number\(visualQuestion\.visual\?\.analysisVersion \|\| 0\) >= 1/);
 });
 

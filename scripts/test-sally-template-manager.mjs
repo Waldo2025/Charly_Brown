@@ -23,7 +23,7 @@ try{
  assert.equal(await page.locator("#sallyUseTemplate").count(),0);assert.equal(await page.locator("#sallyPrepareTemplate").count(),0);assert.equal(await page.evaluate(()=>writes),0);
  await page.fill("#sallyTemplateName","Nota personalizada");await page.fill("#sallyTemplateHtml",'<div style="color:#234;padding:20px;background:#f1f4fb;border-left:4px solid #456"><h3>Nota docente</h3><p>{{contenido}}</p></div><script>parent.injected=true</script>');
  await page.click("#sallyCopyTemplate");await page.waitForFunction(()=>rows.some(t=>t.id==="mine"));assert.equal(await page.evaluate(()=>rows.find(t=>t.id==="shared").name),"Nota del maestro");assert.doesNotMatch(await page.evaluate(()=>rows.find(t=>t.id==="mine").html),/<script>/);assert.equal(await page.locator("#sallySaveTemplate").isEnabled(),true);
- assert.equal(await page.locator("#sallyTemplatePreview").getAttribute("sandbox"),"");assert.equal(await page.evaluate(()=>window.injected),undefined);
+ assert.equal(await page.locator("#sallyTemplatePreview").evaluate(node=>node.tagName),"DIV");assert.equal(await page.evaluate(()=>document.getElementById("sallyTemplatePreview").shadowRoot.querySelector("script")),null);assert.equal(await page.evaluate(()=>window.injected),undefined);
  assert.match(await page.evaluate(()=>rows.find(t=>t.id==="mine").html),/style=/);assert.equal(await page.locator("#sallyTemplateValues").isVisible(),false);
  await page.locator(".sally-template-fields textarea").fill("Revisa los objetivos antes de iniciar la actividad.");
  await page.screenshot({path:"artifacts/sally-template-manager-desktop.png"});

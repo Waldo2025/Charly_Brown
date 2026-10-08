@@ -7,6 +7,15 @@ const { getStorage } = require("firebase-admin/storage");
 const PROJECT_ID = "charly-brown";
 const STORAGE_BUCKET = "charly-brown.firebasestorage.app";
 const REGION = "us-central1";
+const APPROVED_ROLES = new Set([
+  "admin", "administrator", "administrador", "superadmin", "owner", "author", "autor",
+  "editor", "editorial", "developer", "desarrollo", "profe", "profesor", "docente"
+]);
+const GLOBAL_EDITOR_ROLES = new Set([
+  "admin", "administrator", "administrador", "superadmin", "owner", "author", "autor",
+  "editor", "editorial", "developer", "desarrollo"
+]);
+const APPROVED_STATUSES = new Set(["approved", "aprobado", "active", "activo"]);
 const ALLOWED_BROWSER_ORIGINS = new Set([
   "https://charly-brown.web.app",
   "https://charly-brown.firebaseapp.com"
@@ -86,7 +95,14 @@ function installCommonMiddleware(app, { service }) {
       res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,PUT,DELETE,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", [
         "Authorization",
+        "MCP-Protocol-Version",
+        "Mcp-Session-Id",
+        "Last-Event-ID",
         "Content-Type",
+        "MCP-Protocol-Version",
+        "Mcp-Method",
+        "Mcp-Name",
+        "Idempotency-Key",
         "X-Request-Id",
         "X-Session-Id",
         "X-Revision-Id",
@@ -122,17 +138,50 @@ function installErrorHandler(app, { service }) {
       code,
       message: String(error?.message || error)
     }));
-    res.status(status).json({ error: code, requestId: req.requestId || undefined });
+    const body = {
+      error: code,
+      message: String(error?.message || code).slice(0, 1000),
+      requestId: req.requestId || undefined
+    };
+    if (Array.isArray(error?.rejectedVideos)) {
+      body.rejectedVideos = error.rejectedVideos.slice(0, 5).map((item) => ({
+        videoId: String(item?.videoId || "").slice(0, 40),
+        url: String(item?.url || "").slice(0, 300),
+        reason: String(item?.reason || "").slice(0, 500),
+        firstReason: String(item?.firstReason || "").slice(0, 500),
+        fallbackReason: String(item?.fallbackReason || "").slice(0, 500),
+        publicFallbackReason: String(item?.publicFallbackReason || "").slice(0, 500)
+      }));
+    }
+    res.status(status).json(body);
   });
 }
 
 function isPrivilegedRole(role = "") {
-  return ["admin", "administrator", "superadmin", "owner", "editor", "author", "developer", "designer"]
-    .includes(String(role || "").trim().toLowerCase());
+  return APPROVED_ROLES.has(String(role || "").trim().toLowerCase());
 }
 
 function isAdminRole(role = "") {
   return String(role || "").trim() === "admin";
+}
+
+function deriveAccessContext({ claims = {}, profile = {} } = {}) {
+  const role = String(
+    claims.role || profile.role || profile.rol || profile.userRole || ""
+  ).trim().toLowerCase();
+  const status = String(
+    claims.approvalStatus || claims.status || profile.approvalStatus || profile.status || profile.estadoAprobacion || ""
+  ).trim().toLowerCase();
+  const approvedUser = Boolean(
+    APPROVED_STATUSES.has(status) || APPROVED_ROLES.has(role) ||
+    profile.approved === true || profile.aprobado === true
+  );
+  return {
+    role,
+    status,
+    approvedUser,
+    canManageGlobal: GLOBAL_EDITOR_ROLES.has(role)
+  };
 }
 
 async function hasAdminRoleWithProfile(authContext = {}, db = null) {
@@ -155,6 +204,10 @@ module.exports = {
   installErrorHandler,
   isPrivilegedRole,
   isAdminRole,
+  deriveAccessContext,
+  APPROVED_ROLES,
+  GLOBAL_EDITOR_ROLES,
+  APPROVED_STATUSES,
   hasAdminRoleWithProfile,
   isAllowedBrowserOrigin
 };

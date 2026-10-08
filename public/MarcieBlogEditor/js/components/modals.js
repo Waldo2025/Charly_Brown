@@ -2,7 +2,7 @@
  * Gestor de diálogos, modales y popovers estilo Shadcn UI para Marcie Blog Editor
  */
 
-import { downloadStyledDocx } from "/js/word-export.js";
+import { downloadStyledDocx } from "/js/word-export.js?v=20260924r1";
 import {
   hasTitleProposals,
   normalizeAudienceTitleProposals,
@@ -18,7 +18,6 @@ import {
 } from "../services/marcie-vocabulary.js";
 import { analyzeYoutubeVideos } from "../services/marcie-agent-api.js?v=20260922r1";
 
-const MARCIE_OVERLAY_Z_INDEX = "2147483000";
 const MARCIE_AUTOMATED_BRIEF_STORAGE_KEY = "marcie_automated_brief_v1";
 const RESEARCH_REGIONS = [
   ["GLOBAL", "Global / Todas las regiones"],
@@ -54,7 +53,7 @@ function getMarcieOverlayHost() {
 
 function mountMarcieOverlay(element) {
   if (!element) return;
-  element.style.zIndex = MARCIE_OVERLAY_Z_INDEX;
+  element.classList.add("marcie-overlay-top");
   getMarcieOverlayHost().appendChild(element);
 }
 
@@ -135,7 +134,7 @@ export function closeActiveModal() {
   if (existing) existing.marcieClose ? existing.marcieClose() : existing.remove();
 }
 
-export function showSessionCreationChoiceModal() {
+export function showSessionCreationChoiceModal({ reconfigure = false } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -144,10 +143,10 @@ export function showSessionCreationChoiceModal() {
       resolve(value);
     };
     const modal = showModal({
-      title: "Crear una nueva sesión",
+      title: reconfigure ? "Volver a configurar esta sesión" : "Crear una nueva sesión",
       widthClass: "max-w-2xl",
       contentHtml: `
-        <p class="mb-5 text-sm text-slate-600">Elige cómo quieres preparar los artículos.</p>
+        <p class="mb-5 text-sm text-slate-600">${reconfigure ? "Elige cómo volver a preparar los artículos de esta misma sesión." : "Elige cómo quieres preparar los artículos."}</p>
         <div class="marcie-session-choice-grid">
           <button type="button" class="marcie-session-choice" data-session-choice="manual">
             <span class="marcie-session-choice__icon"><i data-lucide="sliders-horizontal"></i></span>
@@ -378,7 +377,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
                 </label>
                 <label class="flex items-center gap-1 font-medium text-slate-600">
                   <span class="text-[11px]">Ventana:</span>
-                  <select id="new-session-period" class="input-field h-7 py-0 text-xs w-28 bg-white shadow-2xs">${[["24h","24 horas"],["7d","7 días"],["1m","1 mes"],["3m","3 meses"],["6m","6 meses"],["12m","12 meses"]].map(([value,label]) => `<option value="${value}" ${value === (initialConfiguration?.researchPeriod || "6m") ? "selected" : ""}>${label}</option>`).join("")}</select>
+                  <select id="new-session-period" class="input-field h-7 py-0 text-xs w-28 bg-white shadow-2xs">${[["24h","24 horas"],["7d","7 días"],["1m","1 mes"],["3m","3 meses"],["6m","6 meses"],["12m","12 meses"],["5y","5 años"]].map(([value,label]) => `<option value="${value}" ${value === (initialConfiguration?.researchPeriod || "6m") ? "selected" : ""}>${label}</option>`).join("")}</select>
                 </label>
               </div>
             </div>
@@ -1519,6 +1518,26 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
           renderSpecifications();
           renderTitleProposals();
           updateTopicUIForCurrentScope();
+
+          if (!isAll) {
+            const orderedAudiences = ALL_AUDIENCE_KEYS.filter((audience) => selectedAudiences.has(audience));
+            const currentIndex = orderedAudiences.indexOf(activeAudienceScope);
+            const candidates = currentIndex >= 0
+              ? [...orderedAudiences.slice(currentIndex + 1), ...orderedAudiences.slice(0, currentIndex)]
+              : orderedAudiences;
+            const nextAudience = candidates.find((audience) => {
+              const proposals = titleProposalsForAudience(titleProposalsByAudience, audience);
+              return (proposals.hooks.length || proposals.contrahooks.length) && !getSelectedTitleForAudience(audience);
+            });
+            if (nextAudience) {
+              setActiveAudience(nextAudience);
+              if (refineStatus) {
+                refineStatus.textContent = `✓ Título asignado para ${audLabel}. Ahora elige el título para ${AUDIENCE_META[nextAudience]?.label || nextAudience}.`;
+              }
+            } else if (refineStatus) {
+              refineStatus.textContent = `✓ Título asignado para ${audLabel}. Todos los públicos seleccionados tienen título.`;
+            }
+          }
         });
       });
     };
@@ -2279,8 +2298,7 @@ export function showToast(message, type = "info") {
   mountMarcieOverlay(toast);
 
   setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateY(10px)";
+    toast.classList.add("is-exiting");
     setTimeout(() => toast.remove(), 300);
   }, 3200);
 }

@@ -1,0 +1,1271 @@
+{
+  "period": {
+    "start": "2026-09-01T05:00:00.000Z",
+    "end": "2026-09-30T16:28:50.340Z",
+    "timezone": "America/Cancun"
+  },
+  "sourceTotals": {
+    "podcaster": 83,
+    "escapeRoomSessions": 73,
+    "marcie": 9,
+    "moodleCourses": 2586,
+    "imageCreatorSessions": 15,
+    "users": 16
+  },
+  "podcaster": {
+    "total": 27,
+    "byUser": {
+      "rmora@asc.education": 17,
+      "wlopez@asc.education": 10
+    },
+    "readyVideoUsageByUser": {
+      "rmora@asc.education": {
+        "videos": 202,
+        "seconds": 1616
+      },
+      "wlopez@asc.education": {
+        "videos": 110,
+        "seconds": 880
+      }
+    },
+    "rows": [
+      {
+        "id": "hLYPCxeqPj0m0wJkakNS",
+        "user": "wlopez@asc.education",
+        "title": "Nueva sesión",
+        "archived": false
+      },
+      {
+        "id": "schroeder_0c61c228b15f426d8e",
+        "user": "wlopez@asc.education",
+        "title": "canción instrumental, con ritmo acerca de la p",
+        "archived": false
+      },
+      {
+        "id": "session_0k1k0dv1",
+        "user": "rmora@asc.education",
+        "title": "Porcentajes y proporciones: relaciones que están en todas partes",
+        "archived": false
+      },
+      {
+        "id": "session_3fj393qy",
+        "user": "rmora@asc.education",
+        "title": "La narrativa contemporánea, Español 2, Bloque 2, Tema 1",
+        "archived": false
+      },
+      {
+        "id": "session_3gp8dair",
+        "user": "wlopez@asc.education",
+        "title": "La entrevista Español 1 bloque 2",
+        "archived": false
+      },
+      {
+        "id": "session_3qy0o5a6",
+        "user": "rmora@asc.education",
+        "title": "Ecuaciones cuadráticas: modelar para encontrar soluciones",
+        "archived": false
+      },
+      {
+        "id": "session_7xj1taha",
+        "user": "rmora@asc.education",
+        "title": "Las obras literarias del Renacimiento",
+        "archived": false
+      },
+      {
+        "id": "session_967o3z99",
+        "user": "rmora@asc.education",
+        "title": "Pendiente y razón de cambio: cómo cambia una recta",
+        "archived": false
+      },
+      {
+        "id": "session_ajc35j2v",
+        "user": "wlopez@asc.education",
+        "title": "Comprender y calcular la probabilidad de eventos aleatorios",
+        "archived": false
+      },
+      {
+        "id": "session_cm186i38",
+        "user": "rmora@asc.education",
+        "title": "Ecuaciones cuadráticas: de la parábola a la solución",
+        "archived": false
+      },
+      {
+        "id": "session_dgcv8avs",
+        "user": "wlopez@asc.education",
+        "title": "¡Mira a tu alrededor! Podemos",
+        "archived": false
+      },
+      {
+        "id": "session_fr49vh6w",
+        "user": "wlopez@asc.education",
+        "title": "La monografía Español 1 Tema 2",
+        "archived": false
+      },
+      {
+        "id": "session_g86a2ez7",
+        "user": "rmora@asc.education",
+        "title": "Sucesiones y expresiones equivalentes: descubre el patrón",
+        "archived": false
+      },
+      {
+        "id": "session_id3xuppb",
+        "user": "rmora@asc.education",
+        "title": "Panel de discusión: argumentar para comprender",
+        "archived": false
+      },
+      {
+        "id": "session_if4k1pmr",
+        "user": "wlopez@asc.education",
+        "title": "leer, analizar, escribir y compartir textos narrativos Español 1 Tema 3",
+        "archived": false
+      },
+      {
+        "id": "session_k6s1v6lb",
+        "user": "rmora@asc.education",
+        "title": "Sistemas de ecuaciones: modelar para resolver",
+        "archived": false
+      },
+      {
+        "id": "session_lfiu63j4",
+        "user": "rmora@asc.education",
+        "title": "Analizar manifestaciones poéticas dentro de un movimiento literario",
+        "archived": false
+      },
+      {
+        "id": "session_lhe58bi9",
+        "user": "rmora@asc.education",
+        "title": "Comprender la función de los textos introductorios",
+        "archived": false
+      },
+      {
+        "id": "session_lkzeji8d",
+        "user": "rmora@asc.education",
+        "title": "Analizar canciones como textos líricos y productos culturales",
+        "archived": false
+      },
+      {
+        "id": "session_mky7z3p5",
+        "user": "wlopez@asc.education",
+        "title": "creación y lectura en voz alta de poemas Español 1 Tema 4",
+        "archived": false
+      },
+      {
+        "id": "session_ruumx9sg",
+        "user": "rmora@asc.education",
+        "title": "Funciones: relaciones que cambian",
+        "archived": false
+      },
+      {
+        "id": "session_uba5k0ip",
+        "user": "rmora@asc.education",
+        "title": "La historieta como forma narrativa, Español 2",
+        "archived": false
+      },
+      {
+        "id": "session_uml4sxmu",
+        "user": "wlopez@asc.education",
+        "title": "La narrativa contemporánea experimenta con",
+        "archived": false
+      },
+      {
+        "id": "session_x6zple76",
+        "user": "rmora@asc.education",
+        "title": "Polígonos: formas, ángulos y estructuras",
+        "archived": false
+      },
+      {
+        "id": "session_ys3mrk9v",
+        "user": "rmora@asc.education",
+        "title": "La lectura dramatizada de una obra de teatro",
+        "archived": false
+      },
+      {
+        "id": "session_zw9r60sw",
+        "user": "rmora@asc.education",
+        "title": "Parábolas: del modelo a la gráfica",
+        "archived": false
+      },
+      {
+        "id": "v8Kl45ENB4xhaPZdN08P",
+        "user": "wlopez@asc.education",
+        "title": "Nueva sesión",
+        "archived": false
+      }
+    ]
+  },
+  "pigpen": {
+    "sessionsCreated": 37,
+    "sessionsByUser": {
+      "wlopez@asc.education": 27,
+      "rmora@asc.education": 10
+    },
+    "escapeRoomsCreated": 74,
+    "byUser": {
+      "rmora@asc.education": 41,
+      "wlopez@asc.education": 33
+    },
+    "byLevel": {
+      "Secundaria": 74
+    },
+    "byGrade": {
+      "Primero": 33,
+      "Tercero": 22,
+      "Segundo": 19
+    },
+    "byTrimester": {
+      "1": 17,
+      "2": 57
+    },
+    "byTopic": {
+      "1": 20,
+      "2": 17,
+      "3": 14,
+      "4": 13,
+      "5": 8,
+      "6": 1,
+      "7": 1
+    },
+    "byFullBreakdown": {
+      "rmora@asc.education | Secundaria | Primero | 2 | 1": 5,
+      "rmora@asc.education | Secundaria | Primero | 2 | 2": 5,
+      "rmora@asc.education | Secundaria | Primero | 2 | 3": 5,
+      "rmora@asc.education | Secundaria | Primero | 2 | 4": 5,
+      "wlopez@asc.education | Secundaria | Primero | 2 | 1": 4,
+      "wlopez@asc.education | Secundaria | Tercero | 2 | 1": 3,
+      "rmora@asc.education | Secundaria | Segundo | 2 | 1": 2,
+      "rmora@asc.education | Secundaria | Segundo | 2 | 2": 2,
+      "rmora@asc.education | Secundaria | Segundo | 2 | 3": 2,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 1": 2,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 2": 2,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 3": 2,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 4": 2,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 5": 2,
+      "wlopez@asc.education | Secundaria | Segundo | 1 | 1": 2,
+      "wlopez@asc.education | Secundaria | Segundo | 2 | 2": 2,
+      "wlopez@asc.education | Secundaria | Tercero | 2 | 2": 2,
+      "rmora@asc.education | Secundaria | Primero | 1 | 4": 1,
+      "rmora@asc.education | Secundaria | Primero | 1 | 5": 1,
+      "rmora@asc.education | Secundaria | Segundo | 2 | 4": 1,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 6": 1,
+      "rmora@asc.education | Secundaria | Tercero | 2 | 7": 1,
+      "wlopez@asc.education | Secundaria | Primero | 1 | 2": 1,
+      "wlopez@asc.education | Secundaria | Primero | 1 | 3": 1,
+      "wlopez@asc.education | Secundaria | Primero | 1 | 4": 1,
+      "wlopez@asc.education | Secundaria | Primero | 1 | 5": 1,
+      "wlopez@asc.education | Secundaria | Primero | 2 | 2": 1,
+      "wlopez@asc.education | Secundaria | Primero | 2 | 3": 1,
+      "wlopez@asc.education | Secundaria | Primero | 2 | 5": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 1 | 2": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 1 | 3": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 1 | 4": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 1 | 5": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 2 | 1": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 2 | 3": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 2 | 4": 1,
+      "wlopez@asc.education | Secundaria | Segundo | 2 | 5": 1,
+      "wlopez@asc.education | Secundaria | Tercero | 1 | 1": 1,
+      "wlopez@asc.education | Secundaria | Tercero | 1 | 2": 1,
+      "wlopez@asc.education | Secundaria | Tercero | 1 | 3": 1,
+      "wlopez@asc.education | Secundaria | Tercero | 1 | 4": 1,
+      "wlopez@asc.education | Secundaria | Tercero | 1 | 5": 1
+    },
+    "rows": [
+      {
+        "id": "rsIefriVIRFFCEmTpmOJ",
+        "sessionId": "0mKpJv6lPLNQpFXAU3WD",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Expedición Geográfica: Atlas de la Tierra"
+      },
+      {
+        "id": "4vGxzQoi1at7w74RFhRF",
+        "sessionId": "3XM82LZhAIyEYRFyEZMu",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "Cronosfera: El Fin del Bipolarismo"
+      },
+      {
+        "id": "L4sm4pgU88JLct8gkKl7",
+        "sessionId": "3XM82LZhAIyEYRFyEZMu",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "La Cumbre de la Paz"
+      },
+      {
+        "id": "UUq5AyhgS0dQNg6dMEHs",
+        "sessionId": "3XM82LZhAIyEYRFyEZMu",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Expedientes de la Guerra Fría"
+      },
+      {
+        "id": "ggciJOtqfGPsKZXY6cJu",
+        "sessionId": "3XM82LZhAIyEYRFyEZMu",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Archivo de la Memoria Global"
+      },
+      {
+        "id": "gLHsjH4950C7irabkZ9i",
+        "sessionId": "3si7dnSX2JuTAWmwffYw",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "La gran olimpiada de los números"
+      },
+      {
+        "id": "STqXOyOB6rsgEoFmndPB",
+        "sessionId": "5y8ch6VPxJUhuKjkBWbo",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "1",
+        "tema": "1",
+        "title": "Operation: Save Every Drop"
+      },
+      {
+        "id": "jky31Jfs2XuMCxfjC4CM",
+        "sessionId": "5y8ch6VPxJUhuKjkBWbo",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "1",
+        "tema": "2",
+        "title": "The Binary Signal Rescue"
+      },
+      {
+        "id": "Li5ydypzYC734LXm6KIv",
+        "sessionId": "65h7a70icwxtNZMigZUG",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Enigma de las Variaciones Demográficas"
+      },
+      {
+        "id": "UCY3INkpLh4ocJWMPOeR",
+        "sessionId": "65h7a70icwxtNZMigZUG",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "El enigma del catastro central"
+      },
+      {
+        "id": "vCzq9dAwkHqg9Z8yVYEz",
+        "sessionId": "65h7a70icwxtNZMigZUG",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "La Gran Olimpiada: El Enigma de los Polígonos"
+      },
+      {
+        "id": "SIVwSkVcvXuWTVCjpQk6",
+        "sessionId": "6pylXnkshUT53w3yqC0g",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "The Living Language Archive"
+      },
+      {
+        "id": "T5uZ1PkfvqJKgF0de4UI",
+        "sessionId": "6pylXnkshUT53w3yqC0g",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Darwin's Selection Vault"
+      },
+      {
+        "id": "oUVyu5ZU0F5LqpzS8rQs",
+        "sessionId": "6pylXnkshUT53w3yqC0g",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "2",
+        "title": "Biome Expedition Grid"
+      },
+      {
+        "id": "3LG1kYWnItSuWOdSvqrb",
+        "sessionId": "AhrED7WSXBUCwrR9UU1p",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Backstage at the Moving-Picture Theater"
+      },
+      {
+        "id": "2IoiLfNR0wrIA5sc4sNS",
+        "sessionId": "CKK2ypeUjRBRSZA7oaEZ",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Nuevo escape room"
+      },
+      {
+        "id": "P1mGYSAlJhBFwqhnbIPb",
+        "sessionId": "Cf6EcoG9L3ojYgOgD391",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "The Three Hidden Studios"
+      },
+      {
+        "id": "yAls75TxHNLHkc95oGzL",
+        "sessionId": "Cf6EcoG9L3ojYgOgD391",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "The Silent Airport Code"
+      },
+      {
+        "id": "4REfcOWlGlxOansy4saS",
+        "sessionId": "DmTb1LPsG7P2NyWoRZvD",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "Leyendas Populares en Escena: El Archivo de las Sombras"
+      },
+      {
+        "id": "QJ102ERzyzo6l62Wlb7o",
+        "sessionId": "DmTb1LPsG7P2NyWoRZvD",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "El Rescate del Archivo Sonoro: Ecos de la Lírica"
+      },
+      {
+        "id": "tS4slwpN6vojTScyQBqM",
+        "sessionId": "DmTb1LPsG7P2NyWoRZvD",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Enigma del Expediente Ceniza"
+      },
+      {
+        "id": "tUjTeR2fKcXi06htE5y1",
+        "sessionId": "DmTb1LPsG7P2NyWoRZvD",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "Rescate en la biblioteca clásica"
+      },
+      {
+        "id": "tfS7JbuUNgNsDWIlaqkL",
+        "sessionId": "Gdoa4rVamJWGQ6bG1VLn",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "1",
+        "tema": "3",
+        "title": "Blackbeard's Coded Manifest"
+      },
+      {
+        "id": "5w2cbaLpO0roG4YTSXQv",
+        "sessionId": "HbblIolNqo6inLQQIKLT",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "The Counterweight Bridge Vault"
+      },
+      {
+        "id": "KqbMTHMmEHUVkhna2xW3",
+        "sessionId": "KRuWEIWUoHkhcxL1tfVQ",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "5",
+        "title": "The Clean-Air Emergency"
+      },
+      {
+        "id": "EsdK7QJwgNod6sXS4Nj9",
+        "sessionId": "KdbRwpfPEJPKZfR3yHMj",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "Expedición Geográfica: Atlas de Biomas y Sostenibilidad"
+      },
+      {
+        "id": "QOuBfE9XWIybuzVGRNHR",
+        "sessionId": "KdbRwpfPEJPKZfR3yHMj",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Expedición Cartográfica: Redes Globales y Territorios"
+      },
+      {
+        "id": "h94Wkh4Pg3CaWygjCYhs",
+        "sessionId": "KdbRwpfPEJPKZfR3yHMj",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Atlas Global de Biomas"
+      },
+      {
+        "id": "jsjqua3dX9xpFhwUDJNc",
+        "sessionId": "KdbRwpfPEJPKZfR3yHMj",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "Expedición Geográfica Mundial: Dinámica Demográfica y Migraciones"
+      },
+      {
+        "id": "0i3gPRyEnGkLA2OZ87iT",
+        "sessionId": "KuzRe5VyHEhJZMNrVZaB",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Enigma de la Probabilidad"
+      },
+      {
+        "id": "GeT2mhACmZafhNIguloH",
+        "sessionId": "KuzRe5VyHEhJZMNrVZaB",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "El Enigma Proporcional"
+      },
+      {
+        "id": "UrrepoHwTX8qmAeo7asd",
+        "sessionId": "KuzRe5VyHEhJZMNrVZaB",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "El Enigma de los Datos Ocultos"
+      },
+      {
+        "id": "xSGn7tbtDpRLUSdqZ7tm",
+        "sessionId": "KuzRe5VyHEhJZMNrVZaB",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "El Enigma Algebraico"
+      },
+      {
+        "id": "a2lS4NEMqWo80B9MOfS7",
+        "sessionId": "NRcFBehGrxfISJcB9EQx",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "4",
+        "title": "Gravity Lab Lockdown"
+      },
+      {
+        "id": "W2qQuPG6R5UH1ElTAwwR",
+        "sessionId": "PfGiyMfYhgkJw3brL56Y",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "La gran olimpiada de los números"
+      },
+      {
+        "id": "TrZyTq1r1DxQFPyU7Ebb",
+        "sessionId": "RZ2jSZvAW7w2CriUoMUM",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "1",
+        "tema": "4",
+        "title": "The Soreq Flow Code"
+      },
+      {
+        "id": "2XVRNUicSCSYYTJamMBb",
+        "sessionId": "RaqUAlg94S6n6jbRAI79",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "2",
+        "title": "The Locked Merchant Port"
+      },
+      {
+        "id": "hHhM7vgqZ2mcgQ1vzhmJ",
+        "sessionId": "RaqUAlg94S6n6jbRAI79",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "1",
+        "title": "The Lost Constellation Console"
+      },
+      {
+        "id": "4Q8APeCUW5ZOiSkXxzn4",
+        "sessionId": "WnOhFqRRM0R9XDj6vaqb",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "4",
+        "title": "Mark Twain's Delayed Invitation"
+      },
+      {
+        "id": "IkVNBtI3MganUzHK88Fy",
+        "sessionId": "WnOhFqRRM0R9XDj6vaqb",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "5",
+        "title": "The Missing Newspaper Campaign"
+      },
+      {
+        "id": "u8554xn3vQOVz9QlkhkV",
+        "sessionId": "WnOhFqRRM0R9XDj6vaqb",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "3",
+        "title": "The Web of Life Rescue"
+      },
+      {
+        "id": "98D3QfXPpzpv3ec6gFEu",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "El Enigma de las Coordenadas Espejo"
+      },
+      {
+        "id": "PBLp4YjUhEjSuVMnweH2",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "La gran olimpiada de los números"
+      },
+      {
+        "id": "RviQE6Bh3sOkUubkqzZc",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "La gran olimpiada de la lógica matemática"
+      },
+      {
+        "id": "XpjOZVTLr1ApPDC5EF23",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Las leyes de la congruencia"
+      },
+      {
+        "id": "ahsqx9tlRHNPOzmJpOIA",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "7",
+        "title": "El Enigma de las Funciones Ocultas"
+      },
+      {
+        "id": "cKJbvB5AVBoDFlgCZ4Vd",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "6",
+        "title": "La trigonometría avanzada"
+      },
+      {
+        "id": "wblkrNVNT7aXOLz7TafP",
+        "sessionId": "XKSRiUysAFRaiWOfLAWT",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "5",
+        "title": "Relaciones geométricas"
+      },
+      {
+        "id": "33hSbCg9j1VgOObJZRHW",
+        "sessionId": "ZTfn8e0UbyldV99MdN8S",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "Misterioso Manuscrito"
+      },
+      {
+        "id": "4RwfUgtwng1TI1rgRDsB",
+        "sessionId": "ZTfn8e0UbyldV99MdN8S",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Enigma del Drama Renacentista"
+      },
+      {
+        "id": "W4ee6Nrec5qilmk6bs9V",
+        "sessionId": "ZTfn8e0UbyldV99MdN8S",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "Biblioteca Clásica"
+      },
+      {
+        "id": "cT5q6UMbIsMrsAU4t3At",
+        "sessionId": "ZTfn8e0UbyldV99MdN8S",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "5",
+        "title": "El Teatro"
+      },
+      {
+        "id": "jqe15QUbMOeyr9eQLulg",
+        "sessionId": "ZTfn8e0UbyldV99MdN8S",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Manuscrito Dramático"
+      },
+      {
+        "id": "8PRhtn6kzg9GZjcW05Rz",
+        "sessionId": "bXoNFkxv3tfidLWBX08Q",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "1",
+        "title": "The Silent Airport Code"
+      },
+      {
+        "id": "TTfQWg4rAEk8is6gOxGc",
+        "sessionId": "dX0xmkkhwLSRwAc9wyZq",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "The Three Hidden Studios"
+      },
+      {
+        "id": "iIVBmDrNP7Mx0KzOHPvo",
+        "sessionId": "eY1rZ5GYvfvRh5dssfqI",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "3",
+        "title": "The Midnight Wall Cipher"
+      },
+      {
+        "id": "QU0TiDuCiU61SGKTPRaT",
+        "sessionId": "fNYjdB6tFNCSRP4L5Gdo",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "1",
+        "tema": "5",
+        "title": "The Steam Factory Shutdown"
+      },
+      {
+        "id": "f0EVpz2rFC2j308A09T2",
+        "sessionId": "jZdJZxTNTzghmptDENrr",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "The Logic Chamber"
+      },
+      {
+        "id": "OXsbqr4MMfq1BimdRWcV",
+        "sessionId": "pOrPMo8S8D9EApVoVFds",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "The Six-Panel Cartoon Archive"
+      },
+      {
+        "id": "9XrhahZNsqMdGLWUtrRD",
+        "sessionId": "pbhKfK7aiuH2AnBIpQWx",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "Laboratorio Genético: El Enigma de la Biodiversidad"
+      },
+      {
+        "id": "MLfUvfmeaCMvToNNEmbi",
+        "sessionId": "pbhKfK7aiuH2AnBIpQWx",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "Ecosfera: Protocolo Biológico"
+      },
+      {
+        "id": "Si635y8PEUAciSOVfhLj",
+        "sessionId": "pbhKfK7aiuH2AnBIpQWx",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "El Archivo Genético Oculto"
+      },
+      {
+        "id": "VliZgue8xQMJqey6qFSs",
+        "sessionId": "pbhKfK7aiuH2AnBIpQWx",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Genes y ADN: Continuidad y Ciclos"
+      },
+      {
+        "id": "IPRCAqBY7KbDDaWih5qS",
+        "sessionId": "qeDjwLZiYiUJmQuYiSex",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Archivo Perdido del Periodista"
+      },
+      {
+        "id": "J596vxEQtuMFHf4JMawe",
+        "sessionId": "quc2PnSVctX4cfAMiRDa",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "The Digestive Chemistry Reactor"
+      },
+      {
+        "id": "MrWhBmeDQp4uL7XrFXlM",
+        "sessionId": "quc2PnSVctX4cfAMiRDa",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "The Zocalo Architecture Cipher"
+      },
+      {
+        "id": "4f7EPbE1FeSle3JwPQf0",
+        "sessionId": "rdCuCw8u0j7C0fX5GbFm",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "3",
+        "title": "Rescate en la Biblioteca"
+      },
+      {
+        "id": "dN75ANMEt2mUYfrNbcR0",
+        "sessionId": "rdCuCw8u0j7C0fX5GbFm",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "1",
+        "title": "El Enigma de la Entrevista Perdida"
+      },
+      {
+        "id": "k669yT82zCATVEfrkbjJ",
+        "sessionId": "rdCuCw8u0j7C0fX5GbFm",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "2",
+        "title": "El Secreto del Manuscrito Perdido"
+      },
+      {
+        "id": "xyeoQIhk8Z8UoLTwXeE8",
+        "sessionId": "rdCuCw8u0j7C0fX5GbFm",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "2",
+        "tema": "4",
+        "title": "Rescate en la Biblioteca Clásica"
+      },
+      {
+        "id": "Grj9Qo45NRiSAI5DVBxa",
+        "sessionId": "tR7TyWmUFKKZIrhPKIe7",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "5",
+        "title": "NYC Ad Agency Mystery: Truth in Advertising"
+      },
+      {
+        "id": "oUOVnKLeJ16dykX9qWwf",
+        "sessionId": "tR7TyWmUFKKZIrhPKIe7",
+        "user": "rmora@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "tema": "4",
+        "title": "Mark Twain's Delayed Invitation"
+      },
+      {
+        "id": "5Kmkuw6Ubts0USZK7z6X",
+        "sessionId": "uCJ1vup7OCvcvz7IRSog",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Segundo",
+        "trimestre": "2",
+        "tema": "5",
+        "title": "The Bioelectric Control Room"
+      },
+      {
+        "id": "Nrp4bohzwB0pz5Znp2iB",
+        "sessionId": "yoskffCRjHlJZmPtYFMS",
+        "user": "wlopez@asc.education",
+        "nivel": "Secundaria",
+        "grado": "Tercero",
+        "trimestre": "1",
+        "tema": "5",
+        "title": "The Empathy Shield"
+      }
+    ]
+  },
+  "marcie": {
+    "sessionsCreated": 8,
+    "articles": 13,
+    "byUser": {
+      "wlopez@asc.education": 10,
+      "auribe@asc.education": 2,
+      "mserrano@asc.education": 1
+    },
+    "rows": [
+      {
+        "id": "0wt2qSe2V4H3cJ2ZBiiB",
+        "user": "wlopez@asc.education",
+        "title": "Cuando el diseño didáctico persigue fantasmas: el dilema de etiquetar cómo aprende cada estudiante",
+        "status": "review_required",
+        "articleCount": 4,
+        "audiences": [
+          "students",
+          "parents",
+          "coordinators",
+          "educators"
+        ]
+      },
+      {
+        "id": "1Mp6MTxPTqznCgz9NL0t",
+        "user": "wlopez@asc.education",
+        "title": "Neurobiología del rechazo verbal y su impacto en la capacidad de aprendizaje",
+        "status": "new",
+        "articleCount": 0,
+        "audiences": []
+      },
+      {
+        "id": "CGgxDK6r0fY07aepFlsn",
+        "user": "auribe@asc.education",
+        "title": "IA como tutor personalizado: el futuro del aprendizaje ya está aquí",
+        "status": "published",
+        "articleCount": 1,
+        "audiences": [
+          "educators"
+        ]
+      },
+      {
+        "id": "GzQ5nIgmZBtY2OCHXNGD",
+        "user": "wlopez@asc.education",
+        "title": "Bases neurobiológicas del diálogo interno y su impacto en la autorregulación del estudiante",
+        "status": "researching",
+        "articleCount": 2,
+        "audiences": [
+          "parents",
+          "educators"
+        ]
+      },
+      {
+        "id": "VQ9F0qIxvx9J8Cg6F1Si",
+        "user": "auribe@asc.education",
+        "title": "neuroplasticidad en diversas etapas de la vida",
+        "status": "review_required",
+        "articleCount": 1,
+        "audiences": [
+          "educators"
+        ]
+      },
+      {
+        "id": "fBbJBBtT470jWtwMVVvI",
+        "user": "wlopez@asc.education",
+        "title": "Investigación Aida: como aprende el cerebro",
+        "status": "review_required",
+        "articleCount": 2,
+        "audiences": [
+          "students",
+          "parents"
+        ]
+      },
+      {
+        "id": "s051BL32RIieJVsN2LGm",
+        "user": "wlopez@asc.education",
+        "title": "El error de ignorar el dolor social: por qué la crítica punitiva en el aula bloquea la corteza prefrontal y frena el aprendizaje",
+        "status": "review_required",
+        "articleCount": 2,
+        "audiences": [
+          "educators",
+          "parents"
+        ]
+      },
+      {
+        "id": "yl9Qsg9euRwdsAoVvfc0",
+        "user": "mserrano@asc.education",
+        "title": "IA como tutor personalizado: el futuro del aprendizaje ya está aquí",
+        "status": "published",
+        "articleCount": 1,
+        "audiences": [
+          "educators"
+        ]
+      }
+    ]
+  },
+  "moodle": {
+    "coursesCreated": 2,
+    "byUser": {
+      "amartinez@asc.education": 1,
+      "ipech@asc.education": 1
+    },
+    "rows": [
+      {
+        "id": "4c81a540-d0c2-4623-88fa-0c04b71aaeed",
+        "user": "amartinez@asc.education",
+        "title": "Biologia Bloq 2"
+      },
+      {
+        "id": "82ab3ce2-d595-4f4c-a639-9f9758444798",
+        "user": "ipech@asc.education",
+        "title": "Química, Bloque 2"
+      }
+    ]
+  },
+  "imageCreator": {
+    "sessionsCreated": 11,
+    "generatedImages": 36,
+    "sessionsByUser": {
+      "amartinez@asc.education": 5,
+      "wlopez@asc.education": 4,
+      "ipech@asc.education": 2
+    },
+    "imagesByUser": {
+      "amartinez@asc.education": 16,
+      "ipech@asc.education": 15,
+      "wlopez@asc.education": 5
+    },
+    "imagesByModel": {
+      "gemini-3.1-flash-image": 31,
+      "gemini-3-pro-image": 5
+    },
+    "rows": [
+      {
+        "id": "0UFBctmJ5dPkWGK7rTNN",
+        "user": "amartinez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 1,
+        "models": {
+          "gemini-3-pro-image": 1
+        }
+      },
+      {
+        "id": "1yuPbwFEsinkZKZ2k8nW",
+        "user": "amartinez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 4,
+        "models": {
+          "gemini-3.1-flash-image": 4
+        }
+      },
+      {
+        "id": "3MCjThsJ9FOLiZzxKJea",
+        "user": "amartinez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "87kvEQSY1wzxbLQ8acnY",
+        "user": "amartinez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 5,
+        "models": {
+          "gemini-3.1-flash-image": 5
+        }
+      },
+      {
+        "id": "9oTn9twcNtoye3UnCwmg",
+        "user": "wlopez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "AuDJxOMvyhsL9hyQnQ6O",
+        "user": "amartinez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 6,
+        "models": {
+          "gemini-3.1-flash-image": 6
+        }
+      },
+      {
+        "id": "Lgn1JSh0Ho63Jts2bAiR",
+        "user": "wlopez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 4,
+        "models": {
+          "gemini-3.1-flash-image": 3,
+          "gemini-3-pro-image": 1
+        }
+      },
+      {
+        "id": "NWS9mOkmuLhBB9qz2Kin",
+        "user": "rmora@asc.education",
+        "createdInMonth": false,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "R7aDxkiWHWx4xu4xbLAY",
+        "user": "ipech@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 2,
+        "models": {
+          "gemini-3-pro-image": 2
+        }
+      },
+      {
+        "id": "asDImsFZnKYs9U3UD0w2",
+        "user": "weare@anonymous.org",
+        "createdInMonth": false,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "lRPGUysMrFnGLnE0uiOJ",
+        "user": "wlopez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 1,
+        "models": {
+          "gemini-3-pro-image": 1
+        }
+      },
+      {
+        "id": "objQmQ9joBBGmRuW9v5l",
+        "user": "wlopez@asc.education",
+        "createdInMonth": false,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "od00wme3FGJmjUk8maDi",
+        "user": "wlopez@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 0,
+        "models": {}
+      },
+      {
+        "id": "rJ0hj9b1SImnNKxff2Vq",
+        "user": "ipech@asc.education",
+        "createdInMonth": true,
+        "generatedImages": 13,
+        "models": {
+          "gemini-3.1-flash-image": 13
+        }
+      },
+      {
+        "id": "rrDpelp7Kg2OJeouvaLi",
+        "user": "wchavez@asc.education",
+        "createdInMonth": false,
+        "generatedImages": 0,
+        "models": {}
+      }
+    ]
+  }
+}

@@ -13,10 +13,10 @@ async function notifyBlocked(db, item, reasons, nowIso) {
   await db.collection("MarcieNotifications").doc(id).set({ type: "publication_blocked", calendarItemId: item.id, sessionId: item.sessionId || "", audience: item.audience || "", reasons, readBy: [], createdAt: nowIso, updatedAt: nowIso }, { merge: true });
 }
 
-async function monitorMarcieEditorialCalendar(now = Date.now()) {
+async function monitorMarcieEditorialCalendar(now = Date.now(), { calendarId } = {}) {
   const { db } = getAdminServices();
   const nowIso = new Date(now).toISOString();
-  const snapshot = await db.collection("MarcieEditorialCalendar").where("status", "in", ["idea", "planned", "researching", "drafting", "review", "approved", "scheduled"]).limit(100).get();
+  const snapshot = calendarId ? { docs: [await db.collection("MarcieEditorialCalendar").doc(calendarId).get()].filter(doc => doc.exists) } : await db.collection("MarcieEditorialCalendar").where("status", "in", ["idea", "planned", "researching", "drafting", "review", "approved", "scheduled"]).limit(100).get();
   let published = 0;
   let blocked = 0;
   let checked = 0;

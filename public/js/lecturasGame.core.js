@@ -5439,7 +5439,7 @@ function _lecturasGameStartOrderDemoPlayback(runtime = lecturasGameModeRuntime) 
     onPlaybackError: () => finishWithError("order_demo_gemini_live_failed")
   });
   if (!handled) {
-    finishWithError("order_demo_gemini_live_unavailable");
+    finishWithError("order_demo_narration_unavailable");
     return false;
   }
   return true;
@@ -14149,8 +14149,6 @@ function bindMainUiEvents() {
 
 /* ===== APIs Live (copiadas para funcionar dentro de lecturasGame.js) ===== */
 const CHARLY_LECTURA_LIVE_STATE_EVENT = "cb:lectura-live-state";
-const GEMINI_LIVE_MODEL_DEFAULT = "gemini-2.5-flash-native-audio-preview-12-2025";
-const GEMINI_LIVE_VOICE_DEFAULT = "Charon";
 
 let googleGenAiLiveModule = null;
 let geminiLiveSessionUnidad = null;
@@ -14467,81 +14465,9 @@ function _stripDuplicatedTitleParagraphs(paragraphs = [], title = "") {
   });
 }
 
-function _resolveGeminiLiveModel() {
-  const fromCfg = String(
-    window.__CHARLY_CONFIG__?.geminiLiveModel
-    || window.__CHARLY_CONFIG__?.geminiModelLive
-    || GEMINI_LIVE_MODEL_DEFAULT
-  ).trim();
-  return fromCfg
-    .replace(/^models\//i, "")
-    .replace(/:generateContent$/i, "")
-    .replace(/:streamGenerateContent$/i, "")
-    .trim()
-    .toLowerCase() || GEMINI_LIVE_MODEL_DEFAULT;
-}
 
-function _resolveGeminiLiveVoice() {
-  const voice = String(
-    window.__CHARLY_CONFIG__?.charlyVoiceName
-    || localStorage.getItem("cb_charly_voice_name")
-    || GEMINI_LIVE_VOICE_DEFAULT
-  ).trim();
-  return voice || GEMINI_LIVE_VOICE_DEFAULT;
-}
 
-async function requestGeminiLiveTokenViaApi(_modelLive = "", _systemInstruction = "") {
-  await ensureRuntimeConfigLoaded();
-  const user = auth.currentUser;
-  const token = user ? await user.getIdToken() : "";
-  const headers = {
-    "Content-Type": "application/json"
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const payload = JSON.stringify({
-    model: _resolveGeminiLiveModel(),
-    systemInstruction: String(_systemInstruction || "").trim()
-  });
-  const initialUrl = buildApiUrl("/api/gemini/live-token");
-  const candidates = [];
-  const pushCandidate = (value = "") => {
-    const url = String(value || "").trim();
-    if (!url || candidates.includes(url)) return;
-    candidates.push(url);
-  };
-  pushCandidate(initialUrl);
-  if (/^http:\/\/127\.0\.0\.1:8787\//i.test(initialUrl)) {
-    pushCandidate(initialUrl.replace("http://127.0.0.1:8787", "http://localhost:8787"));
-  }
-  if (window.location?.origin) {
-    pushCandidate(`${window.location.origin.replace(/\/+$/, "")}/api/gemini/live-token`);
-  }
 
-  let lastError = null;
-  for (const url of candidates) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: payload
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok) return data;
-      if (response.status === 404) {
-        lastError = new Error(`HTTP 404 @ ${url}`);
-        continue;
-      }
-      throw new Error(String(data?.detail || data?.error || `HTTP ${response.status}`));
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err || "gemini_live_token_error"));
-      const message = String(lastError?.message || "");
-      const isNetworkError = /Failed to fetch|NetworkError|Load failed|ERR_CONNECTION_REFUSED/i.test(message);
-      const isRouteMissing = /HTTP 404 @/i.test(message);
-      if (!isNetworkError && !isRouteMissing) break;
-    }
-  }
-  throw lastError || new Error("No se pudo obtener token de Gemini Live.");
-}
 
 async function _loadGoogleGenAiLiveModule() {
   if (window.__cbGoogleGenAiLiveModule?.GoogleGenAI && window.__cbGoogleGenAiLiveModule?.Modality) {
@@ -14674,6 +14600,7 @@ async function detenerGeminiLiveUnidad() {
   try {
     _clearLivePlanTimer();
     _limpiarAudioGeminiProgramado();
+    window.speechSynthesis?.cancel();
     geminiLiveSessionClosing = true;
     geminiLiveIsOpen = false;
     if (geminiLiveSessionUnidad) {
@@ -14685,89 +14612,8 @@ async function detenerGeminiLiveUnidad() {
   }
 }
 
-async function iniciarGeminiLiveUnidad(options = {}) {
-  const forceRestart = options?.forceRestart === true;
-  if (geminiLiveConnectPromise) return geminiLiveConnectPromise;
-  if (!forceRestart && geminiLiveSessionUnidad && geminiLiveIsOpen) return geminiLiveSessionUnidad;
-
-  const epoch = Date.now();
-  geminiLiveSessionEpoch = epoch;
-  const modelLive = _resolveGeminiLiveModel();
-
-  geminiLiveConnectPromise = (async () => {
-    if (forceRestart || geminiLiveSessionUnidad || geminiLiveIsOpen) {
-      await detenerGeminiLiveUnidad();
-    }
-    geminiLiveSessionClosing = true;
-
-    const tokenJson = await requestGeminiLiveTokenViaApi(modelLive, "");
-    const liveApiKey = String(tokenJson?.token || "").trim();
-    if (!liveApiKey) throw new Error("Token efimero vacio para Gemini Live.");
-
-    const { GoogleGenAI, Modality } = await _loadGoogleGenAiLiveModule();
-    const ai = new GoogleGenAI({
-      apiKey: liveApiKey,
-      apiVersion: "v1alpha",
-      httpOptions: { apiVersion: "v1alpha" }
-    });
-
-    geminiLiveSessionUnidad = await ai.live.connect({
-      model: modelLive,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: _resolveGeminiLiveVoice()
-            }
-          }
-        },
-        outputAudioTranscription: {},
-        thinkingConfig: {
-          thinkingBudget: 0
-        }
-      },
-      callbacks: {
-        onopen: () => {
-          if (geminiLiveSessionEpoch !== epoch) return;
-          geminiLiveIsOpen = true;
-          geminiLiveSessionClosing = false;
-        },
-        onmessage: (message) => {
-          if (geminiLiveSessionEpoch !== epoch) return;
-          _handleLiveServerMessage(message);
-        },
-        onerror: () => {
-          if (geminiLiveSessionEpoch !== epoch) return;
-          geminiLiveIsOpen = false;
-          geminiLiveSessionClosing = true;
-          geminiLiveSessionUnidad = null;
-          _notifyAgentSpeechPlaybackError(new Error("gemini_live_error"));
-          if (liveReaderState.state === "playing" || liveReaderState.state === "starting") {
-            _setLiveStatePaused();
-          }
-        },
-        onclose: () => {
-          if (geminiLiveSessionEpoch !== epoch) return;
-          geminiLiveIsOpen = false;
-          geminiLiveSessionClosing = true;
-          geminiLiveSessionUnidad = null;
-          _notifyAgentSpeechPlaybackError(new Error("gemini_live_closed"));
-          if (liveReaderState.state === "playing" || liveReaderState.state === "starting") {
-            _setLiveStatePaused();
-          }
-        }
-      }
-    });
-
-    return geminiLiveSessionUnidad;
-  })();
-
-  try {
-    return await geminiLiveConnectPromise;
-  } finally {
-    geminiLiveConnectPromise = null;
-  }
+async function iniciarGeminiLiveUnidad() {
+  return null;
 }
 
 function _sendCurrentLiveChunk() {
@@ -14855,87 +14701,7 @@ async function loadLecturaByLiveRef(ref = null) {
   }
 }
 
-window.cbLeerLecturaConGeminiLive = async function cbLeerLecturaConGeminiLive(ref = {}) {
-  const normalized = normalizeLiveRef(ref);
-  if (!normalized) return false;
-  if (liveReaderState.startPromise) return liveReaderState.startPromise;
-
-  liveReaderState.ref = { ...normalized };
-  liveReaderState.state = "starting";
-  emitLecturaLiveState(normalized);
-
-  liveReaderState.startPromise = (async () => {
-    try {
-      const lectura = await loadLecturaByLiveRef(normalized);
-      if (!lectura) {
-        _setLiveStateIdle({ keepRef: true });
-        return false;
-      }
-
-      const rawHtml = String(lectura.htmlLectura || lectura.raw?.contenidoHTML || "");
-      const preparedViewer = typeof _lecturasAgentBuildViewerContent === "function"
-        ? _lecturasAgentBuildViewerContent(rawHtml, {
-          preguntas: lectura.preguntas || [],
-          bibliografia: lectura.bibliografia || "",
-          sinonimos: lectura.sinonimos || ""
-        })
-        : null;
-      const narrativeHtml = String(preparedViewer?.narrativeHtml || rawHtml || "").trim();
-      const normalizedForRead = typeof _lecturasAgentNormalizeParagraphHtml === "function"
-        ? _lecturasAgentNormalizeParagraphHtml(narrativeHtml)
-        : [];
-      const tituloPortada = String(lectura.titulo || lectura.tema || "Lectura").trim();
-      const rawParagraphs = normalizedForRead.length
-        ? normalizedForRead.map((item) => String(item?.text || "").trim()).filter(Boolean)
-        : _extractParagraphsFromHtmlForLive(narrativeHtml);
-      const cleanedParagraphs = _dedupeSequentialParagraphs(_stripDuplicatedTitleParagraphs(rawParagraphs, tituloPortada));
-      const chunksNarrativa = _trocearLecturaParaLive(cleanedParagraphs, 980);
-      const chunks = _acelerarPrimerBloqueLectura(chunksNarrativa);
-      if (!chunks.length) {
-        _setLiveStateIdle({ keepRef: true });
-        return false;
-      }
-
-      liveReaderState.plan = {
-        mode: "reading",
-        title: lectura.titulo || lectura.tema || "Lectura",
-        chunks,
-        index: 0,
-        token: Date.now(),
-        waitingTurn: false,
-        turnToken: 0,
-        turnTimer: null,
-        chunkHadAudio: false,
-        turnCompleteReceived: false,
-        turnCompletedAt: 0,
-        lastChunkSentAt: 0,
-        lastAdvanceAt: 0,
-        viewerOffset: 1,
-        announceTitle: true
-      };
-
-      await iniciarGeminiLiveUnidad({ withMic: false });
-      let ok = _sendCurrentLiveChunk();
-      if (!ok) {
-        await iniciarGeminiLiveUnidad({ withMic: false, forceRestart: true });
-        ok = _sendCurrentLiveChunk();
-      }
-      if (!ok) {
-        _setLiveStateIdle({ keepRef: true });
-        return false;
-      }
-      return true;
-    } catch (_) {
-      _setLiveStateIdle({ keepRef: true });
-      return false;
-    } finally {
-      liveReaderState.startPromise = null;
-      emitLecturaLiveState(normalized);
-    }
-  })();
-
-  return liveReaderState.startPromise;
-};
+window.cbLeerLecturaConGeminiLive = async () => false;
 
 /* ===== Tutorial Styles Injection ===== */
 function _lecturasGameInjectTutorialStyles() {
@@ -15273,51 +15039,10 @@ async function geminiGenerateViaApi(model = "", payload = {}, signal = null) {
 }
 
 function hablarAgenteUnidad(texto = "", options = {}) {
-  const textoPlano = String(texto || "").trim();
-  if (!textoPlano) return false;
-
-  const {
-    cancelPrevious = true,
-    onPlaybackStart = null,
-    onPlaybackEnd = null,
-    onPlaybackError = null
-  } = options || {};
-
-  const token = Number((liveAgentSpeechState.token || 0) + 1);
-  liveAgentSpeechState.token = token;
-  liveAgentSpeechState.active = true;
-  liveAgentSpeechState.onEnd = typeof onPlaybackEnd === "function" ? onPlaybackEnd : null;
-  liveAgentSpeechState.onError = typeof onPlaybackError === "function" ? onPlaybackError : null;
-  _clearAgentSpeechSafetyTimer();
-
-  (async () => {
-    try {
-      if (cancelPrevious) _limpiarAudioGeminiProgramado();
-      await iniciarGeminiLiveUnidad({ withMic: false });
-      const prompt = [
-        "Di exactamente este texto en espanol latino, sin agregar ni quitar palabras.",
-        `Texto: "${textoPlano.replace(/"/g, '\\"')}"`
-      ].join("\n");
-      const sent = _safeSendClientContent({
-        turns: [{
-          role: "user",
-          parts: [{ text: prompt }]
-        }],
-        turnComplete: true
-      });
-      if (!sent) throw new Error("gemini_live_send_failed");
-      if (typeof onPlaybackStart === "function") onPlaybackStart();
-      liveAgentSpeechState.safetyTimer = setTimeout(() => {
-        if (Number(liveAgentSpeechState.token || 0) !== token) return;
-        _notifyAgentSpeechPlaybackError(new Error("gemini_live_turn_timeout"));
-      }, 120000);
-    } catch (err) {
-      if (Number(liveAgentSpeechState.token || 0) !== token) return;
-      _notifyAgentSpeechPlaybackError(err);
-    }
-  })();
-
-  return true;
+  const phrase = String(texto || '').trim();
+  if (!phrase) return false;
+  // Keep narration available after Live retirement using the existing local TTS adapter.
+  return _lecturasGameSpeakOrderDemoFallback(phrase, options);
 }
 
 const LECTURAS_AGENT_VIEWER_CACHE_KEY = "cb_lecturas_agent_images_v2";
@@ -16048,9 +15773,6 @@ function _lecturasAgentRenderCurrentSlide() {
   const fullscreenSupported = document.fullscreenEnabled && typeof refs?.panel?.requestFullscreen === "function";
   const menuExpanded = lecturasAgentViewerState.menuOpen === true;
   refs.imageActions.innerHTML = `
-    <button type="button" class="lecturas-asc-agent-read ${autoReadActive ? "is-active" : ""}" data-action="auto-read" aria-label="${autoReadActive ? "Pausar lectura con Gemini Live" : "Leer con Gemini Live"}">
-      <i class="fas ${autoReadActive ? "fa-pause" : "fa-play"}" aria-hidden="true"></i>
-    </button>
     <button type="button" class="lecturas-asc-agent-fullscreen" data-action="toggle-fullscreen" aria-label="${fullscreenActive ? "Salir de pantalla completa" : "Pantalla completa"}" ${fullscreenSupported ? "" : "disabled"}>
       <i class="fas ${fullscreenActive ? "fa-compress" : "fa-expand"}" aria-hidden="true"></i>
     </button>
@@ -16187,7 +15909,7 @@ function _lecturasAgentSpeakViewerText(text = "", options = {}) {
   };
   // Safety net amplio: no decide fin por longitud de párrafo, solo evita bloqueo infinito.
   safetyTimer = setTimeout(() => {
-    finishError(new Error("gemini_live_turn_timeout"));
+    finishError(new Error("narration_playback_timeout"));
   }, 120000);
   const handled = hablarAgenteUnidad(textoPlano, {
     cancelarPrevio,
@@ -16202,7 +15924,7 @@ function _lecturasAgentSpeakViewerText(text = "", options = {}) {
     onPlaybackError: (err) => finishError(err)
   });
   if (handled === false) {
-    finishError(new Error("gemini_live_unavailable"));
+    finishError(new Error("narration_unavailable"));
     return false;
   }
   return true;

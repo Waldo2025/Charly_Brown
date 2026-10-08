@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <script src="js/cache-version-loader.js"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.929-charly-source-files"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,9 +9,13 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="vendor/trumbowyg/trumbowyg.min.css">
+  <link rel="stylesheet" href="vendor/katex/katex.min.css?v=0.18.7">
+  <script defer src="vendor/katex/katex.min.js?v=0.18.7"></script>
+  <script defer src="vendor/katex/contrib/auto-render.min.js?v=0.18.7"></script>
   <link rel="stylesheet" data-cache-href="sidebar.css">
   <link rel="stylesheet" data-cache-href="header.css">
   <link rel="stylesheet" data-cache-href="charly-brown/charly-brown.css">
+  <link rel="stylesheet" data-cache-href="charly-brown/unit-panel.css">
 </head>
 <body data-page="charlyMCPeditor.html" class="cb-unit-body">
   <div class="main-header">
@@ -29,11 +33,6 @@
         <h2 id="cbActiveSessionTitle">Nueva unidad</h2>
       </div>
       <div class="cb-chat-actions" aria-label="Acciones rápidas">
-        <button type="button" id="cbAutomateUnitBtn" class="cb-automation-button" title="Crear unidad automatizada" aria-label="Crear unidad automatizada">
-          <i class="fas fa-bolt" aria-hidden="true"></i>
-          <span>Unidad automática</span>
-        </button>
-        <div class="cb-chat-actions-divider" aria-hidden="true"></div>
         <button type="button" id="cbToggleAcceptedBtn" class="cb-icon-btn" aria-pressed="false" title="Ocultar panel listo para usar" aria-label="Ocultar panel listo para usar">
           <i class="fas fa-table-columns" aria-hidden="true"></i>
         </button>
@@ -59,32 +58,55 @@
     </aside>
 
     <section class="cb-unit-chat" aria-label="Conversación de generación">
+      <details id="cbSourceFilesPanel" class="cb-source-files-panel">
+        <summary><i class="fas fa-folder-open" aria-hidden="true"></i><span>Archivos de esta unidad</span><span id="cbSourceFilesCount" class="cb-source-files-count">0</span></summary>
+        <div class="cb-source-files-body">
+          <div id="cbSourceFilesList" class="cb-source-files-list"></div>
+          <button type="button" id="cbSourceFilesAddBtn" class="cb-source-files-add"><i class="fas fa-plus" aria-hidden="true"></i> Añadir archivo</button>
+        </div>
+      </details>
       <div id="cbMessages" class="cb-messages" aria-live="polite"></div>
     </section>
 
+    <aside class="cb-inspector-panel is-closed" id="cbInspectorPanelRoot" aria-label="Inspector de detalles">
+      <div id="cbInspectorResizeHandle" class="cb-accepted-resize-handle cb-inspector-resize-handle" role="separator" aria-label="Redimensionar inspector" aria-orientation="vertical" tabindex="0"></div>
+      <div id="cbUnitDrawer" class="cb-unit-drawer"></div>
+    </aside>
+
     <aside class="cb-accepted-panel" aria-label="Listo para usar">
       <div id="cbAcceptedResizeHandle" class="cb-accepted-resize-handle" aria-hidden="true"></div>
-      <header class="cb-panel-head">
+      <div class="cb-accepted-header-sticky">
         <p class="cb-panel-kicker">Actividades aprobadas</p>
-        <div class="cb-panel-head-actions">
+        <header class="cb-panel-head">
           <button type="button" id="cbNewUnitBtn" class="cb-icon-button cb-new-unit-button" aria-label="Añadir nueva unidad" title="Añadir nueva unidad">
             <i class="fas fa-plus" aria-hidden="true"></i>
           </button>
-          <button type="button" id="cbEditAcademicDataBtn" class="cb-icon-button" aria-label="Editar datos académicos de la sesión" title="Datos académicos">
-            <i class="fas fa-graduation-cap" aria-hidden="true"></i>
+          <button type="button" id="cbAutomateUnitBtn" class="cb-icon-button cb-automation-button--icon" aria-label="Crear unidad automatizada" title="Crear unidad automatizada">
+            <i class="fas fa-bolt" aria-hidden="true"></i>
           </button>
-          <button type="button" id="cbOpenReadingsBtn" class="cb-icon-button" aria-label="Abrir lecturas" title="Abrir lecturas">
-            <i class="fas fa-book-open" aria-hidden="true"></i>
-          </button>
-          <button type="button" id="cbOpenSyaBtn" class="cb-icon-button" aria-label="Abrir secuencia y alcance" title="Abrir secuencia y alcance">
-            <i class="fas fa-list-check" aria-hidden="true"></i>
-          </button>
-          <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button" title="Crear notas del maestro con el agente MCP" aria-label="Crear notas del maestro">
-            <i class="fas fa-pen-nib" aria-hidden="true"></i>
-            <span>NM</span>
-          </button>
-        </div>
-      </header>
+          <div class="cb-panel-head-group" aria-label="Configuración curricular">
+            <button type="button" id="cbEditAcademicDataBtn" class="cb-icon-button" aria-label="Editar datos académicos de la sesión" title="Datos académicos">
+              <i class="fas fa-graduation-cap" aria-hidden="true"></i>
+            </button>
+            <button type="button" id="cbOpenSyaBtn" class="cb-icon-button cb-icon-button--labeled" aria-label="Abrir secuencia y alcance" title="Abrir secuencia y alcance">
+              <i class="fas fa-list-check" aria-hidden="true"></i>
+              <span>SyA</span>
+            </button>
+            <button type="button" id="cbConfigureSubtopicsBtn" class="cb-icon-button" aria-label="Configurar subtemas por grado y proyectos" title="Configurar subtemas por grado">
+              <i class="fas fa-sliders" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="cb-panel-head-group" aria-label="Contenido">
+            <button type="button" id="cbOpenReadingsBtn" class="cb-icon-button" aria-label="Abrir lecturas" title="Abrir lecturas">
+              <i class="fas fa-book-open" aria-hidden="true"></i>
+            </button>
+            <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button" title="Crear notas del maestro con el agente MCP" aria-label="Crear notas del maestro">
+              <i class="fas fa-pen-nib" aria-hidden="true"></i>
+              <span>NM</span>
+            </button>
+          </div>
+        </header>
+      </div>
       <div id="cbAcceptedPanel" class="cb-accepted-list"></div>
       <footer class="cb-accepted-footer">
         <button type="button" id="cbOpenExportBtn" class="cb-export-open-button">
@@ -92,7 +114,7 @@
           <span>Exportar contenido</span>
         </button>
       </footer>
-  </aside>
+    </aside>
   </main>
 
   <footer class="cb-composer-footer" aria-label="Escritura del chat">
@@ -101,18 +123,37 @@
         <button type="button" id="cbComposerResizeHandle" class="cb-composer-resize-handle" aria-label="Redimensionar área de escritura" title="Redimensionar área de escritura">
           <i class="fas fa-expand-alt" aria-hidden="true"></i>
         </button>
+        <div id="cbComposerDropZone" class="cb-composer-drop-zone" hidden>
+          <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+          <span>Suelta tus archivos aquí para adjuntarlos (PDF, Word, Excel, IDML, Imágenes)</span>
+        </div>
+        <div id="cbComposerActiveTools" class="cb-composer-active-tools" hidden></div>
+        <div id="cbComposerAttachments" class="cb-composer-attachments" hidden></div>
         <textarea id="cbComposerInput" rows="2" placeholder="Escribe lo que necesitas cambiar, generar o corregir..."></textarea>
         <footer class="cb-composer-input-footer">
-          <button type="button" id="cbComposerModelBtn" class="cb-composer-model-button" aria-label="Cambiar modelo de Gemini" title="Cambiar modelo de Gemini" aria-haspopup="menu" aria-expanded="false">
-            <i class="fas fa-brain" aria-hidden="true"></i>
-            <span id="cbComposerModelLabel">Gemini 3.8 Flash</span>
-            <i class="fas fa-chevron-up cb-composer-model-chevron" aria-hidden="true"></i>
-          </button>
+          <div class="cb-composer-footer-left">
+            <button type="button" id="cbComposerAttachBtn" class="cb-composer-attach-button" aria-label="Adjuntar archivo" title="Adjuntar archivos (PDF, Word, Excel, CSV, IDML, Imágenes PNG/JPG)">
+              <i class="fas fa-paperclip" aria-hidden="true"></i>
+            </button>
+            <input type="file" id="cbComposerFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.idml,.png,.jpg,.jpeg,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,image/png,image/jpeg,image/webp" style="display: none;" />
+            <button type="button" id="cbComposerToolsBtn" class="cb-composer-tools-button" aria-label="Herramientas del agente" title="Herramientas del agente" aria-haspopup="menu" aria-expanded="false">
+              <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+              <span id="cbComposerToolsLabel">Herramientas</span>
+              <span id="cbComposerToolsBadge" class="cb-composer-tools-badge" hidden>0</span>
+              <i class="fas fa-chevron-up cb-composer-tools-chevron" aria-hidden="true"></i>
+            </button>
+            <button type="button" id="cbComposerModelBtn" class="cb-composer-model-button" aria-label="Cambiar modelo de Gemini" title="Cambiar modelo de Gemini" aria-haspopup="menu" aria-expanded="false">
+              <i class="fas fa-brain" aria-hidden="true"></i>
+              <span id="cbComposerModelLabel">Gemini 3.8 Flash</span>
+              <i class="fas fa-chevron-up cb-composer-model-chevron" aria-hidden="true"></i>
+            </button>
+          </div>
           <button type="submit" class="cb-send-button" aria-label="Enviar mensaje" title="Enviar mensaje">
             <i class="fas fa-paper-plane" aria-hidden="true"></i>
           </button>
         </footer>
       </div>
+      <div id="cbComposerToolsMenu" class="cb-composer-tools-menu" role="menu" aria-label="Herramientas del agente" hidden></div>
       <div id="cbComposerModelMenu" class="cb-composer-model-menu" role="menu" aria-label="Modelos de Gemini" hidden></div>
     </form>
   </footer>
@@ -172,7 +213,7 @@
             <textarea data-sya-section-field="T" rows="2"></textarea>
           </label>
           <label class="cb-field-group">
-            <span>Aprendizaje esperado (AE)</span>
+            <span>Proceso de desarrollo de aprendizaje (PDA · clave AE)</span>
             <textarea data-sya-section-field="AE" rows="2"></textarea>
           </label>
           <label class="cb-field-group">
@@ -183,6 +224,13 @@
             <span>Proceso o práctica (P)</span>
             <textarea data-sya-section-field="P" rows="2"></textarea>
           </label>
+          <div class="cb-sya-improve-panel">
+            <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbSyaImproveFields">
+              <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+              Mejorar los 4 campos con la NEM
+            </button>
+            <p id="cbSyaImproveStatus" class="cb-sya-improve-status" role="status" aria-live="polite"></p>
+          </div>
         </form>
       </div>
       <footer class="cb-modal-footer cb-modal-footer--spread">
@@ -226,6 +274,12 @@
             <strong>Video</strong>
             <span>Escena breve para modelado o explicación.</span>
           </button>
+        </div>
+        <div class="cb-resource-counts" id="cbResourceCounts" hidden aria-label="Cantidad de cada recurso">
+          <label>Fichas <input type="number" min="1" max="3" value="1" data-resource-count="fichas"></label>
+          <label>Anexos <input type="number" min="1" max="3" value="1" data-resource-count="anexos"></label>
+          <label>Recortables <input type="number" min="1" max="3" value="1" data-resource-count="recortables"></label>
+          <label>Videos <input type="number" min="1" max="2" value="1" data-resource-count="videos"></label>
         </div>
       </div>
       <footer class="cb-modal-footer">
@@ -498,7 +552,241 @@
     </section>
   </div>
 
+  <div id="cbGradeSubtopicsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="subtopics-settings"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide cb-subtopics-modal-panel" role="dialog" aria-modal="true" aria-labelledby="cbGradeSubtopicsModalTitle">
+      <header class="cb-modal-header">
+        <div class="cb-modal-header-title-group">
+          <p class="cb-panel-kicker">Currículo SEP / NEM</p>
+          <h2 id="cbGradeSubtopicsModalTitle">Configuración de Subtemas por Grado</h2>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="subtopics-settings" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body cb-subtopics-modal-body">
+        <div class="cb-settings-top-nav" role="tablist">
+          <button type="button" class="cb-settings-nav-tab is-active" data-settings-tab="subtopics" role="tab" aria-selected="true">
+            <i class="fas fa-layer-group" aria-hidden="true"></i>
+            <span>Subtemas por Grado y Proyectos</span>
+          </button>
+          <button type="button" class="cb-settings-nav-tab" data-settings-tab="vocabulary" role="tab" aria-selected="false">
+            <i class="fas fa-spell-check" aria-hidden="true"></i>
+            <span>Vocabulario Preferente</span>
+          </button>
+          <button type="button" class="cb-settings-nav-tab" data-settings-tab="prompts" role="tab" aria-selected="false">
+            <i class="fas fa-terminal" aria-hidden="true"></i>
+            <span>Prompts Internos y Reglas</span>
+          </button>
+          <button type="button" class="cb-settings-nav-tab" data-settings-tab="exercises" role="tab" aria-selected="false">
+            <i class="fas fa-cubes" aria-hidden="true"></i>
+            <span>Tipos de Ejercicios</span>
+          </button>
+        </div>
+
+        <!-- Section 1: Subtopics & Projects -->
+        <div id="cbSettingsSubtopicsSection" class="cb-settings-tab-pane is-active">
+          <p class="cb-settings-intro">Elige las áreas y proyectos que deben aparecer en la planeación de cada grado. Los cambios se aplican a las siguientes generaciones.</p>
+          <div class="cb-subtopics-toolbar">
+            <div id="cbSubtopicsGradeTabs" class="cb-subtopics-grade-tabs" role="tablist" aria-label="Selector de grado escolar"></div>
+            <div class="cb-subtopics-toolbar-actions">
+              <button type="button" id="cbSubtopicsResetGradeBtn" class="cb-chip-action cb-chip-action--ghost" title="Restablecer grado actual a los defaults oficiales SEP">
+                <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                <span>Restablecer este grado</span>
+              </button>
+              <button type="button" id="cbSubtopicsResetAllBtn" class="cb-chip-action cb-chip-action--ghost" title="Restablecer todos los grados a los defaults oficiales SEP">
+                <i class="fas fa-arrows-rotate" aria-hidden="true"></i>
+                <span>Restablecer todo</span>
+              </button>
+            </div>
+          </div>
+          <div id="cbSubtopicsProjectsInfo" class="cb-subtopics-projects-wrapper"></div>
+          <div id="cbSubtopicsConfigMatrix" class="cb-subtopics-matrix"></div>
+        </div>
+
+        <!-- Section 2: Specialized Preferred Vocabulary Studio -->
+        <div id="cbSettingsVocabSection" class="cb-settings-tab-pane" hidden>
+          <div class="cb-vocab-studio">
+            <!-- Audience Switcher -->
+            <div class="cb-vocab-audience-selector" role="tablist" aria-label="Audiencia de vocabulario">
+              <button type="button" class="cb-vocab-audience-tab is-active" data-vocab-audience="student" role="tab" aria-selected="true">
+                <i class="fas fa-graduation-cap" aria-hidden="true"></i>
+                <span>Actividades del alumno</span>
+              </button>
+              <button type="button" class="cb-vocab-audience-tab" data-vocab-audience="teacher" role="tab" aria-selected="false">
+                <i class="fas fa-chalkboard-user" aria-hidden="true"></i>
+                <span>Notas del maestro</span>
+              </button>
+            </div>
+            <p class="cb-vocab-audience-hint" data-vocab-hint="student">Estas expresiones orientan las consignas, preguntas y actividades que verá el alumno.</p>
+            <p class="cb-vocab-audience-hint" data-vocab-hint="teacher" hidden>Estos conceptos guían la mediación, inclusión y orientación pedagógica de las notas del maestro.</p>
+
+            <!-- Studio Toolbar: Search & Quick Filters -->
+            <div class="cb-vocab-studio-toolbar">
+              <div class="cb-vocab-search-wrap">
+                <i class="fas fa-search cb-vocab-search-icon" aria-hidden="true"></i>
+                <input type="search" id="cbVocabSearchInput" class="cb-vocab-search-input" placeholder="Buscar por palabra, frase o categoría..." aria-label="Buscar en el vocabulario">
+                <button type="button" id="cbVocabSearchClearBtn" class="cb-vocab-search-clear" aria-label="Limpiar búsqueda" hidden>
+                  <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="cb-vocab-studio-actions">
+                <button type="button" id="cbVocabToggleAddBtn" class="cb-chip-action cb-chip-action--primary">
+                  <i class="fas fa-plus" aria-hidden="true"></i>
+                  <span>Nueva expresión</span>
+                </button>
+                <button type="button" id="cbVocabResetBtn" class="cb-chip-action cb-chip-action--ghost" title="Restablecer vocabulario estándar">
+                  <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                  <span>Restablecer estándar</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Category Filter Badges -->
+            <div id="cbVocabCategoryFilterPills" class="cb-vocab-category-pills" role="radiogroup" aria-label="Filtrar por categoría"></div>
+
+            <!-- Creation / Quick Add Panel -->
+            <div id="cbVocabAddCard" class="cb-vocab-add-card">
+              <div class="cb-vocab-add-card-header">
+                <i class="fas fa-feather-pointed" aria-hidden="true"></i>
+                <span id="cbVocabAddCardTitle">Añadir nueva expresión para el alumno</span>
+              </div>
+              <div class="cb-vocab-add-card-form">
+                <div class="cb-vocab-input-wrapper">
+                  <input type="text" id="cbVocabNewWordInput" class="cb-vocab-input" placeholder="Ej. argumenta con evidencias, organiza en tabla..." aria-label="Nueva palabra o frase">
+                </div>
+                <select id="cbVocabCategorySelect" class="cb-vocab-category-select" aria-label="Categoría pedagógica"></select>
+                <button type="button" id="cbVocabAddWordBtn" class="cb-chip-action cb-chip-action--primary">
+                  <i class="fas fa-plus" aria-hidden="true"></i>
+                  <span>Guardar expresión</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Presets Section -->
+            <div class="cb-vocab-presets-section">
+              <span class="cb-vocab-presets-label">
+                <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                <span>Sugerencias rápidas por categoría:</span>
+              </span>
+              <div id="cbVocabPresetsContainer" class="cb-vocab-presets-chips"></div>
+            </div>
+
+            <!-- Vocabulary Studio Results & Interactive List -->
+            <div class="cb-vocab-list-section">
+              <div class="cb-vocab-list-header">
+                <span id="cbVocabCount" class="cb-vocab-count">0 expresiones activas</span>
+                <span id="cbVocabFilterStatus" class="cb-vocab-filter-status"></span>
+              </div>
+              <div id="cbVocabItemsGrid" class="cb-vocab-items-grid" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: System Prompts & Global Rules -->
+        <div id="cbSettingsPromptsSection" class="cb-settings-tab-pane" hidden>
+          <div class="cb-prompts-studio">
+            <div class="cb-prompts-toolbar">
+              <div>
+                <h3 class="cb-prompts-title">Reglas y Prompts del Sistema</h3>
+                <p class="cb-settings-intro">Ajusta las instrucciones que usa cada generador. Se incorporan en las próximas propuestas.</p>
+              </div>
+              <div class="cb-prompts-actions">
+                <button type="button" id="cbPromptsResetBtn" class="cb-chip-action cb-chip-action--ghost" title="Restablecer todos los prompts a su estado original de fábrica">
+                  <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                  <span>Restablecer estado original</span>
+                </button>
+              </div>
+            </div>
+            <div id="cbPromptsEditorGrid" class="cb-prompts-grid"></div>
+          </div>
+        </div>
+
+        <!-- Section 4: Exercise Types & Visual Dynamics Studio -->
+        <div id="cbSettingsExercisesSection" class="cb-settings-tab-pane" hidden>
+          <div class="cb-exercises-studio">
+            <div class="cb-exercises-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+              <div>
+                <p class="cb-settings-intro" style="margin: 0;">Selecciona qué estilos de dinámicas visuales y tipos de ejercicios debe proponer Charly al crear actividades (chat o automatizadas).</p>
+              </div>
+              <div class="cb-exercises-toolbar-actions" style="display: flex; gap: 0.5rem;">
+                <button type="button" id="cbExercisesSelectAllBtn" class="cb-chip-action cb-chip-action--ghost" title="Activar todos los tipos de ejercicios">
+                  <i class="fas fa-check-double" aria-hidden="true"></i>
+                  <span>Activar todos</span>
+                </button>
+                <button type="button" id="cbExercisesResetBtn" class="cb-chip-action cb-chip-action--ghost" title="Restablecer selección predeterminada">
+                  <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                  <span>Predeterminados</span>
+                </button>
+              </div>
+            </div>
+            <div id="cbExercisesConfigGrid" class="cb-exercises-grid"></div>
+          </div>
+        </div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-modal-close="subtopics-settings">Cancelar</button>
+        <button type="button" id="cbSubtopicsSaveBtn" class="cb-chip-action cb-chip-action--primary">
+          <i class="fas fa-floppy-disk" aria-hidden="true"></i>
+          <span>Guardar configuración</span>
+        </button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbProductionProgressModal" class="cb-hud-modal-root" aria-hidden="true" hidden>
+    <section id="cbProductionProgress" class="cb-production-progress-host" aria-live="polite" role="dialog" aria-modal="true" aria-labelledby="cbHudLiveLabel">
+      <span id="cbHudLiveLabel" class="cb-sr-only">Generando unidad automatizada con Charly Brown</span>
+      <div class="cb-hud-overlay">
+        <canvas class="cb-hud-canvas" aria-hidden="true"></canvas>
+        <div class="cb-hud-glass">
+          <div class="cb-hud-top">
+            <div class="cb-hud-telemetry-left">
+              <div class="cb-hud-system-kicker">
+                <span class="cb-hud-sys-label">Charly Brown Editor</span>
+              </div>
+            </div>
+            <div class="cb-hud-pct-wrap">
+              <span class="cb-hud-pct" aria-label="0 por ciento">0<small>%</small></span>
+            </div>
+          </div>
+          <div class="cb-hud-stage">
+            <div class="cb-hud-stage-header">
+              <span class="cb-hud-stage-title">Generando Unidad Automatizada</span>
+            </div>
+          </div>
+          <div id="cbHudActiveAgentsHost"></div>
+          <div class="cb-hud-steps-container">
+            <div class="cb-hud-steps-label">FASES Y RECURSOS DE LA UNIDAD:</div>
+            <div id="cbHudStepsHost"></div>
+          </div>
+          <div class="cb-hud-foot">
+            <div class="cb-hud-metrics">
+              <span class="cb-hud-tasks">Iniciando...</span>
+            </div>
+            <div class="cb-hud-btns">
+              <button type="button" class="cb-hud-ghost" id="cbProductionControlBtn">
+                <i class="fas fa-pause" aria-hidden="true"></i>
+                <span>Pausar</span>
+              </button>
+              <button type="button" class="cb-hud-ghost cb-hud-ghost--danger" id="cbProductionCancelBtn">
+                <i class="fas fa-stop" aria-hidden="true"></i>
+                <span>Cancelar</span>
+              </button>
+              <button type="button" class="cb-hud-ghost" data-production-modal-close>
+                <i class="fas fa-compress-alt" aria-hidden="true"></i>
+                <span>Minimizar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <script src="vendor/jquery/jquery.min.js"></script>
+  <script src="vendor/jszip/jszip.min.js"></script>
+  <script src="js/html-docx.js"></script>
   <script src="vendor/trumbowyg/trumbowyg.min.js"></script>
   <script src="vendor/trumbowyg/plugins/trumbowyg.cleanpaste.min.js"></script>
   <script type="module" data-cache-src="js/chromeLayout.js"></script>

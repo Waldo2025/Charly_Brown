@@ -73,7 +73,8 @@ test("la recta numérica recibe un fondo local visible sin geometría matemátic
   assert.match(editor, /sourceBackgroundIsClean/);
   assert.match(editor, /hasBackground && \(hasPrimary \|\| isCodeDrawnNumberLine\)/);
   assert.match(editor, /la recta numérica completa y el vector de desplazamiento se dibujan con geometría exacta/);
-  assert.match(runtime, /model==="number-line"\|\|hasVisualBackground/);
+  assert.match(runtime, /if\(model==="number-line"\)\{g\.fillStyle/);
+  assert.doesNotMatch(runtime, /model==="number-line"\|\|hasVisualBackground/);
 });
 
 test("un escenario personalizado nunca queda sustituido silenciosamente por el fondo local", () => {
@@ -85,7 +86,7 @@ test("un escenario personalizado nunca queda sustituido silenciosamente por el f
   assert.match(editor, /Object\.assign\(scene\.background, \{ imageUrl: "", imageSrc: "", storagePath: "" \}/);
   assert.match(editor, /Fondo personalizado pendiente de Gemini/);
   assert.match(editor, /Generar fondo solicitado/);
-  assert.match(editor, /hasGeneratedPrimaryLayer = simulatorUsesProgrammaticPrimary\(state\.activity\)/);
+  assert.match(editor, /activity\.simulatorVisualSelection = getSelectedSimulatorVisualSelection\(\)/);
 });
 
 test("la recta personalizada no convierte universo o galaxias en una pista o plataforma", () => {
@@ -177,7 +178,8 @@ test("Phaser carga texturas y separa overlays transparentes del fallback vectori
   for (const preset of ["translate-x", "translate-y", "projectile", "orbit", "rotate", "pulse", "vibrate", "flow", "scale", "phase-step", "static"]) assert.match(runtime, new RegExp(`\\"${preset}\\"`));
   assert.match(runtime, /if\(isEcosystemEnergyFlow\)/);
   assert.match(runtime, /drawEcosystemEnergyOverlay/);
-  assert.match(runtime, /else if\(!hasLoadedPrimary\)\{scene\(/);
+  assert.match(runtime, /else if\(!hasLoadedPrimary\|\|!linearMotionEnabled\)\{[\s\S]*?scene\(/, "Las imágenes principales deben conservar el overlay científico; MRUA utiliza sus indicadores específicos");
+  assert.match(runtime, /Boolean\(this\.generatedBackground\|\|hasLoadedPrimary\)/, "El overlay respeta el fondo generado con transparencia");
   assert.match(runtime, /visualScene:\{status:visualScene\.status/);
   assert.match(runtime, /drawLinearMotionIndicators/);
   assert.match(runtime, /velocity:linearMotion\?\.velocity\?\?values\.velocity/);
@@ -237,13 +239,13 @@ test("las capas guardadas se reparan localmente sin consumir cuota de Gemini", (
   assert.match(editor, /sourceBackground !== normalizedBackground \|\| sourcePrimaryImage !== normalizedPrimaryImage/);
 });
 
-test("la ruta curada de simuladores genera la escena antes de renderizar", () => {
-  const curatedBranch = editor.match(/if \(selectedMode === "simulator"\) \{[\s\S]*?return;\n  \}/)?.[0] || "";
-  assert.match(curatedBranch, /state\.activity\.visualScene = await generateSimulatorVisualSceneWithGemini\(state\.activity, \{ replan: true \}\)/);
-  assert.ok(
-    curatedBranch.indexOf("generateSimulatorVisualSceneWithGemini") < curatedBranch.indexOf("renderGame"),
-    "La escena visual debe completarse antes de montar el simulador curado"
-  );
+test("la ruta de agentes valida la escena antes de aplicar y renderizar el resultado", async () => {
+  const worker = await readFile(new URL("../functions/src/science-production-workers.js", import.meta.url), "utf8");
+  const resultStart = editor.indexOf("onResult: async");
+  const application = editor.slice(resultStart, editor.indexOf("async function generateWithGemini", resultStart));
+  assert.match(worker, /Faltan imágenes obligatorias/);
+  assert.match(worker, /activity\.visualScene=/);
+  assert.ok(application.indexOf("run.result?.generation?.complete !== true") < application.indexOf("await renderGame"));
 });
 
 test("el viewport del simulador no incluye historial ni panel de gráfica", () => {
@@ -326,8 +328,8 @@ test("Transformación energética conserva fondo y seis recursos raster locales 
 });
 
 test("fondo y objetos conservan proporción en pantallas verticales", () => {
-  assert.match(runtime, /scale=w\/sourceWidth/);
-  assert.match(runtime, /fit:"width"/);
+  assert.match(runtime, /scale=isIllustrated\?Math\.max\(w\/sourceWidth,h\/sourceHeight\):w\/sourceWidth/);
+  assert.match(runtime, /fit:isIllustrated\?"cover":"width"/);
   assert.match(runtime, /heightScale=h\*\.48\/Math\.max\(1,sprite\.height\)/);
   assert.match(runtime, /baseScale=Math\.min\(widthScale,heightScale\)/);
   assert.match(runtime, /x=clamp\(x,safeX,w-safeX\);y=clamp\(y,safeY,h-safeY\)/);

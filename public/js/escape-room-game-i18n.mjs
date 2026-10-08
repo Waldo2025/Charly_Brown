@@ -184,3 +184,17 @@ export function formatGameMessage(messagesOrLocale, key, params = {}) {
 export function getGameMessageKeys() {
   return Object.keys(ES).sort();
 }
+
+/** Short markers a hand-authored template writes so the teacher only replaces text. */
+const AUTHORING_LABELS = Object.freeze({
+  "es-419": Object.freeze({ option: "Opción", distractor: "Distractor", pairLeft: "Elemento", pairRight: "Respuesta", sequenceItem: "Paso", answer: "Respuesta", imageAlt: "Describe la imagen", exerciseInstructions: "Instrucciones del ejercicio", extraHint: "Pista adicional", token: "Ficha", target: "Destino" }),
+  "es-ES": Object.freeze({ option: "Opción", distractor: "Distractor", pairLeft: "Elemento", pairRight: "Respuesta", sequenceItem: "Paso", answer: "Respuesta", imageAlt: "Describe la imagen", exerciseInstructions: "Instrucciones del ejercicio", extraHint: "Pista adicional", token: "Ficha", target: "Destino" }),
+  "en-US": Object.freeze({ option: "Option", distractor: "Distractor", pairLeft: "Item", pairRight: "Answer", sequenceItem: "Step", answer: "Answer", imageAlt: "Describe the image", exerciseInstructions: "Exercise instructions", extraHint: "Additional hint", token: "Card", target: "Target" }),
+  "en-GB": Object.freeze({ option: "Option", distractor: "Distractor", pairLeft: "Item", pairRight: "Answer", sequenceItem: "Step", answer: "Answer", imageAlt: "Describe the image", exerciseInstructions: "Exercise instructions", extraHint: "Additional hint", token: "Card", target: "Target" }),
+  "fr-FR": Object.freeze({ option: "Option", distractor: "Distracteur", pairLeft: "Élément", pairRight: "Réponse", sequenceItem: "Étape", answer: "Réponse", imageAlt: "Décrivez l'image", exerciseInstructions: "Consignes de l'exercice", extraHint: "Indice supplémentaire", token: "Jeton", target: "Cible" }),
+  "pt-BR": Object.freeze({ option: "Opção", distractor: "Distrator", pairLeft: "Elemento", pairRight: "Resposta", sequenceItem: "Passo", answer: "Resposta", imageAlt: "Descreva a imagem", exerciseInstructions: "Instruções do exercício", extraHint: "Pista adicional", token: "Ficha", target: "Alvo" })
+});
+
+export function getAuthoringLabels(locale = "es-419") {
+  return AUTHORING_LABELS[normalizeGameLocale(locale)];
+}

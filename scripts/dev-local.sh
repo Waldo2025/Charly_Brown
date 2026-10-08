@@ -5,14 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 API_PORT="${API_PORT:-8787}"
+SALLY_PORT="${SALLY_PORT:-8791}"
 WEB_PORT="${WEB_PORT:-5010}"
 export API_PORT
+export SALLY_PORT
 export WEB_PORT
 BACKEND_LOG="${BACKEND_LOG:-/tmp/charlybrown-backend-${API_PORT}.log}"
+SALLY_LOG="${SALLY_LOG:-/tmp/charlybrown-sally-${SALLY_PORT}.log}"
 WEB_URL="http://127.0.0.1:${WEB_PORT}"
 API_PID=""
+SALLY_PID=""
 WEB_PID=""
 MONITOR_PID=""
+SALLY_MONITOR_PID=""
 WEB_MONITOR_PID=""
 
 kill_stale_backend_processes() {
@@ -114,6 +119,7 @@ resolve_web_port() {
 
 kill_stale_backend_processes
 kill_port "${API_PORT}"
+kill_port "${SALLY_PORT}"
 kill_port "${WEB_PORT}"
 resolve_web_port "${WEB_PORT}"
 
@@ -133,6 +139,13 @@ start_backend() {
   API_PID=$!
 }
 
+start_sally() {
+  echo "[dev-local] starting Sally MCP on http://127.0.0.1:${SALLY_PORT}"
+  : > "${SALLY_LOG}"
+  PORT="${SALLY_PORT}" GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-charly-brown}" node backend/sally/server.js >>"${SALLY_LOG}" 2>&1 &
+  SALLY_PID=$!
+}
+
 stop_backend_pid_if_running() {
   if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" >/dev/null 2>&1; then
     kill "$API_PID" >/dev/null 2>&1 || true
@@ -150,11 +163,17 @@ cleanup() {
   if [[ -n "${WEB_MONITOR_PID:-}" ]] && kill -0 "$WEB_MONITOR_PID" >/dev/null 2>&1; then
     kill "$WEB_MONITOR_PID" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${SALLY_MONITOR_PID:-}" ]] && kill -0 "$SALLY_MONITOR_PID" >/dev/null 2>&1; then
+    kill "$SALLY_MONITOR_PID" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" >/dev/null 2>&1; then
     kill "$API_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "${WEB_PID:-}" ]] && kill -0 "$WEB_PID" >/dev/null 2>&1; then
     kill "$WEB_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${SALLY_PID:-}" ]] && kill -0 "$SALLY_PID" >/dev/null 2>&1; then
+    kill "$SALLY_PID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -189,9 +208,13 @@ verify_podcaster_routes() {
   local health_url="http://127.0.0.1:${API_PORT}/api/health"
   local dialogue_route_url="http://127.0.0.1:${API_PORT}/api/podcaster/dialogue-audio/generate"
   local music_route_url="http://127.0.0.1:${API_PORT}/api/podcaster/music/generate"
+  local audio_reference_route_url="http://127.0.0.1:${API_PORT}/api/schroeder/audio-reference/analyze"
+  local tts_voices_route_url="http://127.0.0.1:${API_PORT}/api/podcaster/tts/voices?language_code=es-MX"
   local health_json=""
   local route_status=""
   local music_status=""
+  local audio_reference_status=""
+  local tts_voices_status=""
 
   health_json="$(curl -fsS "${health_url}" 2>/dev/null || true)"
   if [[ -z "${health_json}" ]]; then
@@ -203,8 +226,18 @@ verify_podcaster_routes() {
     echo "[dev-local] health payload: ${health_json}"
     return 1
   fi
+  if ! echo "${health_json}" | grep -Eq '"podcasterTtsVoicesRoute"[[:space:]]*:[[:space:]]*true'; then
+    echo "[dev-local] backend health missing podcasterTtsVoicesRoute=true"
+    echo "[dev-local] health payload: ${health_json}"
+    return 1
+  fi
   if ! echo "${health_json}" | grep -Eq '"podcasterMusicGenerateRoute"[[:space:]]*:[[:space:]]*true'; then
     echo "[dev-local] backend health missing podcasterMusicGenerateRoute=true"
+    echo "[dev-local] health payload: ${health_json}"
+    return 1
+  fi
+  if ! echo "${health_json}" | grep -Eq '"schroederAudioReferenceRoute"[[:space:]]*:[[:space:]]*true'; then
+    echo "[dev-local] backend health missing schroederAudioReferenceRoute=true"
     echo "[dev-local] health payload: ${health_json}"
     return 1
   fi
@@ -220,6 +253,17 @@ verify_podcaster_routes() {
   fi
   echo "[dev-local] dialogue-audio route probe status: ${route_status} (expected != 404)"
 
+  tts_voices_status="$(curl -sS -o /tmp/charlybrown-podcaster-tts-voices-route-check.json -w "%{http_code}" "${tts_voices_route_url}" || true)"
+  if [[ "${tts_voices_status}" == "404" ]]; then
+    echo "[dev-local] backend active no corresponde a versión con catálogo TTS (GET /api/podcaster/tts/voices -> 404)"
+    return 1
+  fi
+  if [[ "${tts_voices_status}" == "000" || -z "${tts_voices_status}" ]]; then
+    echo "[dev-local] backend TTS voices route check did not reach server"
+    return 1
+  fi
+  echo "[dev-local] TTS voices route probe status: ${tts_voices_status} (expected != 404; 401 means route exists)"
+
   music_status="$(curl -sS -o /tmp/charlybrown-music-generate-route-check.json -w "%{http_code}" -X POST "${music_route_url}" -H "Content-Type: application/json" -d '{}' || true)"
   if [[ "${music_status}" == "404" ]]; then
     echo "[dev-local] backend active no corresponde a versión con music-generate (POST /api/podcaster/music/generate -> 404)"
@@ -230,6 +274,17 @@ verify_podcaster_routes() {
     return 1
   fi
   echo "[dev-local] music-generate route probe status: ${music_status} (expected != 404)"
+
+  audio_reference_status="$(curl -sS -o /tmp/charlybrown-schroeder-audio-reference-route-check.json -w "%{http_code}" -X POST "${audio_reference_route_url}" -H "Content-Type: application/json" -d '{}' || true)"
+  if [[ "${audio_reference_status}" == "404" ]]; then
+    echo "[dev-local] backend active no corresponde a versión con referencia de audio (POST /api/schroeder/audio-reference/analyze -> 404)"
+    return 1
+  fi
+  if [[ "${audio_reference_status}" == "000" || -z "${audio_reference_status}" ]]; then
+    echo "[dev-local] backend audio-reference route check did not reach server"
+    return 1
+  fi
+  echo "[dev-local] audio-reference route probe status: ${audio_reference_status} (expected != 404)"
   return 0
 }
 
@@ -257,6 +312,41 @@ ensure_backend_ready() {
 }
 
 ensure_backend_ready
+
+wait_for_sally() {
+  local attempts="${1:-40}"
+  for _ in $(seq 1 "${attempts}"); do
+    if curl -fsS "http://127.0.0.1:${SALLY_PORT}/health" >/dev/null 2>&1; then return 0; fi
+    if ! kill -0 "$SALLY_PID" >/dev/null 2>&1; then
+      echo "[dev-local] Sally MCP exited unexpectedly"
+      cat "${SALLY_LOG}" || true
+      return 1
+    fi
+    sleep 0.5
+  done
+  echo "[dev-local] Sally MCP did not become healthy"
+  cat "${SALLY_LOG}" || true
+  return 1
+}
+
+start_sally
+if ! wait_for_sally; then
+  echo "[dev-local] WARNING: Sally MCP is unavailable; the editor will remain read-only"
+fi
+
+monitor_sally() {
+  while true; do
+    sleep 2
+    if [[ -n "${SALLY_PID:-}" ]] && kill -0 "$SALLY_PID" >/dev/null 2>&1; then continue; fi
+    echo "[dev-local] Sally MCP stopped; restarting..."
+    start_sally
+    wait_for_sally || true
+  done
+}
+
+monitor_sally &
+SALLY_MONITOR_PID=$!
+echo "[dev-local] Sally MCP monitor started (pid: ${SALLY_MONITOR_PID})"
 
 monitor_backend() {
   local retry_delay=2

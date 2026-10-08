@@ -1,19 +1,7 @@
 const JSZip = require("jszip");
 const PDFDocument = require("pdfkit");
 const { parse } = require("node-html-parser");
-const {
-  AlignmentType,
-  BorderStyle,
-  Document,
-  HeadingLevel,
-  Packer,
-  Paragraph,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-  WidthType
-} = require("docx");
+const { buildDocx10Ed } = require("./charly-docx-10ed.js");
 
 const MIME_TYPES = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -50,6 +38,34 @@ function escapeXml(value = "") {
   return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
+const SUBTOPIC_SKILLS = Object.freeze({
+  ortografia: "Captación de Sistemas Simbólicos (CSM)",
+  gramatica: "Captación de Relaciones Simbólicas (CSR)",
+  dictado: "Memoria de Unidades Simbólicas (MSU)",
+  comprensionlectora: "Captación de Unidades Semánticas (CMU)",
+  expresionescrita: "Producción Divergente de Sistemas Semánticos (DMS)",
+  expresionoral: "Producción Divergente de Relaciones Semánticas (DMR)",
+  trazosdeletras: "Captación de Unidades Figurales (CUF)",
+  habilidades: "Captación de Sistemas Figurales (CSF)",
+  matematicas: "Producción Convergente de Sistemas Simbólicos (NSS)",
+  fracciones: "Evaluación de Sistemas Simbólicos (ESS)",
+  geometria: "Captación de Sistemas Figurales (CSF)",
+  historia: "Memoria de Sistemas Semánticos (MSS)",
+  geografia: "Captación de Relaciones Semánticas (CMR)",
+  naturales: "Evaluación de Clases Semánticas (EMC)",
+  civicaetica: "Evaluación de Sistemas Semánticos (EMS)",
+  socioemocional: "Evaluación de Relaciones Comportamentales (EBR)",
+  proyectos: "Producción Divergente de Implicaciones Semánticas (DMI)"
+});
+
+function resolveCognitiveSkillBackend(activity = {}, subtopic = "") {
+  if (activity.meta?.cognitiveSkill?.fullName) {
+    return `${activity.meta.cognitiveSkill.fullName} (${activity.meta.cognitiveSkill.code || "CSM"})`;
+  }
+  const cleanKey = clean(subtopic).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return SUBTOPIC_SKILLS[cleanKey] || "Captación de Sistemas Simbólicos (CSM)";
+}
+
 function inlineRuns(node, style = {}) {
   if (!node) return [];
   if (node.nodeType === 3) return clean(node.rawText) ? [{ text: node.rawText.replace(/\s+/g, " "), ...style }] : [];
@@ -72,6 +88,10 @@ function htmlBlocks(html = "") {
   const walk = (node) => {
     if (!node || node.nodeType === 3) return;
     const tag = String(node.tagName || "").toLowerCase();
+    if (tag === "img") {
+      blocks.push({ type: "image", src: node.getAttribute("src") || "", alt: node.getAttribute("alt") || "Recurso visual" });
+      return;
+    }
     if (/^h[1-6]$/.test(tag)) {
       blocks.push({ type: "heading", level: Number(tag.slice(1)), runs: inlineRuns(node), text: clean(node.text) });
       return;
@@ -79,14 +99,17 @@ function htmlBlocks(html = "") {
     if (tag === "p" || tag === "blockquote") {
       const text = clean(node.text);
       const classes = String(node.getAttribute?.("class") || "").toLowerCase();
+      const declaredStyle = node.getAttribute?.("data-word-style");
+      const isInstruction = tag === "blockquote" || /instruccion|instruction|cb-simple-instruction/.test(classes) || /^instrucci[oó]n\s*:/i.test(text) || Boolean(node.querySelector("strong, b")) || /^(lee|escribe|observa|subraya|completa|relaciona|clasifica|calcula|responde|contesta|encuentra|marca|une|ordena|traza|dibuja|recorta|colorea)\b/i.test(text);
       const type = node.classList?.contains("answer") || /respuesta|solucionario/.test(classes) || /^respuesta(?: esperada)?\s*:/i.test(text)
         ? "answer"
-        : /subinstruccion|sub-instruction/.test(classes)
-          ? "subinstruction"
-          : tag === "blockquote" || /instruccion|instruction/.test(classes) || /^instrucci[oó]n\s*:/i.test(text)
-            ? "instruction"
+        : isInstruction
+          ? "instruction"
+          : /subinstruccion|sub-instruction/.test(classes)
+            ? "subinstruction"
             : "paragraph";
-      if (text) blocks.push({ type, runs: inlineRuns(node), text });
+      if (text) blocks.push({ type, style: declaredStyle, runs: inlineRuns(node), text });
+      node.querySelectorAll("img").forEach(walk);
       return;
     }
     if (tag === "ul" || tag === "ol") {
@@ -106,7 +129,7 @@ function htmlBlocks(html = "") {
     const children = node.childNodes || [];
     if (!children.some((child) => child.nodeType !== 3)) {
       const text = clean(node.text);
-      if (text) blocks.push({ type: node.classList?.contains("answer") ? "answer" : "paragraph", runs: inlineRuns(node), text });
+      if (text) blocks.push({ type: node.classList?.contains("answer") ? "answer" : "paragraph", style: node.getAttribute?.("data-word-style"), runs: inlineRuns(node), text });
       return;
     }
     children.forEach(walk);
@@ -116,7 +139,7 @@ function htmlBlocks(html = "") {
 }
 
 function addHtmlSection(sections, label, title, html, extra = {}) {
-  if (!clean(parse(String(html || "")).text)) return;
+  if (!clean(parse(String(html || "")).text) && !/<img\b/i.test(html)) return;
   sections.push({ label, title: clean(title || label), blocks: htmlBlocks(html), ...extra });
 }
 
@@ -142,8 +165,38 @@ function collectApprovedDocument(session = {}, { documentKind = "student" } = {}
       } else if (reading.sections?.questionsHtml) addHtmlSection(sections, unitLabel, "Preguntas de comprensión", reading.sections.questionsHtml, { unitTitle, kind: "reading" });
     }
     for (const activity of (accepted.activities || [])) {
-      if (!teacherNotesOnly) addHtmlSection(sections, unitLabel, activity.section || activity.category || activity.title || "Actividad", activity.html, { unitTitle, kind: "activity" });
-      if (teacherNotesOnly) for (const note of (activity.notes || [])) addHtmlSection(sections, unitLabel, `${activity.section || activity.title || "Actividad"} · Notas`, note.html || note.text || note, { unitTitle, kind: "notes" });
+      if (!teacherNotesOnly) {
+        const subtopic = clean(activity.subtopic || activity.section || "Actividad");
+        const skill = resolveCognitiveSkillBackend(activity, subtopic);
+        const campo = clean(activity.category || unit.meta?.category || academic.category || "Lenguaje y comunicación");
+        const eje = clean(unit.sya?.ejeArticulador || "Apropiación de las culturas a través de la lectura y la escritura");
+        const comp = clean(unit.sya?.competencia || "");
+        const activityTitle = clean(activity.title || subtopic);
+
+        const activityBlocks = [
+          { type: "subtopic", style: "0103SUBTITULONIVEL2", text: `Subtema: ${subtopic}`, runs: [{ text: "Subtema: ", bold: true }, { text: subtopic }] },
+          { type: "campoFormativo", style: "0104CAMPOFORMATIVO", text: `Campo formativo: ${campo}`, runs: [{ text: "Campo formativo: ", bold: true }, { text: campo }] },
+          { type: "ejeArticulador", style: "0802EJEARTICULADOR", text: `Eje articulador: ${eje}`, runs: [{ text: "Eje articulador: ", bold: true }, { text: eje }] },
+          { type: "habilidades", style: "080502HABILIDADES", text: `Habilidad cognitiva: ${skill}`, runs: [{ text: "Habilidad cognitiva: ", bold: true }, { text: skill }] },
+          ...(comp ? [{ type: "competencia", style: "0801COMPETENCIA", text: `Competencia: ${comp}`, runs: [{ text: "Competencia: ", bold: true }, { text: comp }] }] : []),
+          { type: "sectionTitle", style: "0105TITULOSECCIONYCOMPETENCIA", text: activityTitle, runs: [{ text: activityTitle, bold: true }] },
+          ...htmlBlocks(activity.html)
+        ];
+
+        sections.push({ label: unitLabel, title: activityTitle, blocks: activityBlocks, unitTitle, kind: "activity", hasCustomHeader: true });
+      }
+      if (teacherNotesOnly) {
+        const subtopic = clean(activity.subtopic || activity.section || "Actividad");
+        for (const note of (activity.notes || [])) {
+          const noteTitle = clean(note.title || `${subtopic} · Notas`);
+          const noteBlocks = [
+            { type: "subtopic", style: "0103SUBTITULONIVEL2", text: `Subtema: ${subtopic}`, runs: [{ text: "Subtema: ", bold: true }, { text: subtopic }] },
+            { type: "sectionTitle", style: "0105TITULOSECCIONYCOMPETENCIA", text: noteTitle, runs: [{ text: noteTitle, bold: true }] },
+            ...htmlBlocks(note.html || note.text || note).map((b) => ({ ...b, style: "1002SPEC" }))
+          ];
+          sections.push({ label: unitLabel, title: noteTitle, blocks: noteBlocks, unitTitle, kind: "notes", hasCustomHeader: true });
+        }
+      }
     }
     for (const resource of (accepted.resources || [])) {
       if (!teacherNotesOnly) addHtmlSection(sections, unitLabel, resource.code || resource.title || resource.type || "Recurso", resource.html, { unitTitle, kind: "resource" });
@@ -160,91 +213,27 @@ function collectApprovedDocument(session = {}, { documentKind = "student" } = {}
   };
 }
 
-function wordRuns(runs = [], fallback = "") {
-  const source = runs.length ? runs : [{ text: fallback }];
-  return source.filter((run) => run.text).map((run) => new TextRun({
-    text: run.text,
-    bold: Boolean(run.bold),
-    italics: Boolean(run.italics),
-    superScript: Boolean(run.superscript),
-    subScript: Boolean(run.subscript),
-    underline: run.underline ? {} : undefined
-  }));
-}
-
-function wordBlock(block, listIndex) {
-  if (block.type === "table") {
-    const columnCount = Math.max(1, ...block.rows.map((row) => row.length));
-    return new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: block.rows.map((row) => new TableRow({ children: Array.from({ length: columnCount }, (_, index) => {
-        const cell = row[index] || { text: "" };
-        return new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: cell.text, bold: Boolean(cell.header) })] })], shading: cell.header ? { fill: "EAF2FF" } : undefined });
-      }) })),
-      borders: { top: { style: BorderStyle.SINGLE, size: 2, color: "CBD5E1" }, bottom: { style: BorderStyle.SINGLE, size: 2, color: "CBD5E1" }, left: { style: BorderStyle.SINGLE, size: 2, color: "CBD5E1" }, right: { style: BorderStyle.SINGLE, size: 2, color: "CBD5E1" }, insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "E2E8F0" }, insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "E2E8F0" } }
-    });
-  }
-  if (block.type === "list") return block.items.map((item) => new Paragraph({ children: wordRuns(item.runs, item.text), style: block.ordered ? "ListaNumerada" : "ListaVinetas", numbering: block.ordered ? { reference: "cb-numbering", level: 0, instance: listIndex } : undefined, bullet: block.ordered ? undefined : { level: 0 } }));
-  if (block.type === "break") return new Paragraph({ text: "" });
-  const style = block.type === "instruction" ? "Instruccion" : block.type === "subinstruction" ? "Subinstruccion" : block.type === "answer" ? "Respuesta" : block.type === "heading" ? (block.level <= 2 ? "Encabezado1" : "Encabezado2") : "Normal";
-  return new Paragraph({ children: wordRuns(block.runs, block.text), style, heading: block.type === "heading" ? (block.level <= 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3) : undefined });
-}
-
-async function buildDocx(documentData) {
-  const children = [
-    new Paragraph({ text: documentData.title, style: "Titulo", alignment: AlignmentType.LEFT }),
-    ...(documentData.subtitle ? [new Paragraph({ text: documentData.subtitle, style: "Subtitulo" })] : [])
-  ];
-  let currentUnit = "";
-  let listIndex = 1;
-  for (const section of documentData.sections) {
-    if (section.unitTitle !== currentUnit) {
-      currentUnit = section.unitTitle;
-      children.push(new Paragraph({ text: currentUnit, style: "Encabezado1", heading: HeadingLevel.HEADING_1, pageBreakBefore: children.length > 2 }));
-    }
-    children.push(new Paragraph({ text: section.title, style: "Encabezado2", heading: HeadingLevel.HEADING_2 }));
-    for (const block of section.blocks) {
-      const output = wordBlock(block, listIndex++);
-      if (Array.isArray(output)) children.push(...output); else children.push(output);
-    }
-  }
-  const doc = new Document({
-    creator: "Charly Brown",
-    title: documentData.title,
-    styles: {
-      default: { document: { run: { font: "Aptos", size: 21, color: "172033" }, paragraph: { spacing: { after: 120, line: 276 } } } },
-      paragraphStyles: [
-        { id: "Titulo", name: "Título", basedOn: "Normal", next: "Subtitulo", run: { font: "Aptos Display", size: 34, bold: true, color: "102A56" }, paragraph: { spacing: { after: 120 } } },
-        { id: "Subtitulo", name: "Subtítulo", basedOn: "Normal", next: "Normal", run: { size: 22, color: "52627A" }, paragraph: { spacing: { after: 280 } } },
-        { id: "Encabezado1", name: "Encabezado 1", basedOn: "Normal", next: "Normal", run: { size: 28, bold: true, color: "102A56" }, paragraph: { spacing: { before: 240, after: 100 } } },
-        { id: "Encabezado2", name: "Encabezado 2", basedOn: "Normal", next: "Normal", run: { size: 24, bold: true, color: "1D4ED8" }, paragraph: { spacing: { before: 180, after: 80 } } },
-        { id: "Instruccion", name: "Instrucción", basedOn: "Normal", next: "Normal", run: { italics: true, color: "334155" }, paragraph: { indent: { left: 360 }, border: { left: { style: BorderStyle.SINGLE, size: 12, color: "38BDF8", space: 8 } } } },
-        { id: "Subinstruccion", name: "Subinstrucción", basedOn: "Normal", next: "Normal", run: { color: "334155" }, paragraph: { indent: { left: 420, hanging: 220 }, spacing: { after: 80 } } },
-        { id: "Respuesta", name: "Respuesta esperada", basedOn: "Normal", next: "Normal", run: { italics: true, color: "C026D3" } },
-        { id: "ListaNumerada", name: "Lista numerada", basedOn: "Normal", next: "Normal", paragraph: { indent: { left: 420, hanging: 220 } } },
-        { id: "ListaVinetas", name: "Lista con viñetas", basedOn: "Normal", next: "Normal", paragraph: { indent: { left: 420, hanging: 220 } } }
-      ],
-      characterStyles: [
-        { id: "Negrita", name: "Negrita", run: { bold: true } },
-        { id: "Cursiva", name: "Cursiva", run: { italics: true } },
-        { id: "Superindice", name: "Superíndice", run: { superScript: true } },
-        { id: "Subindice", name: "Subíndice", run: { subScript: true } }
-      ]
-    },
-    numbering: { config: [{ reference: "cb-numbering", levels: [{ level: 0, format: "decimal", text: "%1.", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 420, hanging: 220 } } } }] }] },
-    sections: [{ properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, children }]
-  });
-  return Packer.toBuffer(doc);
-}
-
 function writePdfBlock(pdf, block) {
+  if (block.type === "image" && block.data) {
+    const availableWidth = pdf.page.width - pdf.page.margins.left - pdf.page.margins.right;
+    const availableHeight = pdf.page.height - pdf.page.margins.top - pdf.page.margins.bottom;
+    const scale = Math.min(availableWidth / block.width, availableHeight / block.height);
+    const width = block.width * scale, height = block.height * scale;
+    if (pdf.y + height > pdf.page.height - pdf.page.margins.bottom) pdf.addPage();
+    const y = pdf.y;
+    pdf.image(block.data, pdf.page.margins.left, y, { width, height });
+    pdf.y = y + height + 8;
+    return;
+  }
   if (block.type === "table") {
     const widths = block.rows.reduce((max, row) => Math.max(max, row.length), 1);
     const columnWidth = (pdf.page.width - pdf.page.margins.left - pdf.page.margins.right) / widths;
     block.rows.forEach((row) => {
-      const y = pdf.y;
+      pdf.font("Helvetica").fontSize(9);
       const heights = row.map((cell) => pdf.heightOfString(cell.text, { width: columnWidth - 12 }) + 12);
       const height = Math.max(28, ...heights);
+      if (pdf.y + height > pdf.page.height - pdf.page.margins.bottom) pdf.addPage();
+      const y = pdf.y;
       row.forEach((cell, index) => {
         const x = pdf.page.margins.left + index * columnWidth;
         pdf.save().fillColor(cell.header ? "#eaf2ff" : "#ffffff").rect(x, y, columnWidth, height).fill().strokeColor("#cbd5e1").rect(x, y, columnWidth, height).stroke().restore();
@@ -411,7 +400,7 @@ async function buildIdml(documentData) {
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-async function buildCharlyExport({ session = {}, format = "docx", documentKind = "student" } = {}) {
+async function buildCharlyExport({ session = {}, format = "docx", documentKind = "student", loadAsset } = {}) {
   const normalizedFormat = String(format || "").toLowerCase();
   if (!MIME_TYPES[normalizedFormat]) {
     const error = new Error("Formato de exportación no compatible.");
@@ -426,7 +415,8 @@ async function buildCharlyExport({ session = {}, format = "docx", documentKind =
     error.code = normalizedKind === "teacher-notes" ? "NO_TEACHER_NOTES" : "NO_APPROVED_CONTENT";
     throw error;
   }
-  const builders = { docx: buildDocx, pdf: buildPdf, idml: buildIdml };
+  await require("./charly-resources/export-images.js").hydrateImages(documentData, session, loadAsset);
+  const builders = { docx: buildDocx10Ed, pdf: buildPdf, idml: buildIdml };
   const buffer = await builders[normalizedFormat](documentData);
   const suffix = normalizedKind === "teacher-notes" ? "notas-del-maestro" : "contenido";
   return { buffer, contentType: MIME_TYPES[normalizedFormat], extension: normalizedFormat, filename: `${buildExportBaseName(session)}-${suffix}.${normalizedFormat}`, documentData };

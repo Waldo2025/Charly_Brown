@@ -113,12 +113,16 @@ test("timeline trim and duration controls explicitly take ownership as manual", 
     new URL("../public/podcaster/podcaster-timeline-clip-duration.js", import.meta.url),
     "utf8"
   );
+  const appSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
   const sceneTrimSection = interactionSource.slice(
     interactionSource.indexOf('if (drag.mode === "trim-start")', interactionSource.indexOf("function processTimelinePointerMove")),
     interactionSource.indexOf("function syncTrimmedSceneGeminiAnchor")
   );
   assert.match(sceneTrimSection, /durationMode:\s*"manual"/);
+  assert.match(interactionSource.slice(0, interactionSource.indexOf("let timelinePointerMoveRafId")), /syncOnScreenTextClipsWithSceneTrack,/);
+  assert.match(appSource.slice(appSource.indexOf("createPodcasterTimelineInteractionApi({"), appSource.indexOf("createPodcasterTimelineInteractionApi({") + 3500), /syncOnScreenTextClipsWithSceneTrack,/);
+  assert.match(interactionSource.slice(interactionSource.indexOf("function syncTrimmedSceneGeminiAnchor"), interactionSource.indexOf("function finalizeClipDrag")), /manualStartMs:\s*true/);
   assert.match(modalSource, /durationMode:\s*durationChanged \? "manual" : current\?\.durationMode/);
   assert.match(modalSource, /durationMode:\s*"manual"/);
 });

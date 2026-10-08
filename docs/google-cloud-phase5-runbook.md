@@ -11,13 +11,19 @@
 
 The long-job smoke covers scenario image, Gemini TTS, Lyria, Veo Fast, Cloud Tasks, the montage Cloud Run Job and cancellation. The baseline also covers an 80 MiB resumable upload, signed media and HTTP Range.
 
+## Gemini Live retirement gate
+
+`geminiApi` retains Gemini TTS jobs for Podcaster and Schroeder. The `/api/gemini/live-token` route returns `410` after the updated Function is deployed. `podcasterApi` is configured with `minInstances: 0`, so the first request after an idle period may take longer.
+
+Before removing the private `gemini-live-proxy` Cloud Run service, use the preview to generate and regenerate a Podcaster scene voice, save and reopen the session, play its saved voice, and export a montage containing that voice. Generate and play a new Schroeder voice too. Any failure stops proxy retirement. The user explicitly requested full Live retirement. Do not recreate the proxy as a rollback; preserve Gemini TTS and saved narration instead.
+
 ## Authentication check
 
 A `401` is valid only when the request has no Firebase ID token or the token is invalid. For a signed-in browser, verify that `Authorization: Bearer ...` is present and inspect `podcasterApi` logs. The client retries once with `getIdToken(true)`; it must not fall back to Render.
 
 ## Monitoring
 
-`monitorStalePodcasterJobs` runs every five minutes. It emits `podcaster_job_heartbeat_expired` for stale `running` AI or montage documents. `scripts/configure-google-cloud-alerts.mjs --execute` idempotently creates log metrics and policies for HTTP 5xx, Cloud Tasks depth, failed Cloud Run Jobs, stale heartbeats and Vertex quota errors.
+Firestore watchers schedule `checkPendingWorkTask` only for pending AI/export jobs. The global `monitorStalePodcasterJobs` cron was removed on October 6, 2026. Pending-job tasks emit `podcaster_job_heartbeat_expired` and close stale work; persisted Veo operations use their own polls and deadline. `scripts/configure-google-cloud-alerts.mjs --execute` idempotently creates log metrics and policies for HTTP 5xx, Cloud Tasks depth, failed Cloud Run Jobs, stale heartbeats and Vertex quota errors.
 
 Use `node scripts/reconcile-stale-google-cloud-jobs.mjs` for a dry-run of abandoned legacy montage jobs. Add `--execute` only after reviewing the count; it preserves the documents and marks them as `status=error`, `stage=interrupted` so existing clients treat them as terminal and users can start a fresh export.
 

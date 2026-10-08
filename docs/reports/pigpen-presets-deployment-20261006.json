@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-10-06T15:29:10.028Z",
+  "release": "sites/charly-brown/releases/1791300468349000",
+  "version": "sites/charly-brown/versions/76e86cc2f6f42c85",
+  "rollback": "sites/charly-brown/versions/ea2aa9ecaddce0fa",
+  "changed": [
+    "PigPenCreator.html",
+    "js/PigPenCreator.js",
+    "js/pigpen-experience-modal.mjs",
+    "js/pigpen-question-preferences.mjs",
+    "js/pigpen-experience-presets.mjs",
+    "js/pigpen-experience-presets-firestore.mjs"
+  ],
+  "preservedFiles": 822,
+  "hostingConfigUnchanged": true,
+  "privateRuleset": "projects/charly-brown/rulesets/5677b0ac-16bd-4dee-b19f-e7d7a56286bb",
+  "assetsVerified": true
+}

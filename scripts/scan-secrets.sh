@@ -22,10 +22,20 @@ if rg -n -S "$PATTERN" . "${EXCLUDES[@]}"; then
   exit 1
 fi
 
-# Allow Firebase Web apiKey (public by design), but block other AIza keys.
+# The Firebase Web apiKey is public by design: it ships inside the browser bundle, so it
+# is allowed wherever it appears. It is pinned to the exact value instead of to an
+# `apiKey:`-looking line, which keeps a Gemini or other Google key pasted into a config
+# object failing the scan. Adding a second Firebase app means listing its public key here.
+FIREBASE_WEB_API_KEYS=(
+  "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0"
+)
+
 AZ_LINES="$(rg -n -S 'AIza[0-9A-Za-z_-]{20,}' . "${EXCLUDES[@]}" || true)"
 if [[ -n "$AZ_LINES" ]]; then
-  FILTERED="$(printf '%s\n' "$AZ_LINES" | rg -v 'apiKey\s*:\s*.*"AIza|firebase-web-config\.js' || true)"
+  FILTERED="$AZ_LINES"
+  for web_key in "${FIREBASE_WEB_API_KEYS[@]}"; do
+    FILTERED="$(printf '%s\n' "$FILTERED" | rg -v -- "$web_key" || true)"
+  done
   if [[ -n "$FILTERED" ]]; then
     printf '%s\n' "$FILTERED"
     echo "[secret-scan] FAIL: potential non-Firebase Google API keys found"

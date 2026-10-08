@@ -1,0 +1,7 @@
+// Read-only reconciliation of all retained PigPen topic records against curriculum plan.
+const path=require('node:path'),{createRequire}=require('node:module');const rf=createRequire(path.resolve(__dirname,'../functions/package.json'));
+const {initializeApp,cert,deleteApp}=rf('firebase-admin/app'),{getFirestore}=rf('firebase-admin/firestore');
+const app=initializeApp({credential:cert(path.resolve(__dirname,'../charly-brown-firebase-adminsdk-fbsvc-6c32e4f96b.json')),projectId:'charly-brown'}),db=getFirestore(app);
+const iso=x=>x?.toDate?.()?.toISOString?.()||x?.toISOString?.()||String(x||'');
+async function main(){const parents=await db.collection('escapeRoom').get(),rows=[];for(const p of parents.docs){const topics=await p.ref.collection('topics').get();topics.forEach(t=>{const x=t.data(),a=x.project||{},parent=p.data(),m=Array.isArray(a.misiones)?a.misiones:[];rows.push({id:t.id,parentId:p.id,createdAt:iso(x.createdAt),title:a.titulo||x.title||'',level:x.nivel||a.nivel||parent.nivel||parent.project?.nivel||'',grade:x.grado||a.grado||parent.grado||parent.project?.grado||'',trim:x.trimestre||a.trimestre||parent.trimestre||parent.project?.trimestre||'',theme:x.tema||a.tema||x.unidad||a.unidad||x.academicNumber||parent.tema||parent.unidad||'',subject:a.materia||'',missions:m.length});});}console.log(JSON.stringify({rows},null,2));}
+main().catch(e=>{console.error(e.code||e.message);process.exitCode=1;}).finally(()=>deleteApp(app));

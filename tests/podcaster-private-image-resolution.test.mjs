@@ -51,3 +51,26 @@ test("untokenized Firebase session images preserve their Storage object path", a
   assert.equal(proxy.pathname, "/api/assets/proxy-image");
   assert.equal(proxy.searchParams.get("storagePath"), "podcaster/sessions/s1/scene.webp");
 });
+
+// Producción: una capa de escena con imagen de la galería (`images/<uid>/…`)
+// llegaba al <img> como proxy de /api/assets y respondía 400 invalid_storage_path,
+// porque el modo streaming de getBlobUrlSync devolvía ese proxy ya "resuelto".
+test("las imágenes fuera de podcaster/ se resuelven por el SDK y no se cachean como proxy", async () => {
+  const controller = new PodcasterPlaybackController();
+  const galleryProxy = "https://charly-brown.web.app/api/assets/proxy-image?storagePath=images%2F9iuid%2Fscene_2%2FEscena02.jpg&u=2026-10-05T13%3A50%3A54.900Z";
+  const signedUrl = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/images%2F9iuid%2Fscene_2%2FEscena02.jpg?alt=media&token=sdk";
+  let sdkRequest = "";
+  controller.deps = {
+    resolveFirebaseStorageUrl: async (gsPath) => {
+      sdkRequest = gsPath;
+      return signedUrl;
+    },
+    resolveAuthorizedAssetUrl: async () => {
+      throw new Error("la galería no debe pasar por la API de assets");
+    }
+  };
+
+  assert.ok(!controller.getBlobUrlSync(galleryProxy), "el proxy 400 no puede quedar en la caché");
+  assert.equal(await controller.resolveStageImageSource(galleryProxy), signedUrl);
+  assert.equal(sdkRequest, "gs://charly-brown.firebasestorage.app/images/9iuid/scene_2/Escena02.jpg");
+});

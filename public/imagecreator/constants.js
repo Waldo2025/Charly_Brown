@@ -20,15 +20,17 @@ export const IMAGE_CREATOR_MODES = Object.freeze([
   { value: "generate", label: "Texto a imagen" },
   { value: "edit", label: "Editar referencia" },
   { value: "compose", label: "Componer referencias" },
-  { value: "variation", label: "Variación" }
+  { value: "variation", label: "Variación" },
+  { value: "video_script", label: "Guion de Video" }
 ]);
 
 export const IMAGE_CREATOR_ASPECT_RATIOS = Object.freeze([
   "1:1",
-  "4:5",
-  "3:4",
   "16:9",
-  "9:16"
+  "9:16",
+  "4:3",
+  "3:4",
+  "4:5"
 ]);
 
 export const IMAGE_CREATOR_IMAGE_SIZES = Object.freeze([
@@ -43,6 +45,12 @@ export const IMAGE_CREATOR_DOWNLOAD_FORMATS = Object.freeze([
   "webp"
 ]);
 
+export const IMAGE_CREATOR_PERSON_GENERATION = Object.freeze([
+  "ALLOW_ALL",
+  "ALLOW_ADULT",
+  "DONT_ALLOW"
+]);
+
 export const IMAGE_CREATOR_COUNT_OPTIONS = Object.freeze([1, 2, 3, 4]);
 
 export function modelSupportsImageSize(model = "") {
@@ -54,10 +62,11 @@ export function createDefaultImageCreatorOptions() {
   return {
     mode: "generate",
     model: IMAGE_CREATOR_MODELS[1],
-    aspectRatio: "1:1",
-    imageSize: "2K",
+    aspectRatio: "16:9",
+    imageSize: "1K",
     downloadFormat: "png",
-    count: 1
+    count: 1,
+    personGeneration: "ALLOW_ALL"
   };
 }
 
@@ -71,6 +80,7 @@ export function normalizeImageCreatorOptions(options = {}) {
     aspectRatio: IMAGE_CREATOR_ASPECT_RATIOS.includes(options.aspectRatio) ? options.aspectRatio : defaults.aspectRatio,
     imageSize: IMAGE_CREATOR_IMAGE_SIZES.includes(options.imageSize) ? options.imageSize : defaults.imageSize,
     downloadFormat: IMAGE_CREATOR_DOWNLOAD_FORMATS.includes(options.downloadFormat) ? options.downloadFormat : defaults.downloadFormat,
-    count: IMAGE_CREATOR_COUNT_OPTIONS.includes(count) ? count : defaults.count
+    count: IMAGE_CREATOR_COUNT_OPTIONS.includes(count) ? count : defaults.count,
+    personGeneration: IMAGE_CREATOR_PERSON_GENERATION.includes(options.personGeneration) ? options.personGeneration : defaults.personGeneration
   };
 }

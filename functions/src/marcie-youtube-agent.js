@@ -1,12 +1,15 @@
 const crypto = require("node:crypto");
-const { buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js");
+const { buildVertexGenerateRequest } = require("./vertex.js");
 
-const ANALYSIS_VERSION = 2;
+const ANALYSIS_VERSION = 4;
 const MAX_YOUTUBE_VIDEOS = 5;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const ANALYSIS_TIMEOUT_MS = 500_000;
 const INTERACTION_POLL_MS = 2_000;
+const PUBLIC_METADATA_TIMEOUT_MS = 15_000;
 const YOUTUBE_ANALYSIS_CACHE_COLLECTION = "MarcieYoutubeAnalysisCache";
+const VIDEO_ANALYSIS_MODEL = "gemini-3.8-flash";
+const VIDEO_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
 
 function clean(value, max = 1200) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, max);
@@ -14,6 +17,20 @@ function clean(value, max = 1200) {
 
 function list(value, max = 20, itemMax = 500) {
   return (Array.isArray(value) ? value : []).map((item) => clean(item, itemMax)).filter(Boolean).slice(0, max);
+}
+
+function uniqueList(values = [], max = 20, itemMax = 500) {
+  const seen = new Set();
+  const result = [];
+  for (const raw of values) {
+    const item = clean(raw, itemMax);
+    const key = item.toLowerCase();
+    if (!item || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+    if (result.length >= max) break;
+  }
+  return result;
 }
 
 function youtubeAnalysisCacheKey({ ownerId = "", videoId = "", objective = "", language = "es-MX" } = {}) {
@@ -62,6 +79,7 @@ function compactVideoAnalysisForCache(video = {}) {
           id: clean(video.bibliographySource.id, 120),
           sourceType: "youtube_video",
           title: clean(video.bibliographySource.title, 500),
+          channel: clean(video.bibliographySource.channel || video.channel, 300),
           authors: list(video.bibliographySource.authors, 10, 300),
           publisher: "YouTube",
           publishedAt: clean(video.bibliographySource.publishedAt, 40),
@@ -118,6 +136,28 @@ function responseText(response = {}) {
     .replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
 }
 
+async function fetchText(url, { timeoutMs = PUBLIC_METADATA_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "Accept-Language": "es-MX,es;q=0.9,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 MarcieEditorialAgent/1.0"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) throw Object.assign(new Error(`youtube_fetch_${response.status}`), { code: `youtube_fetch_${response.status}`, status: response.status });
+    return response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJson(url, options = {}) {
+  return JSON.parse(await fetchText(url, options));
+}
+
 function parseJson(value = "") {
   const text = String(value || "");
   try { return JSON.parse(text); } catch (_) {
@@ -163,14 +203,216 @@ function shouldFallbackToGenerateContent(error) {
   return /not found|unimplemented|unsupported|unknown field|invalid argument|interactions/i.test(details);
 }
 
+function errorDetailText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value); } catch (_) { return String(value); }
+}
+
+function youtubeErrorReason(error) {
+  const parts = [
+    clean(error?.code || "", 80),
+    clean(error?.message || "", 220),
+    clean(error?.cause?.code || "", 80),
+    clean(error?.cause?.message || "", 220),
+    clean(errorDetailText(error?.response?.data), 300)
+  ].filter(Boolean);
+  const unique = [];
+  for (const part of parts) {
+    if (!unique.some((item) => item === part)) unique.push(part);
+  }
+  return clean(unique.join(": "), 500) || "youtube_analysis_failed";
+}
+
+function extractJsonArrayAfterMarker(text = "", marker = "") {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = text.indexOf("[", markerIndex + marker.length);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") inString = false;
+      continue;
+    }
+    if (character === "\"") inString = true;
+    else if (character === "[") depth += 1;
+    else if (character === "]") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+function stripCaptionText(value = "") {
+  return clean(String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">"), 20000);
+}
+
+async function fetchYoutubePublicMetadata(source) {
+  let page = {};
+  try { page = youtubeMetadataFromHtml(await fetchText(source.url), source); } catch (_) {}
+  let oembed = {};
+  if (!page.title || !page.channel) {
+    try { oembed = await fetchJson(`https://www.youtube.com/oembed?url=${encodeURIComponent(source.url)}&format=json`); } catch (_) {}
+  }
+  return {
+    title: page.title || clean(oembed.title, 500),
+    channel: page.channel || clean(oembed.author_name, 300),
+    publishedAt: page.publishedAt || "",
+    authorUrl: clean(oembed.author_url, 1000),
+    thumbnailUrl: clean(oembed.thumbnail_url, 1000)
+  };
+}
+
+function youtubeMetadataFromHtml(html, source) {
+  const value = String(html || "");
+  const expected = source?.videoId;
+  const fromJsonString = key => {
+    const match = value.match(new RegExp(`"${key}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`));
+    if (!match) return "";
+    try { return JSON.parse(match[1]); } catch (_) { return ""; }
+  };
+  const pageId = fromJsonString("externalVideoId") || value.match(/<link[^>]+rel="canonical"[^>]+href="[^"]*[?&]v=([A-Za-z0-9_-]{11})/i)?.[1];
+  if (!expected || pageId !== expected) return {};
+  let structured = {};
+  for (const match of value.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const entries = Array.isArray(parsed) ? parsed : [parsed];
+      structured = entries.find(item => item?.["@type"] === "VideoObject" && String(item["@id"] || item.url || "").includes(expected)) || structured;
+    } catch (_) {}
+  }
+  const date = clean(structured.uploadDate || fromJsonString("uploadDate") || fromJsonString("publishDate"), 40);
+  return {
+    title: clean(structured.name || fromJsonString("title"), 500),
+    channel: clean(fromJsonString("ownerChannelName") || fromJsonString("author"), 300),
+    publishedAt: /^\d{4}-\d{2}-\d{2}/.test(date) ? date.slice(0, 10) : ""
+  };
+}
+
+function applyPublicMetadata(video, metadata = {}) {
+  if (!video) return video;
+  const title = clean(metadata.title, 500) || video.title;
+  const channel = clean(metadata.channel, 300) || video.channel;
+  const publishedAt = clean(metadata.publishedAt, 40) || video.publishedAt;
+  return {
+    ...video, title, channel, publishedAt,
+    bibliographySource: {
+      ...(video.bibliographySource || {}), title, channel,
+      authors: channel ? [channel] : video.bibliographySource?.authors || [],
+      publishedAt
+    }
+  };
+}
+
+async function fetchYoutubePublicCaptions(source) {
+  const html = await fetchText(source.url);
+  const rawTracks = extractJsonArrayAfterMarker(html, "\"captionTracks\":");
+  if (!rawTracks) throw Object.assign(new Error("YouTube no expuso pistas de subtítulos en la respuesta pública."), { code: "youtube_caption_tracks_missing" });
+  let tracks = [];
+  try { tracks = JSON.parse(rawTracks); } catch (_) {
+    throw Object.assign(new Error("No se pudieron interpretar las pistas de subtítulos de YouTube."), { code: "youtube_caption_tracks_invalid" });
+  }
+  const preferred = tracks.find((track) => /^es(?:-|$)/i.test(track.languageCode || ""))
+    || tracks.find((track) => /^en(?:-|$)/i.test(track.languageCode || ""))
+    || tracks[0];
+  if (!preferred?.baseUrl) throw Object.assign(new Error("La pista de subtítulos no tiene una URL de descarga."), { code: "youtube_caption_url_missing" });
+  const captionUrl = new URL(preferred.baseUrl);
+  captionUrl.searchParams.set("fmt", "json3");
+  const raw = await fetchText(captionUrl.toString());
+  if (!raw.trim()) throw Object.assign(new Error("YouTube anunció subtítulos, pero devolvió vacía su descarga pública."), { code: "youtube_caption_download_empty" });
+  try {
+    const parsed = JSON.parse(raw);
+    const captions = stripCaptionText((parsed.events || [])
+      .flatMap((event) => (event.segs || []).map((segment) => segment.utf8 || ""))
+      .join(" "));
+    if (captions) return captions;
+  } catch (_) {
+    // Una página HTML de error con estado 200 no es una transcripción.
+  }
+  throw Object.assign(new Error("La descarga de subtítulos no contiene segmentos legibles."), { code: "youtube_caption_content_invalid" });
+}
+
+async function analyzeWithPublicYoutubeFallback(client, source, options = {}) {
+  let captions = "";
+  let captionsError = null;
+  try {
+    captions = await fetchYoutubePublicCaptions(source);
+  } catch (error) {
+    captionsError = error;
+  }
+  if (typeof options.onPublicFallback === "function") {
+    try {
+      options.onPublicFallback({
+        source,
+        captionsAvailable: Boolean(captions),
+        captionsReason: captions ? "" : youtubeErrorReason(captionsError) || "youtube_public_captions_unavailable_or_unreadable",
+        firstReason: options.firstReason || "",
+        fallbackReason: options.fallbackReason || ""
+      });
+    } catch (_) {}
+  }
+  if (!captions) {
+    throw Object.assign(new Error("Gemini no pudo leer el video y no se pudo obtener una transcripción pública legible."), {
+      code: "youtube_public_captions_unavailable",
+      status: 422,
+      cause: captionsError || undefined
+    });
+  }
+  if (!client?.models?.generateContent) {
+    throw Object.assign(new Error("No está disponible el modelo para analizar los subtítulos públicos."), {
+      code: "youtube_caption_analysis_unavailable",
+      status: 503
+    });
+  }
+
+  const metadata = await fetchYoutubePublicMetadata(source);
+  const request = buildVertexGenerateRequest({
+    model: options.model || VIDEO_ANALYSIS_MODEL,
+    payload: {
+      contents: [{ role: "user", parts: [{ text: `Analiza estos subtítulos públicos de YouTube como fuente editorial. No reproduzcas ni guardes una transcripción completa. Devuelve SOLO JSON con el mismo esquema solicitado.
+Título: ${metadata.title}
+Canal: ${metadata.channel}
+Objetivo editorial: ${clean(options.objective, 1000) || "identificar ideas utilizables para un artículo educativo"}
+Subtítulos públicos parciales:
+${captions.slice(0, 12000)}
+
+JSON: {"title":"","channel":"","publishedAt":"","summary":"","centralIdea":"","neuroeducationConnection":"","topics":[""],"concepts":[""],"proposedTopics":[""],"evidenceItems":[{"id":"","text":"","timestamp":"","evidenceKind":"video_attribution","needsCorroboration":true}],"shortQuotes":[],"warnings":[""]}` }] }],
+      generationConfig: { maxOutputTokens: 8192, responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "MEDIUM" } }
+    }
+  });
+  const parsed = parseJson(responseText(await client.models.generateContent(request)));
+  const normalized = normalizeVideoAnalysis({
+    ...parsed,
+    title: metadata.title || parsed.title,
+    channel: metadata.channel || parsed.channel,
+    publishedAt: metadata.publishedAt || parsed.publishedAt,
+    warnings: uniqueList([...(parsed.warnings || []), "Gemini no pudo ingerir directamente el video; el análisis se realizó con subtítulos públicos de YouTube."], 12, 500)
+  }, source);
+  normalized.analysisMode = "public_captions_fallback";
+  return normalized;
+}
+
 async function analyzeWithAgenticInteraction(client, source, options = {}) {
   if (!client?.interactions?.create) throw Object.assign(new Error("youtube_interactions_unavailable"), { code: "youtube_interactions_unavailable" });
   const interaction = await client.interactions.create({
-    model: options.model || DEFAULT_TEXT_MODEL,
+    model: options.model || VIDEO_ANALYSIS_MODEL,
     background: true,
     response_mime_type: "application/json",
     input: [
-      { type: "video", uri: source.url, mime_type: "video/mp4", processing: "agentic", resolution: "low" },
+      { type: "video", uri: source.url, processing: "agentic" },
       { type: "text", text: videoPrompt(options) }
     ],
     generation_config: { max_output_tokens: 16384 }
@@ -185,16 +427,16 @@ async function analyzeWithAgenticInteraction(client, source, options = {}) {
 async function analyzeWithGenerateContent(client, source, options = {}) {
   if (!client?.models?.generateContent) throw Object.assign(new Error("youtube_analysis_client_unavailable"), { status: 503 });
   const request = buildVertexGenerateRequest({
-    model: options.model || DEFAULT_TEXT_MODEL,
+    model: options.model || VIDEO_ANALYSIS_MODEL,
     payload: {
       contents: [{ role: "user", parts: [
         { fileData: { fileUri: source.url, mimeType: "video/mp4" } },
         { text: videoPrompt(options) }
       ] }],
       generationConfig: {
-        maxOutputTokens: 16384,
+        maxOutputTokens: 8192,
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: "HIGH" },
+        thinkingConfig: { thinkingLevel: "MEDIUM" },
         mediaResolution: "MEDIA_RESOLUTION_LOW"
       }
     }
@@ -229,6 +471,7 @@ function normalizeVideoAnalysis(parsed = {}, source = {}) {
     id: sourceId,
     sourceType: "youtube_video",
     title,
+    channel,
     authors: channel ? [channel] : [],
     publisher: "YouTube",
     publishedAt,
@@ -268,14 +511,54 @@ Devuelve SOLO JSON: {"title":"","channel":"","publishedAt":"YYYY-MM-DD o vacío"
 
 async function analyzeSingleYoutubeVideo(source, options = {}) {
   const client = options.client;
-  let response;
-  try {
-    response = await withDeadline(analyzeWithAgenticInteraction(client, source, options), options.timeoutMs);
-  } catch (error) {
-    if (!shouldFallbackToGenerateContent(error)) throw error;
-    response = await withDeadline(analyzeWithGenerateContent(client, source, options), options.timeoutMs);
+  const models = [options.model || VIDEO_ANALYSIS_MODEL, ...VIDEO_FALLBACK_MODELS]
+    .filter((model, index, all) => all.indexOf(model) === index);
+  const attemptTimeoutMs = Math.min(options.timeoutMs || 150_000, 150_000);
+  let lastError = null;
+  for (const [index, model] of models.entries()) {
+    try {
+      // Vertex documenta las URLs de YouTube mediante generateContent.
+      // Interactions devuelve "Unsupported model interaction" para este cliente.
+      const response = await withDeadline(analyzeWithGenerateContent(client, source, { ...options, model }), attemptTimeoutMs);
+      const parsed = parseJson(responseText(response));
+      if (!clean(parsed.summary || parsed.centralIdea)) {
+        throw Object.assign(new Error("Gemini devolvió un análisis del video sin contenido verificable."), { code: "youtube_analysis_empty_response" });
+      }
+      const metadata = await fetchYoutubePublicMetadata(source).catch(() => null);
+      const video = normalizeVideoAnalysis({
+        ...parsed,
+        title: metadata?.title || parsed.title,
+        channel: metadata?.channel || parsed.channel,
+        publishedAt: metadata?.publishedAt || parsed.publishedAt
+      }, source);
+      video.analysisMode = "vertex_video";
+      return video;
+    } catch (error) {
+      lastError = error;
+      if (typeof options.onVideoFallback === "function") {
+        options.onVideoFallback({ source, model, reason: youtubeErrorReason(error) });
+      }
+      if (index < models.length - 1 && /\b429\b|RESOURCE_EXHAUSTED|resource exhausted/i.test(youtubeErrorReason(error))) {
+        await (options.sleep || delay)(Math.min(4_000, 1_000 * 2 ** index));
+      }
+    }
   }
-  return normalizeVideoAnalysis(parseJson(responseText(response)), source);
+  try {
+    return await analyzeWithPublicYoutubeFallback(client, source, {
+      ...options,
+      firstReason: "vertex_generate_content_exhausted",
+      fallbackReason: youtubeErrorReason(lastError)
+    });
+  } catch (publicError) {
+    throw Object.assign(new Error(youtubeErrorReason(publicError)), {
+      code: clean(publicError?.code || lastError?.code || "youtube_analysis_failed", 120),
+      status: publicError?.status || lastError?.status || lastError?.response?.status,
+      cause: publicError,
+      firstReason: "vertex_generate_content_exhausted",
+      fallbackReason: youtubeErrorReason(lastError),
+      publicFallbackReason: youtubeErrorReason(publicError)
+    });
+  }
 }
 
 async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-MX" } = {}, options = {}) {
@@ -301,11 +584,18 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
           } catch (_) {}
         }
         if (video?.videoId === source.videoId) {
+          if (!video.channel || !video.publishedAt || /^Video de YouTube [A-Za-z0-9_-]{11}$/.test(video.title)) {
+            const metadata = await fetchYoutubePublicMetadata(source).catch(() => null);
+            video = applyPublicMetadata(video, metadata);
+            if (metadata && typeof options.writeCachedAnalysis === "function") {
+              try { await options.writeCachedAnalysis({ source, objective, language, analysisVersion: ANALYSIS_VERSION, video: compactVideoAnalysisForCache(video) }); } catch (_) {}
+            }
+          }
           cacheHitCount += 1;
         } else {
           cacheMissCount += 1;
           video = await (options.analyzeVideo || analyzeSingleYoutubeVideo)(source, { ...options, objective, language });
-          if (typeof options.writeCachedAnalysis === "function") {
+          if (video?.cacheable !== false && typeof options.writeCachedAnalysis === "function") {
             try {
               await options.writeCachedAnalysis({ source, objective, language, analysisVersion: ANALYSIS_VERSION, video: compactVideoAnalysisForCache(video) });
             } catch (_) {}
@@ -313,7 +603,14 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
         }
         videos.push(video);
       } catch (error) {
-        rejectedVideos.push({ videoId: source.videoId, url: source.url, reason: clean(error?.code || error?.message || "youtube_analysis_failed", 160) });
+        rejectedVideos.push({
+          videoId: source.videoId,
+          url: source.url,
+          reason: youtubeErrorReason(error),
+          firstReason: clean(error?.firstReason || "", 500),
+          fallbackReason: clean(error?.fallbackReason || "", 500),
+          publicFallbackReason: clean(error?.publicFallbackReason || "", 500)
+        });
       }
     }
   });
@@ -359,9 +656,12 @@ module.exports = {
   analyzeWithAgenticInteraction,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
+  fetchYoutubePublicMetadata,
   normalizeYoutubeUrl,
   normalizeYoutubeUrls,
   normalizeVideoAnalysis,
+  youtubeMetadataFromHtml,
+  youtubeErrorReason,
   compactVideoAnalysisForCache,
   youtubeAnalysisCacheKey,
   videoPrompt

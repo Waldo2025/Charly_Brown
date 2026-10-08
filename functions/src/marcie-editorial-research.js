@@ -1,19 +1,50 @@
+const { scheduleResearch, researchClient, requestDeadline } = require("./marcie-research-runtime.js");
 const researchPolicy = require("./marcie-research-policy.js");
 const bibliography = require("./marcie-bibliography.js");
 const crypto = require("node:crypto");
 const { getAdminServices } = require("./common.js");
-const { createVertexClient, buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js");
+const {
+  createVertexClient,
+  buildVertexGenerateRequest,
+  DEFAULT_TEXT_MODEL,
+  MARCIE_FALLBACK_MODELS,
+  normalizeTextModel
+} = require("./vertex.js");
 const { verifyCandidateSources } = require("./marcie-source-verifier.js");
+const { searchScientificCatalogs } = require("./marcie-catalog-search.js");
 const { normalizeYoutubeUrl } = require("./marcie-youtube-agent.js");
+const { autoRepairEvidence } = require("./marcie-evidence-repair.js");
 
 const TREND_SCHEMA_VERSION = 6;
 const DEFAULT_SETTINGS = { cadence: "weekly", region: "MX", timezone: "America/Cancun", discoveryMode: "general_education_brain" };
 const AIDA_PHASES = ["headline", "problem", "deepen", "agitate", "turn", "why", "change", "close"];
-const RESEARCH_DEADLINE_MS = 510_000;
-const EVIDENCE_VERIFY_DEADLINE_MS = 105_000;
-const RESEARCH_PERIOD_DAYS = Object.freeze({ "24h": 1, "7d": 7, "1m": 30, "3m": 90, "6m": 180, "12m": 365 });
+const RESEARCH_DEADLINE_MS = 210_000;
+const EVIDENCE_VERIFY_DEADLINE_MS = 240_000;
+const RESEARCH_PERIOD_DAYS = Object.freeze({ "24h": 1, "7d": 7, "1m": 30, "3m": 90, "6m": 180, "12m": 365, "5y": 1825 });
+const SHARED_PAGE_TTL_MS = 10 * 60 * 1000;
+const sharedPageEntries = new Map();
+const sharedPageCache = {
+  get(url) {
+    const entry = sharedPageEntries.get(url);
+    if (!entry) return undefined;
+    if (Date.now() - entry.createdAt > SHARED_PAGE_TTL_MS) { sharedPageEntries.delete(url); return undefined; }
+    return entry.promise;
+  },
+  set(url, promise) {
+    if (sharedPageEntries.size >= 150) sharedPageEntries.delete(sharedPageEntries.keys().next().value);
+    sharedPageEntries.set(url, { promise, createdAt: Date.now() });
+    promise.catch(() => { if (sharedPageEntries.get(url)?.promise === promise) sharedPageEntries.delete(url); });
+  }
+};
 
 function clampText(value, max = 1000) { return String(value == null ? "" : value).trim().slice(0, max); }
+function hasVerifiedPublicationYear(source = {}) { return bibliography.year(source) !== "s. f."; }
+function isGenericLandingUrl(value = "") {
+  try {
+    const url = new URL(value);
+    return url.pathname === "/" && !url.search;
+  } catch (_) { return false; }
+}
 function normalizeVideoEvidence(value = {}) {
   const sources = [];
   const allowedIds = new Set();
@@ -26,6 +57,7 @@ function normalizeVideoEvidence(value = {}) {
       id,
       sourceType: "youtube_video",
       title: clampText(item?.title, 500) || `Video de YouTube ${normalized.videoId}`,
+      channel: clampText(item?.channel || item?.authors?.[0], 300),
       authors: (Array.isArray(item?.authors) ? item.authors : []).map((author) => clampText(author, 300)).filter(Boolean).slice(0, 3),
       publisher: "YouTube",
       publishedAt: /^\d{4}(?:-\d{2}-\d{2})?/.test(clampText(item?.publishedAt, 40)) ? clampText(item.publishedAt, 40) : "",
@@ -151,29 +183,130 @@ function parseJsonResponse(response = {}) {
   }
 }
 
-async function generateJson({ client, prompt, tools = [], maxOutputTokens = 8192 }) {
+function waitMs(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, delayMs)));
+}
+
+function isTransientResearchError(error) {
+  const status = Number(error?.status || error?.code || error?.response?.status || 0);
+  const text = String(error?.message || error?.response?.data || error || "");
+  return [408, 429, 500, 502, 503, 504].includes(status)
+    || /RESOURCE_EXHAUSTED|UNAVAILABLE|Too Many Requests|quota|overloaded|capacity/i.test(text);
+}
+
+async function generateResearchContent({ client, model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS, payload }) {
+  const primaryModel = normalizeTextModel(model);
+  const models = [...new Set([
+    primaryModel,
+    ...(Array.isArray(fallbackModels) ? fallbackModels : MARCIE_FALLBACK_MODELS)
+      .map((candidate) => normalizeTextModel(candidate))
+  ])];
   let lastError;
+  for (const candidate of models) {
+    try {
+      const generate = () => client.models.generateContent(buildVertexGenerateRequest({ model: candidate, payload }));
+      const response = await (client.productionManaged ? generate() : scheduleResearch(generate, client.researchSignal));
+      return { response, model: candidate };
+    } catch (error) {
+      lastError = error;
+      if (client.researchSignal?.aborted || error?.code === "marcie_research_call_timeout" || !isTransientResearchError(error) || candidate === models.at(-1)) throw error;
+      console.warn(JSON.stringify({ severity: "WARNING", event: "marcie_research_model_fallback", fromModel: candidate, toModel: models[models.indexOf(candidate) + 1], status: Number(error?.status || error?.code || 0) || null }));
+    }
+  }
+  throw lastError || new Error("marcie_research_generation_failed");
+}
+
+async function generateJson({ client, prompt, tools = [], maxOutputTokens = 8192, model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS, researchQuery, researchDomains = [], excludedDomains = [], evidenceGap, reformulation }) {
+  let discovery;
+  if (require('./research/budget.js').hasSearch(tools)) {
+    const query = researchQuery || prompt.match(/Investiga(?: el tema)? ["“]([^"”]+)["”]/i)?.[1] || prompt.match(/Investiga ([^.\n]+)/i)?.[1] || 'educación pedagogía aprendizaje investigaciones recientes';
+    discovery = await require('./research/search.js').prepareResearch({ prompt, client, model, query, domains: researchDomains, excludedDomains, evidenceGap, reformulation });
+    prompt = discovery.prompt;
+    tools = tools.filter(tool => !require('./research/budget.js').hasSearch([tool]));
+  }
+
+  let lastError;
+  let activeModel = normalizeTextModel(model);
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const startedAt = Date.now();
     const retryInstruction = attempt
       ? "\n\nREINTENTO DE FORMATO: la respuesta anterior no fue JSON válido. Devuelve un único objeto JSON completo, sin Markdown, comentarios ni texto antes o después. Revisa comas, corchetes y llaves antes de responder."
       : "";
-    const response = await client.models.generateContent(buildVertexGenerateRequest({
-      model: DEFAULT_TEXT_MODEL,
+    const generated = (attempt === 0 && discovery?.preparedGeneration) || await generateResearchContent({
+      client,
+      model: activeModel,
+      fallbackModels,
       payload: {
         contents: [{ role: "user", parts: [{ text: `${prompt}${retryInstruction}` }] }],
         ...(tools.length ? { tools } : {}),
         generationConfig: { maxOutputTokens, ...(tools.length ? {} : { responseMimeType: "application/json" }) }
       }
-    }));
+    });
+    const response = generated.response;
+    activeModel = generated.model;
+    const finishReason = String(response?.candidates?.[0]?.finishReason || "").toUpperCase();
+    console.info(JSON.stringify({ event: "marcie_research_generation", model: activeModel, durationMs: Date.now() - startedAt, finishReason: finishReason || "unknown", promptTokens: response?.usageMetadata?.promptTokenCount || 0, outputTokens: response?.usageMetadata?.candidatesTokenCount || 0, attempt: attempt + 1 }));
+    if (finishReason && finishReason !== "STOP") {
+      lastError = Object.assign(new Error(`marcie_research_response_${finishReason.toLowerCase()}`), { status: 502, code: "marcie_research_response_truncated", finishReason });
+      continue;
+    }
     try {
-      return { parsed: parseJsonResponse(response), response };
+      const parsed = parseJsonResponse(response);
+      if (discovery && Array.isArray(parsed.sources)) {
+        const urls = new Set(discovery.sources.map(s => s.url));
+        parsed.sources = parsed.sources.filter(s => urls.has(s.url));
+      }
+      return { parsed, response, discovery };
     } catch (error) {
       if (error?.code !== "marcie_research_invalid_json") throw error;
-      console.warn(JSON.stringify({ severity: "WARNING", event: "marcie_json_retry", model: DEFAULT_TEXT_MODEL, attempt: attempt + 1 }));
+      console.warn(JSON.stringify({ severity: "WARNING", event: "marcie_json_retry", model: activeModel, attempt: attempt + 1 }));
       lastError = error;
     }
   }
   throw lastError || invalidJsonError();
+}
+
+function createUrlContextReader(client, maxUrls = 2, { model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS } = {}) {
+  let attempted = 0;
+  return async ({ url }) => {
+    if (attempted >= maxUrls) return null;
+    attempted += 1;
+    const { response } = await generateResearchContent({
+      client,
+      model,
+      fallbackModels,
+      payload: {
+        contents: [{ role: "user", parts: [{ text: `Lee esta página pública: ${url}. Devuelve SOLO JSON con {"title":"","authors":[],"publishedAt":"","publisher":"","doi":"","text":""}. El campo text debe contener hasta 1800 palabras factuales extraídas de la página. Usa publishedAt únicamente cuando la página indique fecha de publicación; no uses fechas de creación del archivo. Deja vacíos los metadatos que no se puedan comprobar. No uses conocimiento externo ni inventes datos.` }] }],
+        tools: [{ urlContext: {} }], generationConfig: { maxOutputTokens: 2600 }
+      }
+    });
+    const candidate = response?.candidates?.[0];
+    const retrieved = candidate?.urlContextMetadata?.urlMetadata?.some((item) =>
+      item?.urlRetrievalStatus === "URL_RETRIEVAL_STATUS_SUCCESS" && item?.retrievedUrl && new URL(item.retrievedUrl).hostname === new URL(url).hostname);
+    if (!retrieved || String(candidate?.finishReason || "").toUpperCase() !== "STOP") return null;
+    const rawText = candidate.content?.parts?.map((part) => part.text || "").join("\n") || "";
+    let extracted;
+    try { extracted = parseJsonResponse(response); } catch (_) { extracted = null; }
+    return {
+      retrieved: true, finalUrl: url,
+      text: typeof extracted?.text === "string" ? extracted.text : rawText,
+      title: typeof extracted?.title === "string" ? extracted.title : "",
+      authors: Array.isArray(extracted?.authors) ? extracted.authors.filter((author) => typeof author === "string") : [],
+      publishedAt: typeof extracted?.publishedAt === "string" ? extracted.publishedAt : "",
+      publisher: typeof extracted?.publisher === "string" ? extracted.publisher : "",
+      doi: typeof extracted?.doi === "string" ? extracted.doi : ""
+    };
+  };
+}
+
+function sourceRetrieveOptions({ client, model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS, maxUrls = 2, overrides = {} } = {}) {
+  return {
+    enablePlaywrightFallback: process.env.MARCIE_PLAYWRIGHT_FALLBACK === "1",
+    maxBrowserFallbacks: 3,
+    maxUrlContextFallbacks: Math.min(8, maxUrls),
+    urlContextReader: createUrlContextReader(client, maxUrls, { model, fallbackModels }),
+    ...overrides
+  };
 }
 
 function groundingSources(response = {}) {
@@ -186,9 +319,9 @@ function pageAssessmentPrompt(context, pages) {
   return `Actúa como verificador documental estricto. Decide si cada página recuperada respalda de forma directa al menos una afirmación, señal o antecedente concreto del CONTEXTO; no necesita respaldar el artículo completo. No valides por título, dominio o reputación. Si el texto no contiene ningún dato pertinente, es tangencial o contradice el contexto, recházalo. No inventes citas ni localizadores.\nCONTEXTO:\n${clampText(context, 12000)}\nPÁGINAS RECUPERADAS:\n${pages.map((page) => `ID ${page.id}\nTÍTULO: ${page.retrievedTitle}\nURL FINAL: ${page.finalUrl}\nTEXTO: ${page.text.slice(0, 6000)}`).join("\n\n")}\nDevuelve SOLO JSON: {"assessments":[{"id":"ID","status":"verified|rejected","reason":"content_mismatch|verification_error","supportSummary":"qué información concreta respalda","locator":"encabezado o sección identificable","supports":["summary","signal:0"]}]}`;
 }
 
-function createSourceAssessor(client) {
+function createSourceAssessor(client, { model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS } = {}) {
   return async ({ context, pages }) => {
-    const { parsed } = await generateJson({ client, prompt: pageAssessmentPrompt(context, pages), maxOutputTokens: 2048 });
+    const { parsed } = await generateJson({ client, prompt: pageAssessmentPrompt(context, pages), maxOutputTokens: 2048, model, fallbackModels });
     return Array.isArray(parsed.assessments) ? parsed.assessments : [];
   };
 }
@@ -197,12 +330,12 @@ function normalizedComparableText(value = "") {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[“”„‟«»'’‘]/g, '"').replace(/[^a-z0-9\s"]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-async function extractAttributedReferences({ client, verifiedSources = [], retrievedPages = [] } = {}) {
+async function extractAttributedReferences({ client, verifiedSources = [], retrievedPages = [], model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS } = {}) {
   const pagesById = new Map(retrievedPages.map((page) => [String(page.id), page]));
   const usable = verifiedSources.map((source) => ({ source, page: pagesById.get(String(source.id)) })).filter(({ page }) => page);
   if (!usable.length) return [];
   const prompt = `Extrae referencias atribuibles para un artículo educativo. Devuelve frases textuales solo cuando aparezcan literalmente en la página y limita cada una a 25 palabras. También puedes proponer paráfrasis fieles iniciables como "Según X". La persona o institución debe aparecer en la página o en sus metadatos. No inventes cargos, autores ni frases.\nFUENTES:\n${usable.map(({ source, page }) => `ID ${source.id}\nAUTORÍA: ${(Array.isArray(source.authors) ? source.authors : [source.authors]).filter(Boolean).join(", ")}\nINSTITUCIÓN: ${source.publisher || source.domain}\nTEXTO: ${page.text.slice(0, 2800)}`).join("\n\n")}\nSOLO JSON: {"attributedReferences":[{"personOrInstitution":"","role":"","text":"","type":"direct_quote|paraphrase","sourceId":"","locator":""}]}`;
-  const parsed = (await generateJson({ client, prompt, maxOutputTokens: 2048 })).parsed;
+  const parsed = (await generateJson({ client, prompt, maxOutputTokens: 2048, model, fallbackModels })).parsed;
   const sourcesById = new Map(verifiedSources.map((source) => [String(source.id), source]));
   const quotedWords = new Map();
   return (Array.isArray(parsed.attributedReferences) ? parsed.attributedReferences : []).map((item, index) => {
@@ -310,10 +443,10 @@ function rankTrendOpportunities(opportunities = []) {
   });
 }
 
-async function generateTrendCandidates({ client, region, cadence }) {
+async function generateTrendCandidates({ client, region, cadence, model = DEFAULT_TEXT_MODEL, fallbackModels = MARCIE_FALLBACK_MODELS }) {
   const windows = { daily: "últimas 24 horas", weekly: "últimos 7 días", monthly: "últimos 30 días" };
   const prompt = `Realiza una exploración ABIERTA con Google Search de trending topics en ${region} durante ${windows[cadence]}. Descubre de qué se está hablando ahora dentro del ecosistema amplio de educación, pedagogía, neuroeducación, cerebro humano, neurociencia cognitiva, aprendizaje, memoria, atención, desarrollo infantil y adolescente, psicología educativa, bienestar socioemocional, inclusión, PNL aplicada a educación, tecnología educativa, inteligencia artificial y formación docente. No partas de una lista fija ni repitas temas genéricos: identifica conversaciones concretas que estén apareciendo, creciendo o conectándose con noticias, debates, preguntas o cambios recientes. Agrupa duplicados y devuelve entre 6 y 12 temas distintos, ordenados desde la conversación con mayor impulso hasta la menor. No inventes porcentajes, conteos ni volumen. Clasifica únicamente momentum como breakout, rising, emerging o steady; y freshness como immediate, recent o monthly. Devuelve SOLO JSON: {"opportunities":[{"topic":"tema específico descubierto","summary":"por qué está en conversación ahora","signals":["señal concreta observada en la búsqueda"],"momentum":"breakout|rising|emerging|steady","freshness":"immediate|recent|monthly","whyNow":"detonante actual"}]}`;
-  const generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }] });
+  const generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }], model, fallbackModels });
   const opportunities = (Array.isArray(generated.parsed.opportunities) ? generated.parsed.opportunities : [])
     .map((item) => ({
       ...item,
@@ -332,7 +465,7 @@ async function generateTrendCandidates({ client, region, cadence }) {
 
 async function refreshMarcieTrends({ now = new Date(), force = false, settingsOverride = {}, dependencies = {} } = {}) {
   const { db } = dependencies.db ? dependencies : getAdminServices();
-  const client = dependencies.client || createVertexClient({ location: "global" });
+  const client = researchClient(dependencies.client || createVertexClient({ location: "global" }), dependencies.signal);
   const settingsSnapshot = await db.collection("MarcieEditorialSettings").doc("global").get();
   const stored = settingsSnapshot.exists ? settingsSnapshot.data() || {} : {};
   const settings = { ...DEFAULT_SETTINGS, ...stored, ...settingsOverride };
@@ -343,7 +476,7 @@ async function refreshMarcieTrends({ now = new Date(), force = false, settingsOv
   if (!force && existing.exists && Number(existing.data()?.schemaVersion) === TREND_SCHEMA_VERSION && existing.data()?.verificationStatus === "signal_based") {
     return { skipped: true, cadence, periodKey: key, snapshot: existing.data() };
   }
-  const generated = await generateTrendCandidates({ client, region: settings.region || "MX", cadence });
+  const generated = await generateTrendCandidates({ client, region: settings.region || "MX", cadence, model: dependencies.model || DEFAULT_TEXT_MODEL });
   console.info(JSON.stringify({ severity: "INFO", event: "marcie_trend_discovery", cadence, region: settings.region || "MX", discovered: generated.opportunities.length, groundingChunks: generated.groundedSourceCount }));
   const opportunities = rankTrendOpportunities(generated.opportunities).map((item) => ({ ...item, region: settings.region || "MX", periodKey: key, generatedAt: now.toISOString() }));
   console.info(JSON.stringify({ severity: "INFO", event: "marcie_trend_ranking", cadence, region: settings.region || "MX", discovered: generated.opportunities.length, ranked: opportunities.length, topTopic: opportunities[0]?.topic || "", topTrendingPercent: opportunities[0]?.trendingPercent || 0 }));
@@ -369,19 +502,52 @@ async function refreshMarcieTrends({ now = new Date(), force = false, settingsOv
   return { skipped: false, cadence, periodKey: key, snapshot };
 }
 
-async function researchArticleEvidenceServer({
+async function researchArticleEvidenceServer(options = {}) {
+  const dependencies = options.dependencies || {};
+  // End provider work at the slice boundary, but let the verifier return its
+  // completed evidence and pending candidates during the HTTP deadline grace.
+  if (!(Number(options.timeBudgetMs) > 0) || dependencies.clock) return researchArticleEvidenceSlice(options);
+  const controller = new AbortController();
+  const parent = dependencies.signal;
+  const abort = () => controller.abort(parent.reason);
+  parent?.addEventListener("abort", abort, { once: true });
+  if (parent?.aborted) abort();
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error("marcie_research_budget"), { code: "marcie_research_budget", status: 503 })), Number(options.timeBudgetMs));
+  try {
+    return await researchArticleEvidenceSlice({ ...options, dependencies: { ...dependencies, signal: controller.signal } });
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", abort);
+  }
+}
+
+async function researchArticleEvidenceSlice({
   searchPlatforms,
   researchInstructions = [],
   topic = "",
   audience = "educators",
+  audiences = [],
   mode = "marcie",
   minimumSources,
   region = "MX",
   period = "6m",
+  model = "",
   videoEvidence = null,
+  timeBudgetMs = 0,
+  excludeUrls = [],
+  startPlatformOffset = 0,
+  pendingCandidates: previousPendingCandidates = [],
   dependencies = {}
 } = {}) {
-  const client = dependencies.client || createVertexClient({ location: "global" });
+  const clockNow = dependencies.clock || Date.now;
+  const startedAt = clockNow();
+  const budgetExpired = () => dependencies.signal?.aborted || (timeBudgetMs > 0 && clockNow() - startedAt >= timeBudgetMs);
+  const excludedUrls = new Set((Array.isArray(excludeUrls) ? excludeUrls : []).slice(0, 256).map((url) => String(url).trim().toLowerCase()).filter(Boolean));
+  const client = researchClient(dependencies.client || createVertexClient({ location: "global" }), dependencies.signal);
+  const researchModel = normalizeTextModel(model || dependencies.model || DEFAULT_TEXT_MODEL);
+  const researchFallbackModels = Array.isArray(dependencies.fallbackModels)
+    ? dependencies.fallbackModels.map((candidate) => normalizeTextModel(candidate)).filter((candidate) => candidate !== researchModel)
+    : MARCIE_FALLBACK_MODELS;
   const now = dependencies.now instanceof Date ? dependencies.now : new Date();
   const dateWindow = researchDateWindow(period, now);
   const normalizedVideo = normalizeVideoEvidence(videoEvidence || {});
@@ -393,15 +559,43 @@ async function researchArticleEvidenceServer({
   const platformResults = [];
   const selectedPlatforms = researchPolicy.selection({ searchPlatforms });
   if (!selectedPlatforms.length) throw new Error("Selecciona al menos una plataforma o activa Otros sitios fiables.");
+  const audienceFocus = audiences.length
+    ? audiences.map((id) => `${id}: ${audienceResearchLenses(id)[0]}`).join("; ")
+    : audienceResearchLenses(audience)[0];
   const researchLenses = researchPolicy.platforms.filter(platform => selectedPlatforms.includes(platform.id)).map(platform => ({
     ...platform,
-    instruction: "Busca explícitamente en " + platform.name + " mediante " + platform.domains.map(domain => "site:" + domain).join(" OR ") + ". Sigue registros hacia documentos originales accesibles. No incluyas páginas comerciales ni buscadores como evidencia. Para estudios anteriores o sin fecha comprobada utiliza historical. " + audienceResearchLenses(audience)[0]
+    instruction: "Busca explícitamente en " + platform.name + " mediante " + platform.domains.map(domain => "site:" + domain).join(" OR ") + ". Sigue registros hacia documentos originales accesibles. No incluyas páginas comerciales ni buscadores como evidencia. Para estudios anteriores o sin fecha comprobada utiliza historical. " + audienceFocus
   }));
   // Broad discovery is optional and follows the saved selection.
-  if (selectedPlatforms.includes("supplemental")) researchLenses.push({ ...researchPolicy.supplemental, instruction: researchPolicy.supplemental.instruction + " " + audienceResearchLenses(audience)[0] + " Excluye de esta búsqueda las plataformas desmarcadas: " + researchPolicy.platforms.filter(platform => !selectedPlatforms.includes(platform.id)).flatMap(platform => platform.domains).map(domain => "-site:" + domain).join(" ") });
-  const discover = async (round, feedback) => Promise.all(researchLenses.map(async (platform) => {
+  if (selectedPlatforms.includes("supplemental")) researchLenses.push({ ...researchPolicy.supplemental, instruction: researchPolicy.supplemental.instruction + " " + audienceFocus + " Excluye de esta búsqueda las plataformas desmarcadas: " + researchPolicy.platforms.filter(platform => !selectedPlatforms.includes(platform.id)).flatMap(platform => platform.domains).map(domain => "-site:" + domain).join(" ") });
+  const platformPriority = ["supplemental", "scielo", "redalyc", "cochrane", "dialnet", "base", "ebsco", "refseek"];
+  researchLenses.sort((left, right) => platformPriority.indexOf(left.id) - platformPriority.indexOf(right.id));
+  const platformOffset = Math.max(0, Math.floor(Number(startPlatformOffset) || 0)) % researchLenses.length;
+  if (platformOffset) researchLenses.push(...researchLenses.splice(0, platformOffset));
+  let nextPlatformOffset = platformOffset;
+  let quotaLimited = false;
+  const currentYear = now.getUTCFullYear();
+  const recentThresholdYear = currentYear - 5;
+  const getRecencyScore = (source) => {
+    const y = Number(bibliography.year(source));
+    if (!Number.isFinite(y) || y < 1800) return { tier: 2, year: 0 };
+    if (y >= recentThresholdYear && y <= currentYear + 1) return { tier: 0, year: y };
+    return { tier: 1, year: y };
+  };
+  const sourceRank = (source) => {
+    const { tier, year } = getRecencyScore(source);
+    const invertedYear = String(9999 - year).padStart(4, "0");
+    return [tier, invertedYear, Number(source.qualityTier || 9), String(source.publisher || source.title || "")].join(":");
+  };
+
+  const discoverPlatform = async (round, feedback, platform) => {
     const lens = platform.instruction;
     const prompt = `Investiga el tema "${clampText(topic, 2000)}" para ${audience}, región ${clampText(region, 80)}, perfil ${editorialMode}. El tema completo indicado por el usuario es el centro de la investigación: no lo reemplaces por ciencia o historia.
+CRITERIO DE ACTUALIDAD CIENTÍFICA (ÚLTIMOS 5 AÑOS):
+- Para referencias científicas y bibliografía académica, debes buscar y PREFERIR ACTIVAMENTE el hallazgo más reciente de los ÚLTIMOS 5 AÑOS (${recentThresholdYear} a ${currentYear}).
+- Prioriza meta-análisis, revisiones sistemáticas y artículos de revistas científicas indexadas publicados entre ${recentThresholdYear} y ${currentYear}.
+- EXCEPCIÓN VÁLIDA: Solo se admiten fuentes anteriores a ${recentThresholdYear} cuando la información científica o teoría fundacional no haya cambiado desde que se hizo el hallazgo o se publicó el artículo seminal original (por ejemplo: descubrimientos pioneros clásicos de Piaget, Vygotsky, Bowlby, Teicher, etc.). Cuando uses un estudio seminal clásico, complementa siempre con revisiones recientes que ratifiquen su vigencia.
+- OBLIGACIÓN DE FECHA: Toda referencia científica debe incluir su fecha o año exacto de publicación comprobable (publishedAt en formato YYYY o YYYY-MM-DD). Prioriza siempre artículos que cuenten con fecha de publicación explícita para evitar referencias sin fecha (s. f.).
 La ventana de actualidad ${dateWindow.from.slice(0, 10)} a ${dateWindow.to.slice(0, 10)} solo clasifica las señales recientes; no excluye estudios pertinentes anteriores. Los documentos anteriores o sin fecha comprobada se marcan historical y se pueden usar para explicar conocimientos y contexto, sin presentarlos como novedades.
 ENFOQUE: ${lens}
 PREFERENCIAS DE INVESTIGACIÓN: ${JSON.stringify(researchInstructions)}
@@ -409,21 +603,40 @@ ${videoResearchFocus}
 Las preferencias de tipo de fuente orientan la búsqueda; no cambian las plataformas seleccionadas ni permiten inventar evidencia. Región GLOBAL significa todas las regiones, sin restricción geográfica. Diversifica autorías y publicaciones; pueden coexistir varios documentos distintos en el mismo repositorio. Prioriza HTML o PDF accesible y sigue las referencias hacia documentos originales.
 OBJETIVO TOTAL: ${requestedMinimum} documentos verificados. En esta búsqueda encuentra hasta ${Math.max(8, Math.min(20, Math.ceil(requestedMinimum / researchLenses.length) * 2))} documentos pertinentes.
 RONDA ${round}: ${feedback}
-No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases. SOLO JSON: {"summary":"síntesis","sources":[{"id":"s1","title":"","url":"https://documento-concreto","authors":[],"publishedAt":"","publisher":"","doi":"","sourceType":"paper|book|official|report|dataset|other","evidenceRole":"current|historical"}],"facts":[{"id":"f1","claim":"","sourceIds":["s1"],"risk":"low|high"}],"currentSignals":[{"id":"signal-1","signal":"","sourceIds":["s1"]}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["s1"]}]}`;
+Documentos ya comprobados en otra ejecución; busca otros distintos: ${[...excludedUrls].slice(-40).join("; ")}
+No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases. Si la URL lleva directamente a un PDF, incluye landingUrl solo cuando hayas encontrado la página HTML que enlaza ese PDF. Incluye dos consultas breves en inglés o español para catálogos científicos, con los conceptos centrales y sin instrucciones editoriales; en al menos una consulta enfoca hallazgos recientes. SOLO JSON: {"summary":"síntesis","searchQueries":["consulta científica concreta"],"sources":[{"id":"s1","title":"","url":"https://documento-concreto","landingUrl":"https://pagina-que-enlaza-el-pdf","authors":[],"publishedAt":"","publisher":"","doi":"","sourceType":"paper|book|official|report|dataset|other","evidenceRole":"current|historical"}],"facts":[{"id":"f1","claim":"","sourceIds":["s1"],"risk":"low|high"}],"currentSignals":[{"id":"signal-1","signal":"","sourceIds":["s1"]}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["s1"]}]}`;
     let generated;
     try {
-      generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }] });
-      platformResults.push({ id: platform.id, name: platform.name, round, query: lens, status: "searched", candidateCount: generated.parsed.sources?.length || 0 });
+      generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }], model: researchModel, fallbackModels: researchFallbackModels,
+        researchQuery: topic, researchDomains: researchPolicy.platforms.find(p => p.id === platform.id)?.domains || [],
+        excludedDomains: platform.id === 'supplemental' ? researchPolicy.platforms.filter(p => !selectedPlatforms.includes(p.id)).flatMap(p => p.domains) : [] });
+      platformResults.push({ id: platform.id, name: `Búsqueda web en ${platform.name}`, round, query: lens, status: "searched", discoveryMethod: "open_search", candidateCount: generated.parsed.sources?.length || 0 });
     } catch (error) {
-      platformResults.push({ id: platform.id, name: platform.name, round, query: lens, status: "error", error: error.code || error.message });
-      return { summary: "", facts: [], currentSignals: [], historicalMilestones: [], candidates: [] };
+      platformResults.push({ id: platform.id, name: `Búsqueda web en ${platform.name}`, round, query: lens, status: "error", error: error.code || error.message });
+      if (Number(error?.status || error?.code) === 429 || /RESOURCE_EXHAUSTED|Too Many Requests|"code"\s*:\s*429/i.test(String(error?.message || ""))) quotaLimited = true;
+      generated = { parsed: { sources: [], facts: [], currentSignals: [], historicalMilestones: [] }, response: {} };
+    }
+    let catalogSources = [];
+    if (platform.id === "supplemental" && round <= 2 && !quotaLimited && !budgetExpired()) {
+      const queries = (Array.isArray(generated.parsed.searchQueries) ? generated.parsed.searchQueries : []).filter(Boolean).slice(0, 2);
+      const catalog = await (dependencies.searchScientificCatalogs || searchScientificCatalogs)({ queries: queries.length ? queries : [clampText(topic, 120)] });
+      catalogSources = catalog.sources;
+      for (const result of catalog.results) platformResults.push({ ...result, name: `${result.id === "europe_pmc" ? "Europe PMC" : "Crossref"} (API)`, round, discoveryMethod: "catalog_api" });
     }
     const idMap = new Map();
-    const candidates = [...(generated.parsed.sources || []), ...groundingSources(generated.response)].map((source, sourceIndex) => {
+    const candidates = [...catalogSources, ...(generated.parsed.sources || []), ...groundingSources(generated.response)].map((source, sourceIndex) => {
       const originalId = clampText(source.id, 120) || `source-${sourceIndex + 1}`;
       const id = stableSourceId(source.url);
       idMap.set(originalId, id);
-      return { ...source, id, discoveredVia: [platform.id] };
+      return { ...source, id, discoveredVia: [...new Set([platform.id, ...(source.discoveredVia || [])])] };
+    });
+    candidates.sort((a, b) => {
+      const yearA = Number(String(a.year || a.publishedAt || "").match(/\b(?:18|19|20)\d{2}\b/)?.[0] || 0);
+      const yearB = Number(String(b.year || b.publishedAt || "").match(/\b(?:18|19|20)\d{2}\b/)?.[0] || 0);
+      const recentA = yearA >= recentThresholdYear ? 1 : 0;
+      const recentB = yearB >= recentThresholdYear ? 1 : 0;
+      if (recentA !== recentB) return recentB - recentA;
+      return yearB - yearA;
     });
     const remapEvidence = (items) => (Array.isArray(items) ? items : []).map((item) => ({
       ...item,
@@ -436,38 +649,35 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
       historicalMilestones: remapEvidence(generated.parsed.historicalMilestones),
       candidates
     };
-  }));
+  };
+  const discover = async (round, feedback, platforms) => {
+    if (budgetExpired() || quotaLimited || dependencies.signal?.aborted) return [];
+    return Promise.all(platforms.map(platform => discoverPlatform(round, feedback, platform)));
+  };
   const generatedBatches = [];
   const verified = { verifiedSources: [], rejectedSources: [], retrievedPages: [] };
+  const datedSourceCount = () => verified.verifiedSources.filter(hasVerifiedPublicationYear).length;
   const attempted = new Map();
+  const skippedLandingUrls = new Set();
   const sourceAliases = new Map();
-  const retrievalCache = new Map();
+  const retrievalCache = dependencies.retrieveOptions ? new Map() : sharedPageCache;
+  const retrieveOptions = sourceRetrieveOptions({ client, model: researchModel, fallbackModels: researchFallbackModels, maxUrls: 2, overrides: dependencies.retrieveOptions });
+  const verificationBatchSize = timeBudgetMs > 0 ? Math.min(8, researchPolicy.searchBudget.verificationBatchSize) : researchPolicy.searchBudget.verificationBatchSize;
+  const maxPendingCandidates = researchPolicy.searchBudget.maxCandidates;
+  let pendingCandidates = (Array.isArray(previousPendingCandidates) ? previousPendingCandidates : []).slice(0, maxPendingCandidates).filter((candidate) =>
+    candidate && typeof candidate === "object" && /^https?:\/\//i.test(String(candidate.url || "")) && !excludedUrls.has(String(candidate.url).toLowerCase()));
   let pendingCandidateCount = 0;
-  for (let round = 1; round <= researchPolicy.searchBudget.maxRounds; round++) {
-    const feedback = round === 1 ? "Primera búsqueda." : `Faltan ${Math.max(0, requestedMinimum - verified.verifiedSources.length)} fuentes. Reformula con sinónimos y enfoques complementarios, y localiza documentos distintos o copias accesibles. Ya comprobados: ${[...attempted.values()].map(source => source.url).join("; ")}. Problemas previos: ${[...new Set(verified.rejectedSources.map(source => source.reason))].join(", ")}.`;
-    const batches = await discover(round, feedback);
-    generatedBatches.push(...batches);
-    const newCandidates = [];
-    for (const candidate of batches.flatMap(batch => batch.candidates)) {
-      const previous = attempted.get(candidate.id);
-      if (previous) {
-        previous.discoveredVia = [...new Set([...previous.discoveredVia, ...candidate.discoveredVia])];
-        const accepted = verified.verifiedSources.find(source => source.id === (sourceAliases.get(candidate.id) || candidate.id));
-        if (accepted) accepted.discoveredVia = [...new Set([...(accepted.discoveredVia || []), ...candidate.discoveredVia])];
-        continue;
-      }
-      if (attempted.size >= researchPolicy.searchBudget.maxCandidates) { pendingCandidateCount++; continue; }
-      attempted.set(candidate.id, candidate);
-      newCandidates.push(candidate);
-    }
-    // Process every discovered candidate, in bounded batches; never one document per domain.
-    for (let offset = 0; offset < newCandidates.length; offset += researchPolicy.searchBudget.verificationBatchSize) {
-      const batch = await verifyCandidateSources({
-        candidates: newCandidates.slice(offset, offset + researchPolicy.searchBudget.verificationBatchSize),
+  const verifyNewCandidates = async (candidates) => {
+    let processedCandidates = 0;
+    for (let offset = 0; offset < candidates.length && datedSourceCount() < requestedMinimum && !budgetExpired(); offset += verificationBatchSize) {
+      const batch = await (dependencies.verifyCandidateSources || verifyCandidateSources)({
+        candidates: candidates.slice(offset, offset + verificationBatchSize),
         context: `${topic}\nPreferencias: ${JSON.stringify(researchInstructions)}`,
-        assessSources: createSourceAssessor(client), retrievalCache,
-        maxCandidates: researchPolicy.searchBudget.verificationBatchSize,
-        retrievalConcurrency: 6, retrieveOptions: dependencies.retrieveOptions, dateWindow, allowHistorical: true
+        assessSources: createSourceAssessor(client, { model: researchModel, fallbackModels: researchFallbackModels }), retrievalCache,
+        maxCandidates: verificationBatchSize,
+        retrievalConcurrency: 6,
+        retrieveOptions,
+        dateWindow, allowHistorical: true
       });
       for (const source of batch.verifiedSources) {
         const key = String(source.doi || source.url).toLowerCase();
@@ -477,10 +687,100 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
         else verified.verifiedSources.push(source);
       }
       verified.rejectedSources.push(...batch.rejectedSources);
+      quotaLimited ||= batch.quotaLimited === true;
       verified.retrievedPages.push(...batch.retrievedPages);
+      processedCandidates += Math.min(verificationBatchSize, candidates.length - offset);
+      if (quotaLimited) break;
     }
-    if (verified.verifiedSources.length >= requestedMinimum || pendingCandidateCount) break;
+    const retryableIds = new Set(verified.rejectedSources.filter((source) => source.reason === "verification_error" || (source.reason === "unreachable" && !source.httpStatus)).map((source) => String(source.id)));
+    const verifiedIds = new Set(verified.verifiedSources.map((source) => String(source.id)));
+    return datedSourceCount() >= requestedMinimum ? [] : [
+      ...candidates.slice(0, processedCandidates)
+        .filter((source) => retryableIds.has(String(source.id)) && !verifiedIds.has(String(source.id)))
+        .map((source) => ({ ...source, verificationAttempts: Number(source.verificationAttempts || 0) + (quotaLimited ? 0 : 1) }))
+        .filter((source) => quotaLimited || source.verificationAttempts < 2),
+      ...candidates.slice(processedCandidates)
+    ].slice(0, maxPendingCandidates);
+  };
+  if (pendingCandidates.length) pendingCandidates = await verifyNewCandidates(pendingCandidates);
+  const processDiscoveredBatches = async (batches, lensOffset) => {
+    generatedBatches.push(...batches);
+    const newCandidates = [];
+    const deferredCandidates = [];
+    for (const candidate of batches.flatMap(batch => batch.candidates)) {
+      if (excludedUrls.has(String(candidate.url || "").trim().toLowerCase())) continue;
+      if (isGenericLandingUrl(candidate.url)) {
+        const url = String(candidate.url).toLowerCase();
+        if (!skippedLandingUrls.has(url)) {
+          skippedLandingUrls.add(url);
+          verified.rejectedSources.push({ id: candidate.id, url: candidate.url, title: candidate.title, discoveredVia: candidate.discoveredVia || [], reason: "generic_homepage" });
+        }
+        continue;
+      }
+      const previous = attempted.get(candidate.id);
+      if (previous) {
+        previous.discoveredVia = [...new Set([...previous.discoveredVia, ...candidate.discoveredVia])];
+        const accepted = verified.verifiedSources.find(source => source.id === (sourceAliases.get(candidate.id) || candidate.id));
+        if (accepted) accepted.discoveredVia = [...new Set([...(accepted.discoveredVia || []), ...candidate.discoveredVia])];
+        continue;
+      }
+      if (attempted.size >= researchPolicy.searchBudget.maxCandidates) {
+        deferredCandidates.push(candidate);
+        continue;
+      }
+      attempted.set(candidate.id, candidate);
+      newCandidates.push(candidate);
+    }
+    const unresolved = await verifyNewCandidates(newCandidates);
+    const verifiedUrls = new Set(verified.verifiedSources.map((source) => String(source.requestedUrl || source.url || "").toLowerCase()));
+    pendingCandidates = [...new Map([...pendingCandidates, ...unresolved, ...deferredCandidates]
+      .filter((candidate) => !verifiedUrls.has(String(candidate.url || "").toLowerCase()))
+      .map((candidate) => [String(candidate.url).toLowerCase(), candidate])).values()].slice(0, maxPendingCandidates);
+    pendingCandidateCount = pendingCandidates.length;
+    nextPlatformOffset = (platformOffset + lensOffset + batches.length) % researchLenses.length;
+  };
+  // Only fan out across selected platforms and the sources still required.
+  const parallelBudget = timeBudgetMs > 0 ? Math.max(1, Math.ceil(timeBudgetMs / 15_000)) : 10;
+  const platformStride = Math.min(10, parallelBudget, Math.max(1, requestedMinimum - datedSourceCount()));
+  for (let round = 1; round <= researchPolicy.searchBudget.maxRounds && datedSourceCount() < requestedMinimum && !quotaLimited && !budgetExpired(); round++) {
+    for (let lensOffset = 0; lensOffset < researchLenses.length && datedSourceCount() < requestedMinimum && !quotaLimited && !budgetExpired(); lensOffset += platformStride) {
+      const strategies = [
+        "Busca el tema y la audiencia con términos exactos; pide artículos o informes con título, autor, fecha y enlace directo.",
+        "Reformula con sinónimos en español y variantes del contexto educativo; considera autores, instituciones y estudios que conozcas, busca su DOI o página canónica y comprueba el documento, no portadas ni fichas de buscador.",
+        "Traduce los conceptos principales al inglés y combina revisiones sistemáticas, guías institucionales y estudios originales; prueba autores y publicaciones reconocidos que recuerdes, pero comprueba cada enlace."
+      ];
+      const feedback = `${strategies[Math.min(round - 1, strategies.length - 1)]} Faltan ${Math.max(0, requestedMinimum - datedSourceCount())} fuentes con fecha comprobada. Conserva los documentos sin fecha ya verificados como respaldo. Ya comprobados: ${[...attempted.values()].map(source => source.url).join("; ")}. Problemas previos: ${[...new Set(verified.rejectedSources.map(source => source.reason))].join(", ")}.`;
+      const batches = await discover(round, feedback, researchLenses.slice(lensOffset, lensOffset + platformStride));
+      await processDiscoveredBatches(batches, lensOffset);
+      if (round === 1 && datedSourceCount() < requestedMinimum && !pendingCandidateCount && !quotaLimited && !budgetExpired()) {
+        const retryFeedback = `${strategies[1]} Cambia las palabras de la consulta anterior y busca documentos distintos. URLs ya descartadas: ${verified.rejectedSources.slice(-20).map(source => source.url).filter(Boolean).join("; ")}.`;
+        await processDiscoveredBatches(await discover(2, retryFeedback, researchLenses.slice(lensOffset, lensOffset + platformStride)), lensOffset);
+      }
+      if (quotaLimited) break;
+    }
+    if (attempted.size >= researchPolicy.searchBudget.maxCandidates || quotaLimited) break;
   }
+  // Paid discovery runs only after accessible candidates have actually been verified.
+  if (require('./research/budget.js').currentContext()?.dossierId && datedSourceCount() < requestedMinimum && !pendingCandidates.length && !quotaLimited && !budgetExpired() && await require('./research/budget.js').groundingConfigured()) {
+    const { prepareResearch } = require('./research/search.js');
+    const permittedDomains = selectedPlatforms.includes('supplemental') ? [] : researchLenses.flatMap(p => p.domains || []);
+    const excludedDomains = researchPolicy.platforms.filter(p => !selectedPlatforms.includes(p.id)).flatMap(p => p.domains);
+    for (let attempt = 0; attempt < 2 && datedSourceCount() < requestedMinimum && !budgetExpired(); attempt++) {
+      const query = `${topic} ${attempt ? 'systematic review original research' : 'revisión sistemática estudio original'} ${currentYear}`.slice(0, 300);
+      const discovery = await prepareResearch({ prompt: '', client, model: researchModel, query, domains: permittedDomains, excludedDomains,
+        evidenceGap: `Solo ${datedSourceCount()} documentos verificados con fecha para ${topic}; se requieren ${requestedMinimum}.`,
+        reformulation: attempt ? 'La primera consulta no completó la evidencia; cambiar a terminología académica inglesa.' : undefined });
+      const paid = discovery.sources.filter(source => source.discoveredVia?.includes('grounding'));
+      platformResults.push({ id: 'grounding', status: paid.length ? 'searched' : 'unavailable_or_budget_disabled', round: attempt + 1, candidateCount: paid.length });
+      if (!paid.length) break;
+      await processDiscoveredBatches([{ summary: '', facts: [], currentSignals: [], historicalMilestones: [],
+        candidates: paid.map(source => ({ ...source, id: stableSourceId(source.url) })) }], 0);
+    }
+  }
+  pendingCandidateCount = pendingCandidates.length;
+  const dateSearchComplete = datedSourceCount() >= requestedMinimum
+    || (!quotaLimited && !budgetExpired() && !pendingCandidateCount && platformResults.filter((platform) => platform.discoveryMethod !== "catalog_api").every((platform) => platform.status === "searched"));
+  verified.verifiedSources.sort((left, right) => sourceRank(left).localeCompare(sourceRank(right)));
   const generated = { parsed: {
     summary: generatedBatches.map((batch) => batch.summary).filter(Boolean).join(" "),
     facts: generatedBatches.flatMap((batch) => batch.facts),
@@ -526,11 +826,14 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
   const blockers = [];
   const requiredMinimum = requestedMinimum;
   if (!verified.verifiedSources.length) blockers.push("La investigación no encontró ninguna fuente verificable después de completar las rondas de búsqueda.");
-  if (pendingCandidateCount) blockers.push(`Quedan ${pendingCandidateCount} resultados sin analizar por el límite técnico de esta ejecución. Acota el tema y reintenta.`);
+  if (verified.verifiedSources.length && verified.verifiedSources.length < requestedMinimum) blockers.push(`Se verificaron ${verified.verifiedSources.length} de ${requestedMinimum} fuentes requeridas.`);
+  if (pendingCandidateCount && verified.verifiedSources.length < requestedMinimum) blockers.push(`Quedan ${pendingCandidateCount} resultados sin analizar por el límite técnico de esta ejecución. Acota el tema y reintenta.`);
+  if (quotaLimited) blockers.push("Gemini alcanzó temporalmente su cuota de investigación. Reanuda cuando el servicio esté disponible.");
+  if (!dateSearchComplete && datedSourceCount() < requestedMinimum) blockers.push(`La búsqueda de fuentes fechadas quedó pendiente: ${datedSourceCount()} de ${requestedMinimum} con fecha comprobada. Reanuda antes de usar fuentes sin fecha como respaldo.`);
   const recommendations = institutionCount < 2 ? ["Conviene contrastar con otras autorías o publicaciones independientes."] : [];
-  if (verified.verifiedSources.length > 0 && verified.verifiedSources.length < requiredMinimum) recommendations.push(`Se encontraron y analizaron ${verified.verifiedSources.length} fuentes verificadas de una meta editorial de ${requiredMinimum}; la redacción puede continuar con la evidencia disponible.`);
+  if (verified.verifiedSources.length > 0 && verified.verifiedSources.length < requiredMinimum) recommendations.push(`Se encontraron ${verified.verifiedSources.length} de ${requiredMinimum} fuentes requeridas; amplía la investigación antes de redactar.`);
   let attributedReferences = [];
-  try { attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages }); }
+  try { if (!budgetExpired() && verified.verifiedSources.length >= requestedMinimum) attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages, model: researchModel, fallbackModels: researchFallbackModels }); }
   catch (_) { recommendations.push("No se pudieron extraer citas textuales; utiliza paráfrasis de los hallazgos verificados."); }
   const combinedSources = [...verified.verifiedSources, ...normalizedVideo.sources];
   const combinedFacts = [...facts, ...normalizedVideo.facts];
@@ -542,7 +845,7 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
     currentSignals,
     facts: combinedFacts,
     sources: combinedSources,
-    analysisStatus: pendingCandidateCount ? "incomplete" : "complete",
+    analysisStatus: pendingCandidateCount && verified.verifiedSources.length < requestedMinimum ? "incomplete" : "complete",
     analysis: { sourceIds: combinedSources.map(source => source.id), examinedCandidateCount: attempted.size, rejectedCount: verified.rejectedSources.length, pendingCandidateCount },
     researchInstructions,
     researchRegion: region,
@@ -553,6 +856,11 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
       verifiedCount: verified.verifiedSources.filter(source => source.discoveredVia?.includes(platform.id)).length,
       rejected: verified.rejectedSources.filter(source => source.discoveredVia?.includes(platform.id))
     })),
+    pendingCandidates: pendingCandidates.slice(0, maxPendingCandidates).map(({ id, url, landingUrl, title, authors, publishedAt, publisher, doi, sourceType, evidenceRole, discoveredVia, verificationAttempts }) => ({ id, url, landingUrl, title, authors, publishedAt, publisher, doi, sourceType, evidenceRole, discoveredVia, verificationAttempts: Number(verificationAttempts || 0) })),
+    dateSearchComplete,
+    datedSourceCount: datedSourceCount(),
+    quotaLimited,
+    nextPlatformOffset,
     researchPeriod: dateWindow.period,
     dateWindow,
     currentSourceCount: currentSources.length,
@@ -571,8 +879,112 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
     targetSourceCount: requestedMinimum,
     verificationStatus: blockers.length ? "blocked" : "verified",
     researchedAt: now.toISOString(),
-    telemetry: { modeUsed: editorialMode, model: DEFAULT_TEXT_MODEL, searches: generatedBatches.length, retrievedUrls: verified.verifiedSources.map((source) => source.url), videoCount: normalizedVideo.sources.length }
+    telemetry: { modeUsed: editorialMode, model: researchModel, fallbackModels: researchFallbackModels, durationMs: clockNow() - startedAt, searches: generatedBatches.length, retrievedUrls: verified.verifiedSources.map((source) => source.url), videoCount: normalizedVideo.sources.length }
   };
+}
+
+async function researchArticleEvidenceBundleServer({ audiences = [], audienceBriefs = {}, minimumSources = 4, ...options } = {}) {
+  const selected = [...new Set(audiences.map(String))].filter((id) => ["educators", "students", "parents", "coordinators"].includes(id));
+  if (!selected.length) throw Object.assign(new Error("Selecciona al menos un público."), { status: 400 });
+  const target = researchPolicy.target({ editorialProfileSnapshot: { minimumSources } });
+  const sharedTarget = researchPolicy.sharedTarget({ editorialProfileSnapshot: { sharedMinimumSources: 2 } });
+  const specificTarget = Math.max(
+    researchPolicy.specificTarget({ editorialProfileSnapshot: { specificMinimumSources: 2 } }),
+    target - sharedTarget
+  );
+  const shared = await researchArticleEvidenceServer({
+    ...options, audiences: selected, audience: selected.join(", "),
+    topic: `${clampText(options.topic, 600)}. ${selected.map((id) => `${id}: ${clampText(audienceBriefs[id], 300)}`).join("; ")}`,
+    minimumSources: Math.min(30, Math.max(target, sharedTarget + (specificTarget * selected.length)))
+  });
+  return selectArticleEvidenceServer({ dossier: shared, audiences: selected, audienceBriefs, minimumSources, topic: options.topic, dependencies: options.dependencies });
+}
+
+async function selectArticleEvidenceServer({ dossier: shared = {}, audiences = [], audienceBriefs = {}, minimumSources = 4, topic = "", dependencies = {} } = {}) {
+  const selected = [...new Set((Array.isArray(audiences) ? audiences : []).map(String))].filter((id) => ["educators", "students", "parents", "coordinators"].includes(id));
+  if (!selected.length) throw Object.assign(new Error("Selecciona al menos un público."), { status: 400 });
+  const target = researchPolicy.target({ editorialProfileSnapshot: { minimumSources } });
+  const sharedTarget = researchPolicy.sharedTarget({ editorialProfileSnapshot: { sharedMinimumSources: 2 } });
+  const specificTarget = Math.max(researchPolicy.specificTarget({ editorialProfileSnapshot: { specificMinimumSources: 2 } }), target - sharedTarget);
+  if (!Array.isArray(shared.sources) || shared.sources.length > 80 || JSON.stringify(shared).length > 1_000_000) throw Object.assign(new Error("El expediente de investigación no es válido."), { status: 400 });
+  const documents = shared.sources.filter((source) => source.verificationStatus === "verified");
+  const videoSources = shared.sources.filter((source) => source.sourceType === "youtube_video" && source.verificationStatus === "attributed_only");
+  const client = researchClient(dependencies.client || createVertexClient({ location: "global" }), dependencies.signal);
+  let matches = [];
+  let requestedSharedIds = [];
+  let classificationFailed = false;
+  if (documents.length) {
+    try {
+      const prompt = `Clasifica la pertinencia DIRECTA de documentos ya verificados para cada público y selecciona fuentes transversales. No inventes hallazgos. Tema: ${clampText(topic, 600)}. Públicos y enfoques: ${JSON.stringify(audienceBriefs)}. Documentos: ${JSON.stringify(documents.map((source) => ({ id: source.id, title: source.title, finding: source.supportSummary })).slice(0, 30))}. Devuelve SOLO JSON {"sharedIds":["ID"],"matches":[{"id":"ID","audiences":["educators"]}]}. sharedIds debe contener al menos ${sharedTarget} documentos pertinentes para TODOS los públicos; matches debe incluir cada documento pertinente para cada público.`;
+      const parsed = (await generateJson({ client, prompt, maxOutputTokens: 2048 })).parsed || {};
+      if (!Array.isArray(parsed.matches)) throw new Error("La clasificación no devolvió coincidencias válidas.");
+      matches = parsed.matches;
+      requestedSharedIds = Array.isArray(parsed.sharedIds) ? parsed.sharedIds.map(String) : [];
+    } catch (error) {
+      classificationFailed = true;
+      console.warn("[MarcieResearch] No se completó la clasificación de fuentes compartidas", error?.code || error?.message);
+    }
+  }
+  const documentById = new Map(documents.map((source) => [String(source.id), source]));
+  const relevance = new Map(documents.map((source) => [String(source.id), new Set()]));
+  matches.forEach((item) => {
+    const id = String(item?.id || "");
+    if (!relevance.has(id)) return;
+    (Array.isArray(item?.audiences) ? item.audiences : []).map(String).forEach((audience) => {
+      if (selected.includes(audience)) relevance.get(id).add(audience);
+    });
+  });
+  // Keep documents available for provisional drafts if classification fails,
+  // but never treat a valid empty classification as audience relevance.
+  if (classificationFailed) documents.forEach((source) => selected.forEach((audience) => relevance.get(String(source.id)).add(audience)));
+  const selectCurrentYear = new Date().getUTCFullYear();
+  const selectRecentThresholdYear = selectCurrentYear - 5;
+  const selectRecencyScore = (source) => {
+    const y = Number(bibliography.year(source));
+    if (!Number.isFinite(y) || y < 1800) return { tier: 2, year: 0 };
+    if (y >= selectRecentThresholdYear && y <= selectCurrentYear + 1) return { tier: 0, year: y };
+    return { tier: 1, year: y };
+  };
+  const sourceRank = (source) => {
+    const { tier, year } = selectRecencyScore(source);
+    const invertedYear = String(9999 - year).padStart(4, "0");
+    return [tier, invertedYear, Number(source.qualityTier || 9), String(source.publisher || source.title || "")].join(":");
+  };
+  const rankedDocuments = [...documents].sort((left, right) => sourceRank(left).localeCompare(sourceRank(right)));
+  const universalPool = rankedDocuments.filter((source) => selected.every((audience) => relevance.get(String(source.id))?.has(audience)));
+  const requestedShared = requestedSharedIds.map((id) => documentById.get(id)).filter((source) => source && universalPool.some((item) => item.id === source.id));
+  const sharedSources = [...new Map([...requestedShared, ...universalPool].map((source) => [String(source.id), source])).values()]
+    .sort((left, right) => sourceRank(left).localeCompare(sourceRank(right))).slice(0, sharedTarget);
+  const sharedIds = new Set(sharedSources.map((source) => String(source.id)));
+  const byAudience = {};
+  for (const audience of selected) {
+    const specificPool = rankedDocuments.filter((source) => !sharedIds.has(String(source.id)) && relevance.get(String(source.id))?.has(audience));
+    const fallbackSpecific = classificationFailed ? rankedDocuments.filter((source) => !sharedIds.has(String(source.id)) && !specificPool.some((item) => item.id === source.id)) : [];
+    const specificSources = [...specificPool, ...fallbackSpecific].slice(0, specificTarget);
+    const sources = [...sharedSources, ...specificSources, ...videoSources];
+    const ids = new Set(sources.map((source) => String(source.id)));
+    const facts = (Array.isArray(shared.facts) ? shared.facts : []).filter((fact) => fact.sourceIds?.some((id) => ids.has(String(id))));
+    const count = sources.filter((source) => source.verificationStatus === "verified").length;
+    const specificIds = specificSources.map((source) => String(source.id));
+    const blockers = [];
+    if (classificationFailed) blockers.push("No se pudo confirmar la pertinencia de los documentos para este público.");
+    if (sharedSources.length < sharedTarget) blockers.push(`Faltan fuentes comunes reutilizables: ${sharedSources.length} de ${sharedTarget}.`);
+    if (specificSources.length < specificTarget) blockers.push(`Faltan fuentes específicas del artículo: ${specificSources.length} de ${specificTarget}.`);
+    if (!shared.dateSearchComplete && sources.filter(hasVerifiedPublicationYear).length < sharedTarget + specificTarget) {
+      blockers.push(`La búsqueda de fuentes fechadas quedó pendiente: ${sources.filter(hasVerifiedPublicationYear).length} de ${sharedTarget + specificTarget} con fecha comprobada. Reanuda antes de usar fuentes sin fecha como respaldo.`);
+    }
+    byAudience[audience] = {
+      ...shared, audience, sources, facts,
+      attributedReferences: (Array.isArray(shared.attributedReferences) ? shared.attributedReferences : []).filter((item) => ids.has(String(item.sourceId))),
+      analysis: { ...(shared.analysis || {}), sourceIds: sources.map((source) => String(source.id)) },
+      sharedSourceIds: [...sharedIds], specificSourceIds: specificIds,
+      sharedSourceCount: sharedSources.length, specificSourceCount: specificSources.length,
+      sharedSourceTarget: sharedTarget, specificSourceTarget: specificTarget,
+      verifiedSourceCount: count, targetSourceCount: sharedTarget + specificTarget,
+      blockers, verificationStatus: blockers.length ? "blocked" : "verified"
+    };
+  }
+  return { byAudience, sharedSourceCount: sharedSources.length };
 }
 
 function articleText(article = {}, topic = "") {
@@ -580,17 +992,23 @@ function articleText(article = {}, topic = "") {
 }
 
 async function verifyArticleEvidenceServer({ article = {}, topic = "", additionalSearches = 0, dependencies = {} } = {}) {
-  const client = dependencies.client || createVertexClient({ location: "global" });
+  const client = researchClient(dependencies.client || createVertexClient({ location: "global" }), dependencies.signal);
+  const retrieveOptions = sourceRetrieveOptions({ client, maxUrls: 8, overrides: dependencies.retrieveOptions });
   const text = articleText(article, topic);
   const uniqueCandidates = new Map();
-  for (const source of [...(article.researchSources || []), ...(article.sources || []), ...(article.usedSources || []), ...bibliography.sources(article)]) {
+  for (const source of [...(article.researchSources || []), ...(article.sources || []), ...(article.usedSources || []), ...bibliography.sources(article), ...(article.sourceCandidates || [])]) {
     if (source?.url && !uniqueCandidates.has(source.url)) uniqueCandidates.set(source.url, source);
   }
   const videoSources = [...uniqueCandidates.values()].filter((source) => source?.sourceType === "youtube_video");
   let candidates = [...uniqueCandidates.values()].filter((source) => source?.sourceType !== "youtube_video");
   const verified = { verifiedSources: [], rejectedSources: [], retrievedPages: [] };
-  for (let offset = 0; offset < candidates.length; offset += 32) {
-    const batch = await verifyCandidateSources({ candidates: candidates.slice(offset, offset + 32), maxCandidates: 32, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions, allowHistorical: true });
+  for (let offset = 0; offset < candidates.length; offset += 8) {
+    // La comprobación documental valida que el documento sea pertinente al
+    // tema. Las afirmaciones concretas se contrastan después con su contenido.
+    // Pasar el artículo entero aquí hacía que una fuente válida se descartara
+    // por no respaldar cada sección del borrador.
+    const documentContext = `${topic || article.title || ""}. ${article.subtitle || ""}`.trim();
+    const batch = await verifyCandidateSources({ candidates: candidates.slice(offset, offset + 8), maxCandidates: 8, retrievalConcurrency: dependencies.retrievalConcurrency || 4, context: documentContext, assessSources: createSourceAssessor(client), retrievalCache: dependencies.retrievalCache || (dependencies.retrieveOptions ? new Map() : sharedPageCache), retrieveOptions, allowHistorical: true });
     for (const field of Object.keys(verified)) verified[field].push(...batch[field]);
   }
   const pagesById = new Map(verified.retrievedPages.map((page) => [page.id, page]));
@@ -637,6 +1055,9 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   }
   if (verified.rejectedSources.length) blockers.push(`${verified.rejectedSources.length} fuente(s) fueron descartadas al comprobar su contenido.`);
   const requiredSources = article.researchDossier?.targetSourceCount || (article.editorialMode === "aida" ? researchPolicy.target({ editorialMode: "aida" }) : 0);
+  if (requiredSources > 0 && verified.verifiedSources.length < requiredSources) {
+    blockers.push(`La investigación conserva ${verified.verifiedSources.length} de ${requiredSources} documentos verificados.`);
+  }
   if (!verified.verifiedSources.length) blockers.push("El artículo no conserva ninguna fuente verificable.");
   const contradictions = Array.isArray(result.contradictions) ? result.contradictions.map((value) => clampText(value, 800)).filter(Boolean) : [];
   if ((blockers.length || !claims.length) && additionalSearches > 0) {
@@ -644,14 +1065,47 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
     const combined = [...candidates, ...supplemental.sources, ...videoSources];
     if (combined.length > candidates.length + videoSources.length) return verifyArticleEvidenceServer({ article: { ...article, sources: combined, researchSources: combined }, topic, additionalSearches: additionalSearches - 1, dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
   }
+  const supportedIds = new Set(claims.filter(claim => claim.status === 'supported').flatMap(claim => claim.sourceIds));
+  await require('./research/budget.js').recordEvidence(verified.verifiedSources.filter(source => supportedIds.has(source.id)), { used: true });
   const coverage = claims.length ? Math.round((claims.filter((claim) => claim.status === "supported").length / claims.length) * 100) : 0;
   const contentHash = crypto.createHash("sha256").update(JSON.stringify({ title: article.title, subtitle: article.subtitle, blocks: article.blocks, sources: preservedSources, seo: article.seo })).digest("hex");
   return {
-    ...article, usedSources: article.usedSources || article.sources || [], sources: preservedSources, researchSources: preservedSources, articleClaims: claims,
+    ...article, usedSources: article.usedSources || article.sources || [], sourceCandidates: [...uniqueCandidates.values()], sources: preservedSources, researchSources: preservedSources, articleClaims: claims,
     evidenceLinks: claims.flatMap((claim) => claim.sourceIds.map((sourceId) => ({ claimId: claim.id, sourceId, url: sourcesById.get(sourceId)?.url || "", title: sourcesById.get(sourceId)?.title || "", supportSummary: claim.supportSummary, locator: claim.locator }))),
     sourceAudit: verified.rejectedSources,
     verification: { status: blockers.length || contradictions.length || !claims.length ? "blocked" : "verified", coverage, blockers, contradictions, verifiedAt: new Date().toISOString(), contentHash, model: DEFAULT_TEXT_MODEL, checkedUrls: verified.verifiedSources.map((source) => source.url), videoSources: videoSources.map((source) => ({ id: source.id, url: source.url, verificationStatus: "attributed_only" })) }
   };
+}
+
+async function verifyAndRepairArticleEvidenceServer(options = {}) {
+  const verify = options.dependencies?.verifyArticleEvidence || verifyArticleEvidenceServer;
+  const verified = await verify(options);
+  const repaired = autoRepairEvidence(verified);
+  if (!repaired.changed) return verified;
+  if (!(repaired.article.blocks || []).some((block) => String(block?.text || "").trim())) {
+    return {
+      ...options.article,
+      articleClaims: verified.articleClaims || [],
+      sourceAudit: verified.sourceAudit || [],
+      verification: { ...verified.verification, status: "blocked", blockers: [...(verified.verification?.blockers || []), "La corrección automática retiraría todo el contenido; se conservó el borrador original para revisión."] }
+    };
+  }
+  const result = await verify({ ...options, article: repaired.article, additionalSearches: 0 });
+  const originalWords = articleText(verified).split(/\s+/).filter(Boolean).length;
+  const remainingWords = articleText(result).split(/\s+/).filter(Boolean).length;
+  if (originalWords >= 100 && remainingWords < originalWords * 0.6) {
+    return {
+      ...options.article,
+      articleClaims: verified.articleClaims || [],
+      sourceAudit: verified.sourceAudit || [],
+      verification: {
+        ...verified.verification,
+        status: "blocked",
+        blockers: [...(verified.verification?.blockers || []), "La corrección automática retiraría demasiado contenido; se conservó el borrador original para revisión."]
+      }
+    };
+  }
+  return result;
 }
 
 function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
@@ -664,25 +1118,31 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
     const cadence = ["daily", "weekly", "monthly"].includes(req.body?.cadence) ? req.body.cadence : "weekly";
     const settings = { cadence, region: clampText(req.body?.region || "MX", 80), timezone: "America/Cancun", discoveryMode: "general_education_brain", updatedBy: authContext.uid, updatedAt: new Date().toISOString() };
     await db.collection("MarcieEditorialSettings").doc("global").set(settings, { merge: true });
-    const result = await refreshMarcieTrends({ force: req.body?.force === true, settingsOverride: settings, dependencies: { db, client: dependencies.client } });
+    const result = await refreshMarcieTrends({ force: req.body?.force === true, settingsOverride: settings, dependencies: { db, client: dependencies.client, model: normalizeTextModel(req.body?.model) } });
     return res.status(200).json({ ok: true, ...result });
   }));
-  app.post("/api/marcie/evidence/research", wrapAsync(async (req, res) => {
+  app.post(["/api/marcie/evidence/research", "/api/marcie/evidence/research-global"], wrapAsync(async (req, res) => {
     const authContext = await resolveRequestAuth(req); const { db } = getServices();
     await assertEditorialAccess(authContext, db);
     let dossier;
     try {
-      dossier = await withDeadline(researchArticleEvidenceServer({
+      dossier = await requestDeadline(req, res, signal => researchArticleEvidenceServer({
         topic: req.body?.topic,
         searchPlatforms: req.body?.searchPlatforms,
         researchInstructions: Array.isArray(req.body?.researchInstructions) ? req.body.researchInstructions.slice(0, 50).map(value => clampText(value, 2000)) : [],
         audience: req.body?.audience,
+        audiences: Array.isArray(req.body?.audiences) ? req.body.audiences.slice(0, 4) : [],
         mode: req.body?.mode,
         minimumSources: req.body?.minimumSources,
         region: req.body?.region,
         period: req.body?.period,
+        model: normalizeTextModel(req.body?.model),
         videoEvidence: req.body?.videoEvidence || null,
-        dependencies: { client: dependencies.client }
+        timeBudgetMs: Math.max(60_000, Math.min(180_000, Number(req.body?.timeBudgetMs) || 150_000)),
+        excludeUrls: req.body?.excludeUrls,
+        startPlatformOffset: req.body?.startPlatformOffset,
+        pendingCandidates: req.body?.pendingCandidates,
+        dependencies: { client: dependencies.client, signal }
       }), RESEARCH_DEADLINE_MS, "marcie_research_timeout");
     } catch (error) {
       if (error?.code !== "marcie_research_timeout") throw error;
@@ -696,11 +1156,30 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
     }
     return res.status(200).json({ ok: true, dossier });
   }));
+  app.post("/api/marcie/evidence/select", wrapAsync(async (req, res) => {
+    const authContext = await resolveRequestAuth(req); const { db } = getServices();
+    await assertEditorialAccess(authContext, db);
+    const result = await requestDeadline(req, res, signal => selectArticleEvidenceServer({
+      dossier: req.body?.dossier, audiences: req.body?.audiences, audienceBriefs: req.body?.audienceBriefs,
+      minimumSources: req.body?.minimumSources, topic: req.body?.topic,
+      dependencies: { client: dependencies.client, signal }
+    }), RESEARCH_DEADLINE_MS, "marcie_selection_timeout");
+    return res.status(200).json({ ok: true, ...result });
+  }));
+  app.post("/api/marcie/evidence/research-bundle", wrapAsync(async (req, res) => {
+    const authContext = await resolveRequestAuth(req); const { db } = getServices();
+    await assertEditorialAccess(authContext, db);
+    const result = await requestDeadline(req, res, signal => researchArticleEvidenceBundleServer({
+      ...req.body, timeBudgetMs: Math.max(60_000, Math.min(180_000, Number(req.body?.timeBudgetMs) || 180_000)), researchInstructions: Array.isArray(req.body?.researchInstructions) ? req.body.researchInstructions.slice(0, 50).map((value) => clampText(value, 2000)) : [],
+      dependencies: { client: dependencies.client, signal }
+    }), RESEARCH_DEADLINE_MS, "marcie_research_timeout");
+    return res.status(200).json({ ok: true, ...result });
+  }));
   app.post("/api/marcie/evidence/verify", wrapAsync(async (req, res) => {
     const authContext = await resolveRequestAuth(req); const { db } = getServices();
     await assertEditorialAccess(authContext, db);
     const article = await withDeadline(
-      verifyArticleEvidenceServer({ article: req.body?.article || {}, topic: req.body?.topic, additionalSearches: Math.max(0, Math.min(2, Number(req.body?.additionalSearches) || 0)), dependencies: { client: dependencies.client } }),
+      (req.body?.autoRepair === true ? verifyAndRepairArticleEvidenceServer : verifyArticleEvidenceServer)({ article: req.body?.article || {}, topic: req.body?.topic, additionalSearches: Math.max(0, Math.min(2, Number(req.body?.additionalSearches) || 0)), dependencies: { client: dependencies.client } }),
       EVIDENCE_VERIFY_DEADLINE_MS,
       "marcie_verification_timeout"
     );
@@ -709,8 +1188,8 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
 }
 
 module.exports = {
-  DEFAULT_SETTINGS, TREND_SCHEMA_VERSION, RESEARCH_DEADLINE_MS, EVIDENCE_VERIFY_DEADLINE_MS, RESEARCH_PERIOD_DAYS, assertEditorialAccess, createSourceAssessor, periodKey, researchDateWindow,
-  parseJsonResponse, repairAdjacentJsonContainers, generateJson,
-  rankTrendOpportunities, refreshMarcieTrends, researchArticleEvidenceServer, verifyArticleEvidenceServer, extractAttributedReferences,
+  normalizeVideoEvidence, DEFAULT_SETTINGS, TREND_SCHEMA_VERSION, RESEARCH_DEADLINE_MS, EVIDENCE_VERIFY_DEADLINE_MS, RESEARCH_PERIOD_DAYS, assertEditorialAccess, createSourceAssessor, periodKey, researchDateWindow,
+  parseJsonResponse, repairAdjacentJsonContainers, generateJson, generateResearchContent,
+  rankTrendOpportunities, refreshMarcieTrends, researchArticleEvidenceServer, researchArticleEvidenceBundleServer, selectArticleEvidenceServer, verifyArticleEvidenceServer, verifyAndRepairArticleEvidenceServer, extractAttributedReferences,
   registerMarcieEditorialResearchRoutes
 };

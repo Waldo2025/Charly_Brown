@@ -3609,6 +3609,17 @@ body.er-zip-export-in-progress {
   box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.04);
 }
 
+.er-brief-submit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.er-brief-submit-actions > .er-button {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
 .er-brief-generate-button {
   position: relative;
   isolation: isolate;
@@ -5756,6 +5767,34 @@ body.er-preview-studio-fullscreen {
 }
 
 .er-studio-shell #escapeRoomForm .er-brief-generate-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--er-panel-ring);
+}
+
+.er-studio-shell #escapeRoomForm .er-brief-submit-actions {
+  gap: var(--er-panel-space-2);
+}
+
+.er-studio-shell #escapeRoomForm .er-brief-template-button {
+  min-height: 38px;
+  border: 1px solid var(--er-panel-border);
+  border-radius: var(--er-panel-radius-sm);
+  background: var(--er-panel-surface);
+  color: #334155;
+  box-shadow: none;
+}
+
+.er-studio-shell #escapeRoomForm .er-brief-template-button :where(i, span) {
+  color: #334155;
+}
+
+.er-studio-shell #escapeRoomForm .er-brief-template-button:hover:not(:disabled) {
+  border-color: var(--er-panel-primary);
+  background: var(--er-panel-muted, #f8fafc);
+  transform: none;
+}
+
+.er-studio-shell #escapeRoomForm .er-brief-template-button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--er-panel-ring);
 }

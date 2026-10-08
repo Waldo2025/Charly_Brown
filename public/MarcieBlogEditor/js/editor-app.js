@@ -1,5 +1,73 @@
-import "./contracts/marcie-bibliography.js?v=20260908r9";
+import { productionRequest, productionProgress, waitForProductionSave } from "./services/marcie-production-client.js";
+import { mountProductionClock } from "./services/marcie-production-clock.js";
+import { readSavingsPolicy, claimManySavings } from "../../js/savings-client.js";
+import "./contracts/marcie-bibliography.js?v=20260924r7";
 const bibliography = globalThis.MarcieBibliography;
+const pendingVerificationTimers = new Map();
+const pendingVerificationRuns = new Set();
+const pendingVerificationControllers = new Map();
+
+function schedulePendingVerification(sessionId, audienceId, delayMs = 60_000) {
+  const key = `${sessionId}:${audienceId}`;
+  if (pendingVerificationTimers.has(key) || pendingVerificationRuns.has(key)) return;
+  pendingVerificationTimers.set(key, window.setTimeout(async () => {
+    pendingVerificationTimers.delete(key);
+    const session = appState.sessions.find((item) => item.id === sessionId);
+    const article = session?.articlesByAudience?.[audienceId];
+    if (!article?.verification?.retryPending || session?.automation?.status === "cancelled") return;
+    if (appState.automationWorkflowActive || sessionOperations.has(sessionId)) {
+      schedulePendingVerification(sessionId, audienceId, 30_000);
+      return;
+    }
+    pendingVerificationRuns.add(key);
+    const controller = new AbortController();
+    pendingVerificationControllers.set(key, controller);
+    let nextDelay = 0;
+    try {
+      const originalHash = await articleContentHash(article);
+      const verified = await withMarcieAutomationLock(sessionId, () => verifyArticleEvidence({ article, topic: session.topic || session.title, additionalSearches: 0, autoRepair: false, signal: controller.signal }));
+      const latest = appState.sessions.find((item) => item.id === sessionId);
+      const current = latest?.articlesByAudience?.[audienceId];
+      if (!current || latest.automation?.status === "cancelled" || await articleContentHash(current) !== originalHash) return;
+      latest.articlesByAudience[audienceId] = { ...current, ...verified, blocks: current.blocks, verification: { ...verified.verification, retryPending: false } };
+      if (latest.audience === audienceId) latest.article = latest.articlesByAudience[audienceId];
+      const articles = Object.values(latest.articlesByAudience || {}).filter(hasCompleteArticle);
+      if (articles.length && !articles.some(item => item.verification?.retryPending)) {
+        const blockers = articles.flatMap(item => articleVerificationBlockers(item, { editorialMode: latest.editorialMode }));
+        if (!blockers.length && !latest.automation?.remainingFindings && !latest.automation?.coverErrors?.length) {
+          latest.automation.status = "completed";
+          latest.automation.message = "Artículos comprobados y listos para revisión y aprobación.";
+        } else if (latest.automation?.status === "completed_with_findings") {
+          latest.automation.message = "La comprobación automática terminó. Revisa los hallazgos editoriales y las fuentes pendientes.";
+        }
+      }
+      await saveMarcieSession(latest);
+      renderActiveSession();
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      const latest = appState.sessions.find((item) => item.id === sessionId);
+      const current = latest?.articlesByAudience?.[audienceId];
+      if (!current?.verification?.retryPending) return;
+      if (error?.code === "marcie_automation_in_other_tab") {
+        nextDelay = 30_000;
+        return;
+      }
+      if (![503, 504].includes(Number(error?.status || 0)) && !isTransientFetchError(error)) {
+        current.verification = { ...current.verification, retryPending: false, error: String(error?.message || "Error de verificación") };
+        await saveMarcieSession(latest).catch(() => {});
+        return;
+      }
+      const attempts = Number(current.verification.retryAttempts || 0) + 1;
+      current.verification.retryAttempts = attempts;
+      await saveMarcieSession(latest).catch(() => {});
+      nextDelay = Math.min(10 * 60_000, 60_000 * 2 ** Math.min(attempts, 4));
+    } finally {
+      pendingVerificationRuns.delete(key);
+      pendingVerificationControllers.delete(key);
+      if (nextDelay) schedulePendingVerification(sessionId, audienceId, nextDelay);
+    }
+  }, delayMs));
+}
 import {
   subscribeToMarcieSessions,
   createMarcieSession,
@@ -10,29 +78,56 @@ import {
   deleteMarcieSession,
   seedInitialSessionIfEmpty,
   MARCIE_COLLECTION
-} from "./services/marcie-session-store.js?v=20260922r1";
+} from "./services/marcie-session-store.js?v=20260923r6";
 import {
   ensureApprovedUserAccess,
   logOutUser,
   findUserProfile
 } from "./services/marcie-auth-guard.js";
-import { initPanelResizers } from "./components/panel-resizer.js";
-import { openSessionContextMenu } from "./components/session-menu.js?v=20260908r9";
-import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js?v=20260922r3";
-import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260908r9";
-import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9";
-import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260922r3";
-import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r6";
+import { initPanelResizers } from "./components/panel-resizer.js?v=20260923r1";
+import { openSessionContextMenu } from "./components/session-menu.js?v=20260923r3";
+import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js?v=20260923r4";
+import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260923r2";
+import { makeArticleEditable, formatSelectedArticleBlocks } from "./components/inline-editor.js?v=20260924r1";
+import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260923r4";
+import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260923r4";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
-import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r3";
-import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r3";
-import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r4";
-import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260908r9";
-import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
+import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260924r4";
+import { articleContentHash, correctArticleAuditWithGemini, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260924r30";
+import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260923r27";
+import { hasCompleteArticle, hasProposalsForAudiences, isTransientFetchError, retryTransientFetch } from "./services/marcie-automation-recovery.js";
+import { withMarcieAutomationLock } from "./services/marcie-automation-lock.js?v=20260923r1";
+import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260924r4";
+import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js?v=20260923r4";
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
-import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js";
-import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r19";
+import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js?v=20260923r1";
+import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260924r5";
+import { buildStyledDocxBlob } from "/js/word-export.js?v=20260924r1";
+import { getYoutubeVideoMetadata } from "./services/marcie-agent-api.js";
+import { videosNeedingMetadata, mergeVideoMetadata } from "./services/marcie-video-metadata.mjs?v=20260924r1";
+import {
+  openCreateVideoScriptModal,
+  openVideoScriptsListModal,
+  openVideoScriptViewerModal,
+  updateVideoScriptButtonsState
+} from "./components/marcie-video-scripts-modal.js?v=20260928r6";
+
+const videoMetadataRequests = new Set();
+function hydrateSavedVideoMetadata(sessionId) {
+  const session = appState.sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  const urls = videosNeedingMetadata(session);
+  const pending = urls.filter(url => !videoMetadataRequests.has(`${sessionId}:${url}`));
+  if (!pending.length) return;
+  pending.forEach(url => videoMetadataRequests.add(`${sessionId}:${url}`));
+  void getYoutubeVideoMetadata(pending).then(async result => {
+    const latest = appState.sessions.find(item => item.id === sessionId);
+    if (!latest || !mergeVideoMetadata(latest, result.videos)) return;
+    await saveMarcieSession(latest);
+    if (getActiveSession()?.id === sessionId) renderActiveSession();
+  }).catch(error => console.warn("[MarcieBlogEditor] No se pudieron actualizar los metadatos del video:", error));
+}
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
 const MARCIE_UI_THEMES = [
@@ -106,9 +201,147 @@ const appState = {
   showArchived: false
 };
 let marcieAgentPanel = null;
+const automationCancellations = new Map();
+const automationRecoveryRuns = new Map();
+const automationRecoveryControllers = new Map();
 
-async function runSessionReview(session, article = session?.article, audience = article?.audience || session?.audience || "educators") {
-  const result = await reviewArticleForMode({ session, article: article || { title: session?.title, blocks: [] } });
+function automationRetryDelay(attempt, error) {
+  const base = Number(error?.status) === 429 ? 60_000 : 10_000;
+  return Math.min(5 * 60_000, base * 2 ** Math.min(Math.max(0, attempt - 1), 5));
+}
+
+function waitForAutomationRetry(delayMs, signal) {
+  return new Promise(resolve => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(finish, delayMs);
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
+
+function automationRecoveryKey() {
+  return appState.currentUser?.uid ? `marcie_automation_v1_${appState.currentUser.uid}` : "";
+}
+
+function removeAutomationRecoverySnapshot(key) {
+  if (!key) return;
+  try {
+    localStorage.removeItem(`${key}_snapshot`);
+    const staleKeys = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const storedKey = localStorage.key(index);
+      if (storedKey?.startsWith("marcie_automation_v1_") && storedKey.endsWith("_snapshot")) {
+        staleKeys.push(storedKey);
+      }
+    }
+    staleKeys.forEach((storedKey) => localStorage.removeItem(storedKey));
+  } catch (_) {}
+}
+
+function rememberAutomation(session) {
+  const key = automationRecoveryKey();
+  if (!key || !session?.id) return;
+  const marker = JSON.stringify({ sessionId: session.id, updatedAt: Date.now() });
+  try {
+    // Firestore ya conserva el estado completo. Aquí solo dejamos un puntero
+    // pequeño para reanudar cuando vuelva a llegar la suscripción en tiempo real.
+    localStorage.setItem(key, marker);
+    removeAutomationRecoverySnapshot(key);
+  } catch (_) {
+    // El respaldo local es opcional; no debe convertir una cuota de Storage en
+    // un error visible ni impedir que continúe el flujo respaldado en Firebase.
+    removeAutomationRecoverySnapshot(key);
+    try { localStorage.setItem(key, marker); } catch (_) {}
+  }
+}
+
+function forgetAutomation(session) {
+  const key = automationRecoveryKey();
+  if (!key) return;
+  try {
+    if (JSON.parse(localStorage.getItem(key) || "null")?.sessionId === session?.id) {
+      localStorage.removeItem(key);
+      localStorage.removeItem(`${key}_snapshot`);
+    }
+  } catch (_) {
+    localStorage.removeItem(key);
+    localStorage.removeItem(`${key}_snapshot`);
+  }
+}
+
+function automationAbortError() {
+  const error = new Error("Producción cancelada. Los artículos y avances guardados se conservaron.");
+  error.name = "AbortError";
+  return error;
+}
+
+async function awaitAutomation(session, operation) {
+  const cancellation = automationCancellations.get(session.id);
+  if (!cancellation || cancellation.cancelled) throw automationAbortError();
+  const result = await Promise.race([operation, cancellation.promise.then(() => { throw automationAbortError(); })]);
+  if (cancellation.cancelled) throw automationAbortError();
+  return result;
+}
+
+async function withAutomationRequestDeadline(operation, timeoutMs, parentSignal) {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+  parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    if (parentSignal?.aborted) controller.abort();
+    return await operation(controller.signal);
+  } catch (error) {
+    if (timedOut) throw Object.assign(new Error("La corrección editorial tardó demasiado; se conservará el artículo y sus hallazgos para revisión."), { code: "marcie_correction_timeout" });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", abortFromParent);
+  }
+}
+
+async function cancelAutomatedSession(session) {
+  if (session.automation?.engine === "persistent") {
+    session.automation.cancelRequested = true;
+    if (!session.automation.productionId) {
+      const started = await productionRequest("start", { sessionId: session.id });
+      session.automation.productionId = started.id;
+    }
+    const result = await productionRequest("cancel", { productionId: session.automation.productionId });
+    session.automation = { ...session.automation, ...productionProgress(result) };
+    automationRecoveryControllers.get(session.id)?.abort();
+    forgetAutomation(session);
+    updateAutomatedSessionProgress(session.automation.stage, session.automation.message, session.automation.progress || 0, null, session);
+    renderActiveSession();
+    return;
+  }
+  automationRecoveryControllers.get(session.id)?.abort();
+  for (const [key, timer] of pendingVerificationTimers) {
+    if (key.startsWith(`${session.id}:`)) { clearTimeout(timer); pendingVerificationTimers.delete(key); }
+  }
+  for (const [key, controller] of pendingVerificationControllers) {
+    if (key.startsWith(`${session.id}:`)) controller.abort();
+  }
+  const cancellation = automationCancellations.get(session.id);
+  if (cancellation) {
+    cancellation.cancelled = true;
+    cancellation.controller.abort();
+    cancellation.resolve();
+  }
+  session.automation = { ...(session.automation || {}), status: "cancelled", message: "Producción cancelada. Puedes revisar los avances o crear otra configuración.", cancelledAt: new Date().toISOString() };
+  forgetAutomation(session);
+  updateAutomatedSessionProgress(session.automation.stage || "proposals", session.automation.message, session.automation.progress || 0, session.automation.stagePercent, session);
+  await saveMarcieSession(session).catch((error) => console.warn("[MarcieAutomation] No se pudo sincronizar la cancelación:", error));
+  renderActiveSession();
+}
+
+async function runSessionReview(session, article = session?.article, audience = article?.audience || session?.audience || "educators", blockIds = []) {
+  const result = await reviewArticleForMode({ session, article: article || { title: session?.title, blocks: [] }, blockIds });
   const audit = { ...result };
   if (audit.verifiedArticle) {
     const verifiedArticle = audit.verifiedArticle;
@@ -304,10 +537,8 @@ window.__marcieSetArticleGenerationState = ({ isGenerating, current, total, audi
   if (appState.currentTab === "article" && dom.articleView && dom.editorialGuideView) {
     if (appState.isGeneratingArticle) {
       dom.editorialGuideView.classList.add("hidden");
-      dom.editorialGuideView.style.display = "none";
       dom.editorialGuideView.hidden = true;
       dom.articleView.classList.remove("hidden");
-      dom.articleView.style.display = "";
       dom.articleView.hidden = false;
     }
   }
@@ -320,17 +551,14 @@ window.__marcieShowArticleGenerationSpinner = (session = {}, progress = {}) => {
   appState.currentTab = "article";
   if (dom.articleView) {
     dom.articleView.classList.remove("hidden");
-    dom.articleView.style.display = "";
     dom.articleView.hidden = false;
   }
   if (dom.structuredView) {
     dom.structuredView.classList.add("hidden");
-    dom.structuredView.style.display = "none";
     dom.structuredView.hidden = true;
   }
   if (dom.seoView) {
     dom.seoView.classList.add("hidden");
-    dom.seoView.style.display = "none";
     dom.seoView.hidden = true;
   }
   if (appState.currentTab === "article") {
@@ -342,15 +570,32 @@ window.__marcieHideArticleGenerationSpinner = () => {
   window.__marcieSetArticleGenerationState({ isGenerating: false });
 };
 
-const ARTICLE_GENERATOR_ANIME_SRC = "/vendor/animejs/anime.esm.min.js";
-let animeModulePromise = null;
 const ARTICLE_GENERATION_SPINNER_HOST_ID = "article-generation-spinner";
 let articleGeneratingAnimation = null;
 let automationProgressAnimations = [];
+let automationProgressAnimationRun = 0;
 
-function animateSpinnerTarget(animate, targets, params = {}) {
-  if (!targets || !animate || typeof animate !== "function") return null;
-  return animate(targets, params);
+function animateSpinnerTarget(_animate, targets, params = {}) {
+  const nodes = targets instanceof Element ? [targets] : Array.from(targets || []);
+  const tracks = ["translateX", "translateY", "rotate", "scale", "opacity"];
+  const steps = Math.max(2, ...tracks.map((key) => Array.isArray(params[key]) ? params[key].length : 0));
+  const animations = nodes.filter((node) => typeof node.animate === "function").map((node) => {
+    const frames = Array.from({ length: steps }, (_, index) => {
+      const value = (key, fallback) => {
+        const sequence = params[key];
+        return Array.isArray(sequence) ? sequence[Math.min(index, sequence.length - 1)] : fallback;
+      };
+      return {
+        transform: `translate(${value("translateX", 0)}px, ${value("translateY", 0)}px) rotate(${value("rotate", 0)}deg) scale(${value("scale", 1)})`,
+        opacity: value("opacity", 1),
+        ...(params.transformOrigin ? { transformOrigin: params.transformOrigin } : {})
+      };
+    });
+    const animation = node.animate(frames, { duration: params.duration || 600, iterations: params.loop ? Infinity : 1, direction: params.alternate ? "alternate" : "normal", easing: "ease-in-out", fill: "both" });
+    if (params.onComplete && !params.loop) animation.finished.then(() => params.onComplete()).catch(() => {});
+    return animation;
+  });
+  return { pause: () => animations.forEach((animation) => animation.pause()), cancel: () => animations.forEach((animation) => animation.cancel()) };
 }
 
 function getArticleViewContentHost() {
@@ -373,26 +618,23 @@ function getArticleGenerationSpinnerHost() {
 function hideArticleViewContentForGeneration() {
   if (!dom.articleView) return;
 
-  dom.articleView.style.position = "relative";
+  dom.articleView.classList.add("relative");
 
   const articleGuideShell = document.getElementById("article-guide-shell");
   const articleGuideView = document.getElementById("editorial-guide-view");
-  if (articleGuideShell) articleGuideShell.style.display = "none";
+  if (articleGuideShell) articleGuideShell.classList.add("hidden");
   if (articleGuideView) {
-    articleGuideView.style.display = "none";
     articleGuideView.hidden = true;
     articleGuideView.classList.add("hidden");
   }
 
   Array.from(dom.articleView.children).forEach((child) => {
     if (child.id === ARTICLE_GENERATION_SPINNER_HOST_ID) {
-      child.style.display = "";
       child.hidden = false;
       child.classList.remove("hidden");
       return;
     }
 
-    child.style.display = "none";
     child.hidden = true;
     child.classList.add("hidden");
   });
@@ -407,7 +649,6 @@ function restoreArticleViewContent() {
       return;
     }
 
-    child.style.display = "";
     child.hidden = false;
     child.classList.remove("hidden");
   });
@@ -497,9 +738,6 @@ function renderEvidencePanel(article = {}) {
   const blockers = articleVerificationBlockers(article, { editorialMode: getActiveSession()?.editorialMode, scope: "evidence" });
   const citationIssues = bibliography.integrity(article);
   const citationNotices = citationIssues.missing.length ? [`${citationIssues.missing.length} cita(s) sin documento bibliográfico asociado. Revisa las marcas [?].`] : [];
-  const dossier = article.researchDossier || getActiveSession()?.researchByAudience?.[article.audience || getActiveSession()?.audience] || {};
-  const sourceCount = bibliography.sources(article).filter(source => source.verificationStatus === "verified").length;
-  if (article.blocks?.length && dossier.targetSourceCount && sourceCount < dossier.targetSourceCount) citationNotices.push(`Investigación pendiente: ${sourceCount} de ${dossier.targetSourceCount} documentos verificados. Vuelve a investigar antes de aprobar.`);
   blockers.push(...citationNotices);
   const pendingClaimTexts = new Set(uniqueClaims
     .filter((claim) => claim?.status !== "supported")
@@ -523,14 +761,14 @@ function renderEvidencePanel(article = {}) {
       : verificationError
         ? "La comprobación no pudo terminar"
         : pendingClaimCount
-          ? pendingClaimCount === 1 ? "1 afirmación requiere revisión editorial" : `${pendingClaimCount} afirmaciones requieren revisión editorial`
+          ? pendingClaimCount === 1 ? "1 afirmación con evidencia pendiente" : `${pendingClaimCount} afirmaciones con evidencia pendiente`
           : blockers.length && verificationStatus !== "pending"
             ? "El artículo necesita evidencia antes de aprobarse"
             : "La comprobación se ejecutará automáticamente";
   if (dom.btnVerifyEvidence) {
-    dom.btnVerifyEvidence.classList.toggle("hidden", isChecking || !verificationError);
+    dom.btnVerifyEvidence.classList.toggle("hidden", isChecking || (!verificationError && verificationStatus !== "blocked"));
     dom.btnVerifyEvidence.disabled = isChecking;
-    dom.btnVerifyEvidence.textContent = "Reintentar";
+    dom.btnVerifyEvidence.textContent = "Reintentar comprobación";
   }
   if (dom.evidenceBlockers) {
     const notices = [...citationNotices, ...(verificationError ? [verificationError] : verificationStatus === "pending" ? [] : summaryBlockers)];
@@ -572,36 +810,62 @@ function renderEvidencePanel(article = {}) {
       const referencesHtml = claimReferences.length
         ? `<div class="mt-3 flex flex-wrap items-center gap-1.5"><span class="mr-1 text-[10px] font-medium text-slate-500">Evidencia:</span>${claimReferences.map((entry) => entry.url === "#" ? `<span class="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 text-[9px] font-semibold text-slate-600" title="${escapeHtml(entry.title)}">${entry.reference}</span>` : `<a class="rounded-md border border-teal-200 bg-teal-50 px-1.5 py-1 text-[9px] font-semibold text-teal-700 transition hover:border-teal-300 hover:bg-teal-100" href="${escapeHtml(entry.url)}" target="_blank" rel="noopener" title="${escapeHtml(entry.title)}" aria-label="Abrir ${entry.reference}: ${escapeHtml(entry.title)}">${entry.reference}</a>`).join("")}</div>`
         : `<p class="mt-3 text-[10px] font-medium text-amber-700">Sin una página asociada.</p>`;
-      const reviewAction = actionable ? `<button type="button" data-review-evidence-claim="${escapeHtml(claim.id || "")}" class="article-evidence-review-action">Revisar en la redacción</button>` : "";
+      const reviewAction = actionable ? `<button type="button" data-review-evidence-claim="${escapeHtml(claim.id || "")}" class="article-evidence-review-action">Resolver con Marcie</button>` : "";
       return `<article class="article-evidence-claim"><div class="flex items-start justify-between gap-3"><p class="text-xs leading-relaxed text-slate-700">${escapeHtml(claim.claim || claim.text || "Afirmación")}</p><span class="shrink-0 rounded-full px-2 py-1 text-[9px] font-bold ${badge}">${statusLabel}</span></div>${supportSummary ? `<p class="mt-2 text-[10px] leading-relaxed text-slate-500">${escapeHtml(supportSummary)}</p>` : ""}${referencesHtml}${reviewAction}</article>`;
     };
     const pendingClaims = uniqueClaims.filter((claim) => claim?.status !== "supported");
+    const automaticCorrections = Array.isArray(article.automaticCorrections) ? article.automaticCorrections : [];
+    const correctionsHtml = automaticCorrections.length
+      ? `<details class="article-evidence-details"><summary>Correcciones de Marcie <span>${automaticCorrections.length} cambios</span></summary><div class="article-evidence-details-body"><ul class="space-y-2 text-xs text-slate-600">${automaticCorrections.map((item) => `<li>${escapeHtml(item.description || item.target || "Corrección factual")}</li>`).join("")}</ul></div></details>`
+      : "";
     const claimsHtml = pendingClaims.length
-      ? `<div class="article-evidence-issues"><div class="article-evidence-issues-heading"><span>Requiere tu criterio editorial</span><span>${pendingClaims.length}</span></div>${pendingClaims.map((claim) => renderClaim(claim, true)).join("")}</div>`
+      ? `<div class="article-evidence-issues"><div class="article-evidence-issues-heading"><span>Correcciones pendientes de Marcie</span><span>${pendingClaims.length}</span></div>${pendingClaims.map((claim) => renderClaim(claim, true)).join("")}</div>`
       : "";
     const sourcesHtml = evidenceSources.length ? `<div class="space-y-2">${evidenceSources.map((source) => `<div class="flex min-w-0 items-center gap-2"><span class="shrink-0 rounded-md bg-slate-100 px-1.5 py-1 text-[9px] font-bold text-slate-600">${source.reference}</span><div class="min-w-0 flex-1"><p class="truncate text-[10px] font-semibold text-slate-700" title="${escapeHtml(source.title)}">${escapeHtml(source.title)}</p><p class="truncate text-[9px] text-slate-400">${escapeHtml(source.domain || "Página verificada")}</p></div>${source.url === "#" ? "" : `<a class="shrink-0 text-[10px] font-semibold text-teal-700 hover:underline" href="${escapeHtml(source.url)}" target="_blank" rel="noopener">Abrir</a>`}</div>`).join("")}</div>` : `<p class="text-xs text-slate-500">Sin referencias asociadas todavía.</p>`;
     const auditHtml = rejectedSources.length ? `<details class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><summary class="cursor-pointer text-xs font-semibold text-amber-900">${rejectedSources.length} fuente(s) descartadas durante la recuperación</summary><div class="mt-2 space-y-2">${rejectedSources.map((source) => `<div class="rounded-lg border border-amber-100 bg-white/70 p-2"><b class="block truncate text-[10px] text-slate-700">${escapeHtml(source.title || source.url || "Fuente")}</b><span class="text-[9px] text-amber-800">${escapeHtml(source.reason || "verification_error")}</span></div>`).join("")}</div></details>` : "";
     const technicalDetails = !isChecking && (uniqueClaims.length || evidenceSources.length || rejectedSources.length)
       ? `<details class="article-evidence-details"><summary>Detalles de evidencia <span>${coverage}% · ${uniqueClaims.length} afirmaciones</span></summary><div class="article-evidence-details-body"><div><p class="article-evidence-detail-label">Matriz completa</p><div class="space-y-2">${uniqueClaims.length ? uniqueClaims.map((claim) => renderClaim(claim)).join("") : `<p class="text-xs text-slate-500">Sin afirmaciones extraídas.</p>`}</div></div><div><p class="article-evidence-detail-label">Fuentes de la matriz</p>${sourcesHtml}</div>${auditHtml}</div></details>`
       : "";
-    dom.evidenceMatrix.innerHTML = isChecking ? `<div class="article-evidence-progress"><span></span><p>Contrastando afirmaciones con las páginas recuperadas. Puedes seguir editando mientras termina.</p></div>` : `${claimsHtml}${technicalDetails}`;
+    dom.evidenceMatrix.innerHTML = isChecking ? `<div class="article-evidence-progress"><span></span><p>Contrastando afirmaciones con las páginas recuperadas. Puedes seguir editando mientras termina.</p></div>` : `${correctionsHtml}${claimsHtml}${technicalDetails}`;
     dom.evidenceMatrix.querySelectorAll("[data-review-evidence-claim]").forEach((button) => button.addEventListener("click", () => {
-      dom.articleBodyContainer?.scrollIntoView({ behavior: "smooth", block: "center" });
-      dom.articleBodyContainer?.focus({ preventScroll: true });
+      const claim = pendingClaims.find((item) => String(item.id) === button.dataset.reviewEvidenceClaim);
+      if (!claim) return;
+      const isSmallPhone = window.matchMedia("(max-width: 599px) and (max-device-width: 599px) and (orientation: portrait) and (pointer: coarse)").matches;
+      if (isSmallPhone) {
+        const mobileAssistant = document.getElementById("btn-mobile-assistant");
+        if (mobileAssistant?.getAttribute("aria-expanded") === "false") mobileAssistant.click();
+      } else if (document.getElementById("right-panel")?.classList.contains("hidden")) {
+        document.getElementById("btn-toggle-right-panel-fullscreen")?.click();
+      }
+      void marcieAgentPanel?.resolveEvidenceClaim(claim);
     }));
   }
 }
 
 function getSessionEvidenceCandidates(session = {}) {
-  const candidates = [];
-  const appendSources = (articleOrDossier = {}) => {
-    const sources = articleOrDossier.researchSources || articleOrDossier.sources || [];
-    if (Array.isArray(sources)) candidates.push(...sources);
+  const audience = session.audience || session.article?.audience || "educators";
+  const article = session.articlesByAudience?.[audience] || session.article || {};
+  const dossier = session.researchByAudience?.[audience] || article.researchDossier || {};
+  return sanitizeTrustedSources([
+    ...(article.researchSources || article.sources || []),
+    ...(article.usedSources || []),
+    ...(dossier.sources || [])
+  ]);
+}
+
+function retainVerifiedAudienceSources(session, audience, article = {}) {
+  if (!Array.isArray(article.researchSources)) return;
+  const dossier = session.researchByAudience?.[audience];
+  if (!dossier) return;
+  session.researchByAudience = {
+    ...session.researchByAudience,
+    [audience]: {
+      ...dossier,
+      sources: article.researchSources,
+      verifiedSourceCount: article.researchSources.filter((source) => source?.verificationStatus === "verified").length,
+      verificationStatus: article.verification?.status === "verified" ? "verified" : "blocked"
+    }
   };
-  appendSources(session.article || {});
-  Object.values(session.articlesByAudience || {}).forEach(appendSources);
-  (Array.isArray(session.trends) ? session.trends : []).forEach(appendSources);
-  return sanitizeTrustedSources(candidates);
 }
 
 const automaticEvidenceTimers = new Map();
@@ -622,7 +886,7 @@ function scheduleAutomaticEvidenceVerification(session, { delay = 1400 } = {}) {
   }, delay));
 }
 
-async function runAutomaticEvidenceVerification(session, { notify = false } = {}) {
+async function runAutomaticEvidenceVerification(session, { notify = false, additionalSearches = 0, autoRepair = false } = {}) {
   const key = evidenceJobKey(session);
   if (!session?.article || automaticEvidenceRuns.has(key)) return automaticEvidenceRuns.get(key) || null;
   const audience = session.audience || session.article.audience || "educators";
@@ -634,7 +898,7 @@ async function runAutomaticEvidenceVerification(session, { notify = false } = {}
     session.article.verification = { ...(session.article.verification || {}), status: "verifying", error: "" };
     if (getActiveSession()?.id === session.id) renderEvidencePanel(session.article);
     try {
-      const verified = await verifyArticleEvidence({ article: articleAtStart, topic: session.topic || session.title, additionalSearches: 0 });
+      const verified = await verifyArticleEvidence({ article: articleAtStart, topic: session.topic || session.title, additionalSearches, autoRepair });
       const latestSession = getAllSessions().find(item => item.id === session.id);
       if (latestSession !== session) return null;
       const currentArticle = session.articlesByAudience?.[audience] || session.article;
@@ -645,12 +909,13 @@ async function runAutomaticEvidenceVerification(session, { notify = false } = {}
       }
       if (session.audience === audience) session.article = verified;
       session.articlesByAudience = { ...(session.articlesByAudience || {}), [audience]: verified };
+      retainVerifiedAudienceSources(session, audience, verified);
       session.approvedAudiences = (session.approvedAudiences || []).filter((item) => item !== audience);
       session.status = "review_required";
       await saveMarcieSession(session);
       if (getActiveSession()?.id === session.id) renderActiveSession();
       const pending = (verified.articleClaims || []).filter((claim) => claim?.status !== "supported").length;
-      if (notify) showToast(pending ? pending === 1 ? "1 afirmación requiere revisión editorial." : `${pending} afirmaciones requieren revisión editorial.` : "Control factual completado automáticamente.", pending ? "info" : "success");
+      if (notify) showToast(pending ? "Marcie no pudo completar todas las correcciones factuales. La aprobación sigue bloqueada." : "Control factual y correcciones completados automáticamente.", pending ? "warning" : "success");
       return verified;
     } catch (error) {
       const failedArticle = session.articlesByAudience?.[audience];
@@ -709,9 +974,11 @@ const authorNamePending = new Map();
 const ARTICLE_APPEARANCE_DEFAULTS = Object.freeze({
   "data-text-title-size": "xsmall",
   "data-text-subtitle-size": "small",
+  "data-text-section-size": "normal",
   "data-text-p-size": "normal",
   "data-text-title-weight": "semibold",
   "data-text-subtitle-weight": "normal",
+  "data-text-section-weight": "semibold",
   "data-text-font": "sans",
   "data-quote-color": "teal",
   "data-text-line-height": "normal"
@@ -933,9 +1200,10 @@ function articleTemplateStyle(template, overrides = {}) {
     quoteBg: "--article-quote-bg", quoteBorder: "--article-quote-border", quoteText: "--article-quote-text", quoteIcon: "--article-quote-icon",
     fontHeading: "--article-font-heading", fontBody: "--article-font-body", radius: "--article-radius", titleSize: "--article-title-size",
     titleLine: "--article-title-line", subtitleSize: "--article-subtitle-size", subtitleLine: "--article-subtitle-line",
-    bodySize: "--article-body-size", bodyLine: "--article-body-line", coverRadius: "--article-cover-radius", preview: "--article-preview-art"
+    bodySize: "--article-body-size", bodyLine: "--article-body-line", sectionSize: "--article-section-size",
+    sectionLine: "--article-section-line", sectionWeight: "--article-section-weight", coverRadius: "--article-cover-radius", preview: "--article-preview-art"
   };
-  return Object.entries(map).map(([key, cssName]) => `${cssName}:${values[key]}`).join(";");
+  return Object.entries(map).filter(([key]) => values[key] != null).map(([key, cssName]) => `${cssName}:${values[key]}`).join(";");
 }
 
 function getArticleTemplateSharedCss(scope) {
@@ -955,7 +1223,7 @@ ${scope} #article-body-container :is(strong,b){font-weight:700!important;}
 ${scope} #article-body-container :is(ul,ol) li,${scope} #article-body-container :is(ul,ol) li > :not(a),${scope} #article-body-container :is(ul,ol) li :is(span,strong,b,em,i){color:var(--article-text)!important;-webkit-text-fill-color:currentColor!important;opacity:1!important;}
 ${scope} #article-body-container :is(ul,ol) li::marker{color:var(--article-accent)!important;}
 ${scope} #article-body-container .article-inline-code{padding:.12em .38em;border:1px solid var(--article-border);border-radius:calc(var(--article-radius)*.45);background:var(--article-accent-soft)!important;color:var(--article-accent)!important;-webkit-text-fill-color:currentColor!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;}
-${scope} #article-body-container h2,${scope} #article-body-container h3{color:var(--article-heading)!important;font-family:var(--article-font-heading)!important;}
+${scope} #article-body-container h2,${scope} #article-body-container h3{color:var(--article-heading)!important;font-family:var(--article-font-heading)!important;font-size:var(--article-section-size,1.25rem)!important;line-height:var(--article-section-line,1.75)!important;font-weight:var(--article-section-weight,600)!important;}
 ${scope} #article-body-container a{color:var(--article-accent)!important;}
 ${scope} #article-body-container li::marker{color:var(--article-accent);}
 ${scope} #article-body-container blockquote{position:relative;margin:2rem 0!important;padding:1.5rem 1.5rem 1.5rem 4.4rem!important;border:0!important;border-left:4px solid var(--article-quote-border)!important;border-radius:0 var(--article-radius) var(--article-radius) 0!important;background:var(--article-quote-bg)!important;color:var(--article-quote-text)!important;font-style:normal!important;}
@@ -1266,14 +1534,6 @@ ${theme("midnightaurora")}{background-image:radial-gradient(circle at 10% 5%,rgb
 `;
 }
 
-function ensureArticleTemplatePreviewStyles() {
-  if (document.getElementById("marcie-article-template-styles")) return;
-  const style = document.createElement("style");
-  style.id = "marcie-article-template-styles";
-  style.textContent = getArticleTemplateSharedCss(".article-template-surface");
-  document.head.appendChild(style);
-}
-
 function ensureArticleTemplateFont(template) {
   const id = `marcie-template-font-${template.id}`;
   if (document.getElementById(id)) return;
@@ -1286,11 +1546,9 @@ function ensureArticleTemplateFont(template) {
 
 function applyArticleTemplate(article = {}) {
   if (!dom.articleView) return;
-  ensureArticleTemplatePreviewStyles();
   const template = getArticleTemplate(article.templateId);
   ensureArticleTemplateFont(template);
   dom.articleView.dataset.articleTemplate = template.id;
-  dom.articleView.setAttribute("style", `${dom.articleView.getAttribute("style") || ""};${articleTemplateStyle(template)}`);
 
   const appearance = article.appearance || {};
   Object.entries(ARTICLE_APPEARANCE_DEFAULTS).forEach(([attr, fallback]) => {
@@ -1339,14 +1597,13 @@ function openArticleTemplateGallery() {
       data-article-template-option="${escapeHtml(template.id)}"
       aria-label="Aplicar plantilla ${escapeHtml(template.name)}"
       aria-pressed="${template.id === selectedId ? "true" : "false"}"
-      style="${escapeHtml(articleTemplateStyle(template))}"
     >
       <span class="article-template-card__preview" aria-hidden="true">
         <span class="article-template-card__eyebrow">Marcie Editorial · 6 min</span>
         <span class="article-template-card__cover"></span>
         <span class="article-template-card__title">Ideas que transforman el aprendizaje</span>
         <span class="article-template-card__line"></span>
-        <span class="article-template-card__line" style="width:68%"></span>
+        <span class="article-template-card__line article-template-card__line--short"></span>
         <span class="article-template-card__quote">“Una buena idea cambia la manera de mirar el aula.”</span>
       </span>
       <span class="article-template-card__details">
@@ -1601,22 +1858,11 @@ async function resolveAuthorDisplayName({ article = {}, session = {} } = {}) {
 function setNodeHidden(node, shouldHide) {
   if (!node) return;
   node.hidden = shouldHide;
-  node.style.display = shouldHide ? "none" : "";
   node.classList.toggle("hidden", shouldHide);
 }
 
 async function getAnimeModule() {
-  if (!animeModulePromise) {
-    animeModulePromise = import(ARTICLE_GENERATOR_ANIME_SRC).then((module) => {
-      const animate = module?.animate || module?.default?.animate || module?.default;
-      if (typeof animate !== "function") {
-        throw new Error("Módulo de anime.js sin función animate exportada.");
-      }
-      return { animate };
-    });
-  }
-
-  return animeModulePromise;
+  return { animate: null };
 }
 
 function stopArticleGeneratingAnimation(restoreContent = true) {
@@ -1643,14 +1889,12 @@ function renderArticleGeneratingState(session = {}) {
   if (!dom.articleView) return;
 
   if (dom.editorialGuideView) {
-    dom.editorialGuideView.style.display = "none";
     dom.editorialGuideView.hidden = true;
     dom.editorialGuideView.classList.add("hidden");
   }
 
   dom.articleView.scrollTop = 0;
   dom.articleView.classList.remove("hidden");
-  dom.articleView.style.display = "";
   dom.articleView.hidden = false;
   hideArticleViewContentForGeneration();
 
@@ -1778,7 +2022,7 @@ const EDITORIAL_GUIDE_STEP_DEFS = {
     icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2a7 7 0 0 1 7 7c0 3.5-2.5 5.5-3 7H8c-.5-1.5-3-3.5-3-7a7 7 0 0 1 7-7z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 21h6m-6-3h6"/></svg>`,
     label: "Propuestas",
     title: "Paso 3 — Crear propuestas",
-    desc: "Genera hasta 4 propuestas de artículo con diferentes enfoques para docentes, estudiantes, familias y coordinadores académicos. Incluye título, subtítulo, estructura y ángulo diferenciador.",
+    desc: "Genera propuestas de artículo según los públicos seleccionados. Incluye título, subtítulo, estructura y ángulo diferenciador.",
     tips: ["Cambia la audiencia en la barra superior antes de generar.", "Puedes seleccionar una propuesta como base y redactar el artículo completo.", "Las propuestas respetan el brief editorial de tu institución."],
     badge: "Creatividad"
   },
@@ -2164,7 +2408,7 @@ function openEditorialPhaseModal(phaseId) {
           sourceIds: existing?.sourceIds || (dossier.sources || []).map((source) => String(source.id)),
           researchStatus: existing?.researchStatus || dossier.verificationStatus || "incomplete",
           verifiedSourceCount: Number(existing?.verifiedSourceCount ?? dossier.verifiedSourceCount ?? dossier.sources?.length ?? 0),
-          targetSourceCount: Number(existing?.targetSourceCount ?? dossier.targetSourceCount ?? 6)
+          targetSourceCount: Number(existing?.targetSourceCount ?? dossier.targetSourceCount ?? 4)
         });
       });
     const audienceOrder = [...new Set([...(session?.selectedAudiences || []), ...proposalsByAudience.keys()])];
@@ -2188,7 +2432,7 @@ function openEditorialPhaseModal(phaseId) {
                 <span class="w-fit rounded-full bg-purple-50 px-2 py-1 text-[10px] font-semibold text-purple-700">${escapeHtml(proposal.audienceLabel || audienceLabel(proposal.audience))}</span>
                 ${proposal.hasArticle ? `<span class="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-700">Artículo existente</span>` : ""}
                 ${proposal.origin === "manual" ? `<span class="w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-semibold text-slate-600">Creado manualmente</span>` : ""}
-                <span class="w-fit rounded-full border ${Number(proposal.verifiedSourceCount || 0) >= Number(proposal.targetSourceCount || 6) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"} px-2 py-0.5 text-[9px] font-semibold">${Number(proposal.verifiedSourceCount || 0)}/${Number(proposal.targetSourceCount || 6)} fuentes verificadas</span>
+              <span class="w-fit rounded-full border ${Number(proposal.verifiedSourceCount || 0) >= Number(proposal.targetSourceCount || 4) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"} px-2 py-0.5 text-[9px] font-semibold">${Number(proposal.verifiedSourceCount || 0)}/${Number(proposal.targetSourceCount || 4)} fuentes verificadas</span>
               </div>
               <strong class="mt-3 text-sm leading-snug text-slate-900">${escapeHtml(proposal.title || "Propuesta editorial")}</strong>
               <span class="mt-2 flex-1 text-[11px] leading-relaxed text-slate-600">${escapeHtml(proposal.brief || "")}</span>
@@ -2289,7 +2533,7 @@ function openEditorialPhaseModal(phaseId) {
         console.error("[MarcieBlogEditor] Error regenerando propuestas y artículos:", error);
         showToast(`No fue posible regenerar los artículos: ${error.message}`, "error");
         button.disabled = false;
-        button.textContent = proposals.length ? "Regenerar propuestas y artículos" : "Generar 4 propuestas";
+        button.textContent = proposals.length ? "Regenerar propuestas y artículos" : "Generar propuestas";
       }
     });
 
@@ -2509,7 +2753,7 @@ function openEditorialPhaseModal(phaseId) {
       issue?.title || issue?.finding || issue?.suggestion || `hallazgo-${index}`
     );
     const issues = allIssues.filter((issue, index) => !resolvedIssueKeys.has(getIssueKey(issue, index)));
-    const auditReady = Boolean(audit && issues.length === 0);
+    const auditReady = Boolean(audit && audit.reviewStatus !== "pending" && issues.length === 0);
     panel.innerHTML = `
       <div class="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50/75 to-white p-5 shadow-sm">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2528,7 +2772,7 @@ function openEditorialPhaseModal(phaseId) {
           <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr]">
             <div class="rounded-xl border border-slate-200 bg-white p-4">
               <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Puntaje editorial</span>
-              <div class="mt-2 text-4xl font-black leading-none ${auditReady ? "text-emerald-600" : "text-slate-900"}">${escapeHtml(audit.readabilityScore || (auditReady ? 98 : 92))}</div>
+              <div class="mt-2 text-4xl font-black leading-none ${auditReady ? "text-emerald-600" : "text-slate-900"}">${escapeHtml(audit.reviewStatus === "pending" ? "--" : (audit.readabilityScore || (auditReady ? 98 : 92)))}</div>
               <p class="mt-3 text-[11px] leading-relaxed text-slate-600">${escapeHtml(auditReady ? "No hay hallazgos pendientes. El artículo está listo para publicar." : audit.summary || "Auditoría completada.")}</p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-4">
@@ -2626,26 +2870,31 @@ function openEditorialPhaseModal(phaseId) {
 
         try {
           const audience = activeSession.article?.audience || activeSession.audience || "educators";
-          const correctedArticle = await draftArticleForMode({
-            session: activeSession,
-            title: activeSession.article.title || activeSession.title,
-            topic: activeSession.topic || activeSession.title,
-            audience,
-            brief: `Corrige el artículo manteniendo su estructura, enfoque, tono y fuentes.\n\nHallazgo: ${issue.message || issue.title || issue.finding || "Hallazgo editorial"}\nSugerencia: ${recommendation}`
+          const originalArticle = activeSession.article;
+          const correctedArticle = await correctArticleAuditWithGemini({
+            article: originalArticle,
+            issues: [{ ...issue, suggestion: recommendation }],
+            maxChangedBlocks: 1,
+            targetBlockId: issue.blockId || ""
           });
+          if (getActiveSession()?.id !== activeSession.id || activeSession.article !== originalArticle) {
+            throw new Error("El artículo cambió durante la corrección. Vuelve a intentarlo sobre la versión actual.");
+          }
+          if (correctedArticle === originalArticle) throw new Error("Marcie no identificó un bloque que pudiera corregir sin alterar el resto del artículo.");
           activeSession.article = correctedArticle;
           if (!activeSession.articlesByAudience) activeSession.articlesByAudience = {};
           activeSession.articlesByAudience[audience] = correctedArticle;
-          if (correctedArticle.title) activeSession.title = correctedArticle.title;
           activeSession.status = "review_required";
+          activeSession.approvedAudiences = (activeSession.approvedAudiences || []).filter((item) => item !== audience);
 
           const refreshedAudit = await runSessionReview(activeSession, correctedArticle, correctedArticle.audience || activeSession.audience);
-          refreshedAudit.resolvedIssueKeys = [...resolvedIssueKeys, issueKey];
+          const issueRemains = (refreshedAudit.issues || []).some((candidate, index) => getIssueKey(candidate, index) === issueKey);
+          refreshedAudit.resolvedIssueKeys = issueRemains ? [...resolvedIssueKeys] : [...resolvedIssueKeys, issueKey];
           activeSession.audit = refreshedAudit;
           const correctionEntry = {
             id: `correction-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             createdAt: new Date().toISOString(),
-            status: "corrected",
+            status: issueRemains ? "revised" : "corrected",
             issueKey,
             issue: issue.message || issue.title || issue.finding || "Hallazgo editorial",
             recommendation,
@@ -2658,14 +2907,16 @@ function openEditorialPhaseModal(phaseId) {
             ...(Array.isArray(activeSession.correctionHistory) ? activeSession.correctionHistory : [])
           ].slice(0, 100);
           await saveMarcieSession(activeSession);
-          button.dataset.fixStatus = "fixed";
-          button.className = "inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-600 px-2.5 py-1.5 text-[10px] font-semibold text-white";
-          button.innerHTML = `<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 12 4 4L19 7"></path></svg> Corregido`;
+          button.dataset.fixStatus = issueRemains ? "pending" : "fixed";
+          button.className = issueRemains
+            ? "inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold text-amber-700"
+            : "inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-600 px-2.5 py-1.5 text-[10px] font-semibold text-white";
+          button.textContent = issueRemains ? "Revisado" : "Corregido";
           await new Promise((resolve) => setTimeout(resolve, 700));
           renderSessionList();
           renderActiveSession();
           renderAuditWorkspace();
-          showToast("Hallazgo corregido y artículo analizado nuevamente.", "success");
+          showToast(issueRemains ? "Bloque actualizado; la auditoría aún muestra este hallazgo." : "Bloque corregido y artículo analizado nuevamente.", issueRemains ? "warning" : "success");
         } catch (error) {
           console.error("[MarcieBlogEditor] Error corrigiendo hallazgo:", error);
           showToast(`No fue posible aplicar la corrección: ${error.message}`, "error");
@@ -2783,7 +3034,7 @@ function renderEditorialGuideInArticleBody() {
 
       <div class="relative">
         <div class="absolute top-5 left-0 right-0 h-[2px] bg-slate-200 z-0 mx-[10%]"></div>
-        <div class="article-guide-progress-line absolute top-5 left-[10%] h-[2px] bg-gradient-to-r from-teal-400 to-purple-500 z-0 transition-all duration-500" style="width:0%"></div>
+        <div class="article-guide-progress-line absolute top-5 left-[10%] h-[2px] bg-gradient-to-r from-teal-400 to-purple-500 z-0 transition-all duration-500"></div>
 
         <div class="relative z-10 flex justify-between px-[6%]">
           ${[1,2,3].map((n) => {
@@ -2819,7 +3070,7 @@ function renderEditorialGuideInArticleBody() {
     const data = getEditorialMergedStepDef(n, getActiveSession());
     const c = EDITORIAL_GUIDE_COLOR_MAP[data.color];
     btns.forEach((btn) => btn.setAttribute("data-active", btn.getAttribute("data-article-guide-step") === String(n) ? "true" : "false"));
-    progress.style.width = progressMap[n] || "0%";
+    progress.dataset.step = String(n);
 
     detail.className = `article-guide-step-detail min-h-[132px] rounded-xl border ${c.border} ${c.bg} bg-gradient-to-br from-slate-50/80 to-white p-5 transition-all duration-300 shadow-sm`;
     detail.innerHTML = `
@@ -2908,22 +3159,11 @@ function setEditorialHeaderStateForSession(session, hasGuideInBody) {
   const btnToggleSubheader = document.getElementById("btn-toggle-subheader");
 
   if (centerSubheader) {
-    centerSubheader.style.overflow = "hidden";
-    centerSubheader.style.transition = "max-height 0.25s ease, padding 0.25s ease, border 0.25s ease";
-
     if (hasGuideInBody) {
-      centerSubheader.style.maxHeight = "0px";
-      centerSubheader.style.paddingTop = "0";
-      centerSubheader.style.paddingBottom = "0";
-      centerSubheader.style.borderBottomWidth = "0";
       centerSubheader.classList.add("collapsed-subheader");
       if (btnToggleSubheader) btnToggleSubheader.title = "Mostrar opciones";
     } else {
       centerSubheader.classList.remove("collapsed-subheader");
-      centerSubheader.style.maxHeight = "none";
-      centerSubheader.style.paddingTop = "";
-      centerSubheader.style.paddingBottom = "";
-      centerSubheader.style.borderBottomWidth = "";
       if (btnToggleSubheader) btnToggleSubheader.title = "Ocultar opciones";
     }
   }
@@ -3132,6 +3372,7 @@ function renderSessionItem(session) {
 
 function renderActiveSession() {
   const session = getActiveSession();
+  if (session) hydrateSavedVideoMetadata(session.id);
   const isReconfigureDisabled = !session || sessionOperations.has(session.id);
   const reconfigureButton = document.getElementById("btn-reconfigure-session-header");
   const reconfigureGridButton = document.getElementById("btn-reconfigure-session-grid");
@@ -3140,8 +3381,22 @@ function renderActiveSession() {
   if (reconfigureGridButton) reconfigureGridButton.disabled = isReconfigureDisabled;
   // Mostrar spinner del toolbar solo mientras el workflow corre en background
   if (automationProgressBtn) {
-    const workflowActive = appState.automationWorkflowActive && (!appState.automationWorkflowSessionId || appState.automationWorkflowSessionId === session?.id);
-    automationProgressBtn.classList.toggle("hidden", !workflowActive);
+    const workflowActive = Boolean(session && (automationRecoveryRuns.has(session.id) || (appState.automationWorkflowActive && (!appState.automationWorkflowSessionId || appState.automationWorkflowSessionId === session.id))));
+    const canResume = canResumeAutomatedSession(session);
+    const canRegenerate = canRegenerateAutomationSession(session);
+    const resumeLabel = automationResumeLabel(session);
+    const showAutomationAction = workflowActive || canResume || canRegenerate;
+    automationProgressBtn.classList.toggle("hidden", !showAutomationAction);
+    const actionLabel = canResume && !workflowActive
+      ? resumeLabel
+      : canRegenerate && !workflowActive
+        ? "Regenerar producción"
+        : "Ver progreso de producción";
+    automationProgressBtn.setAttribute("aria-label", actionLabel);
+    automationProgressBtn.title = actionLabel;
+    automationProgressBtn.querySelector(".automation-toolbar-spinner")?.classList.toggle("hidden", !workflowActive);
+    const progressLabel = automationProgressBtn.querySelector("span:last-child");
+    if (progressLabel) progressLabel.textContent = canResume && !workflowActive ? "Reanudar" : canRegenerate && !workflowActive ? "Regenerar" : "Generando…";
   }
   if (session?.saveConflict && session.remoteConflict && !session._conflictDialog) {
     session._conflictDialog = true;
@@ -3199,10 +3454,8 @@ function renderActiveSession() {
   if (dom.articleView && dom.editorialGuideView) {
     if (isGeneratingArticle && isArticleTab) {
       dom.editorialGuideView.classList.add("hidden");
-      dom.editorialGuideView.style.display = "none";
       dom.editorialGuideView.hidden = true;
       dom.articleView.classList.remove("hidden");
-      dom.articleView.style.display = "";
       dom.articleView.hidden = false;
     } else {
       setNodeHidden(dom.editorialGuideView, !isArticleTab || !shouldShowEditorialGuideForSession);
@@ -3219,6 +3472,7 @@ function renderActiveSession() {
   // Banner de progreso en vivo si la automatización está corriendo
   let progressBanner = dom.articleView?.querySelector("#center-panel-progress-banner");
   if (session.automation?.status === "running") {
+    const automationProgress = clampPercent(session.automation.progress);
     if (!progressBanner && dom.articleView) {
       progressBanner = document.createElement("div");
       progressBanner.id = "center-panel-progress-banner";
@@ -3235,9 +3489,9 @@ function renderActiveSession() {
             <h4 class="text-xs font-bold text-slate-900">${escapeHtml(session.automation.message || "Marcie está procesando tu producción...")}</h4>
             <div class="mt-1 flex items-center gap-2">
               <div class="h-2 w-36 overflow-hidden rounded-full bg-teal-200/80">
-                <div class="h-full bg-teal-600 transition-all duration-300" style="width: ${session.automation.progress || 0}%"></div>
+                <progress class="marcie-progress-fill" value="${automationProgress}" max="100" aria-label="Progreso de producción"></progress>
               </div>
-              <span class="text-[10px] font-bold text-teal-800">${session.automation.progress || 0}%</span>
+              <span class="text-[10px] font-bold text-teal-800">${automationProgress}%</span>
             </div>
           </div>
         </div>
@@ -3260,6 +3514,10 @@ function renderActiveSession() {
     if (blocks.length === 0) {
       const trend = session.trends?.[0];
       if (trend) {
+        const trendScore = clampPercent(trend.trendScore, null);
+        const trendGrowth = String(trend.growth || "No medido");
+        const trendFreshness = String(trend.freshness || "No medida");
+        const trendSourceDiversity = String(trend.sourceDiversity || "Alta");
         dom.articleBodyContainer.innerHTML = `
           <div class="space-y-6 my-2">
             <!-- Diagnóstico de Tendencia Gemini -->
@@ -3273,7 +3531,7 @@ function renderActiveSession() {
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs text-slate-500 font-medium">TrendScore:</span>
-                  <span class="badge badge-success text-xs font-bold px-2.5 py-1">${trend.trendScore == null ? "Sin métrica" : `${trend.trendScore} / 100`}</span>
+                  <span class="badge badge-success text-xs font-bold px-2.5 py-1">${trendScore == null ? "Sin métrica" : `${trendScore} / 100`}</span>
                 </div>
               </div>
               <p class="text-slate-700 text-xs sm:text-sm leading-relaxed mb-4">${escapeHtml(trend.summary || "Señal descubierta a partir de debates educativos recientes.")}</p>
@@ -3281,15 +3539,15 @@ function renderActiveSession() {
               <div class="grid grid-cols-3 gap-3 pt-3 border-t border-teal-100 text-xs">
                 <div class="bg-white/90 p-2.5 rounded-lg border border-teal-100/80 shadow-2xs">
                   <div class="text-slate-500 text-[10px] uppercase font-bold">Crecimiento</div>
-                  <div class="text-purple-700 font-bold text-sm mt-0.5">${trend.growth || "No medido"}</div>
+                  <div class="text-purple-700 font-bold text-sm mt-0.5">${escapeHtml(trendGrowth)}</div>
                 </div>
                 <div class="bg-white/90 p-2.5 rounded-lg border border-teal-100/80 shadow-2xs">
                   <div class="text-slate-500 text-[10px] uppercase font-bold">Frescura</div>
-                  <div class="text-slate-800 font-bold text-sm mt-0.5">${trend.freshness || "No medida"}</div>
+                  <div class="text-slate-800 font-bold text-sm mt-0.5">${escapeHtml(trendFreshness)}</div>
                 </div>
                 <div class="bg-white/90 p-2.5 rounded-lg border border-teal-100/80 shadow-2xs">
                   <div class="text-slate-500 text-[10px] uppercase font-bold">Fuentes</div>
-                  <div class="text-teal-700 font-bold text-sm mt-0.5">${trend.sourceDiversity || "Alta"}</div>
+                  <div class="text-teal-700 font-bold text-sm mt-0.5">${escapeHtml(trendSourceDiversity)}</div>
                 </div>
               </div>
             </div>
@@ -3316,7 +3574,7 @@ function renderActiveSession() {
             <div class="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex items-center justify-between gap-4">
               <div>
                 <div class="font-bold text-purple-900 text-xs">Siguiente paso del flujo editorial:</div>
-                <div class="text-purple-700 text-[11px]">Genera 4 propuestas por audiencia o redacta directamente el artículo completo.</div>
+                <div class="text-purple-700 text-[11px]">Genera propuestas para los públicos seleccionados o redacta directamente el artículo completo.</div>
               </div>
             <button id="btn-quick-draft" class="btn btn-primary h-8 px-4 text-xs font-semibold shadow-xs shrink-0 cursor-pointer flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
@@ -3342,8 +3600,15 @@ function renderActiveSession() {
         `;
       }
     } else {
-      const aiDisclaimerHtml = `<div class="article-ai-disclaimer text-[11px] text-slate-500 italic bg-slate-50/60 border border-slate-200/60 p-3 rounded-lg leading-relaxed mt-8 mb-4">Este artículo ha sido elaborado con el apoyo de herramientas de IA para la investigación de fuentes y la revisión editorial, verificado por nuestro equipo.</div>`;
-      dom.articleBodyContainer.innerHTML = blocks.map((block) => renderBlock(block)).join("") + aiDisclaimerHtml;
+      const evidenceVerified = article.verification?.status === "verified" && articleVerificationBlockers(article, { editorialMode: session.editorialMode }).length === 0;
+      const disclosure = evidenceVerified
+        ? "Este artículo ha sido elaborado con el apoyo de herramientas de IA para la investigación de fuentes y la revisión editorial, verificado por nuestro equipo."
+        : "Este artículo conserva contenido de autor elaborado con apoyo de IA. La comprobación documental de algunas afirmaciones está pendiente.";
+      const aiDisclaimerHtml = `<div class="article-ai-disclaimer text-[11px] text-slate-500 italic bg-slate-50/60 border border-slate-200/60 p-3 rounded-lg leading-relaxed mt-8 mb-4">${disclosure}</div>`;
+      dom.articleBodyContainer.innerHTML = blocks.map((block, index) => {
+        const emptySection = block?.type === "heading" && (!blocks[index + 1] || blocks[index + 1]?.type === "heading");
+        return renderBlock(block) + (emptySection ? '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 my-3" data-empty-section-notice>Esta sección no tiene texto. Se conserva el título para recuperar o redactar su contenido.</p>' : "");
+      }).join("") + aiDisclaimerHtml;
     }
   }
 
@@ -3371,7 +3636,7 @@ function renderActiveSession() {
           <i data-lucide="link" class="w-4 h-4"></i>
         </div>
         <div class="flex flex-col gap-1 flex-1 min-w-0">
-          <span id="source-${escapeHtml(s.id)}" class="article-source-title text-slate-800 text-sm leading-relaxed whitespace-normal" style="display:block;padding-left:2em;text-indent:-2em">${bibliography.formatHtml(s)}</span>
+          <span id="source-${escapeHtml(s.id)}" class="article-source-title text-slate-800 text-sm leading-relaxed whitespace-normal">${bibliography.formatHtml(s)}</span>
           ${(() => {
             const safeSourceHref = safeSourceUrlForArticle(s.url);
             const linkLabel = safeSourceHref === "#" ? "Sin enlace" : "Ver referencia";
@@ -3407,6 +3672,9 @@ function renderActiveSession() {
       renderSessionList();
     }
   });
+
+  // Actualizar estado de los botones de guiones de video
+  updateVideoScriptButtonsState(session);
 
   // Re-inicializar iconos
   if (window.lucide && typeof window.lucide.createIcons === "function") {
@@ -3444,10 +3712,11 @@ function renderArticleFeaturedImage(session, article = {}) {
     return;
   }
 
-  if (image?.url) {
+  const safeImageUrl = getSafeImageUrl(image?.url);
+  if (safeImageUrl) {
     host.innerHTML = `
       <figure class="marcie-cover-figure">
-        <img src="${escapeHtml(image.url)}" alt="Portada editorial de ${escapeHtml(article.title || session.title)}" loading="eager" />
+        <img src="${escapeHtml(safeImageUrl)}" alt="Portada editorial de ${escapeHtml(article.title || session.title)}" loading="eager" />
         <figcaption class="marcie-cover-actions">
           <button type="button" class="marcie-cover-button marcie-cover-button--overlay" data-generate-article-image>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
@@ -3754,6 +4023,23 @@ function isSafeExportTextUrl(url = "") {
 }
 
 function getArticleExportSources(article = {}) { return bibliography.sources(article); }
+function articleBodyBlocksForExport(article = {}) {
+  const heading = /^(?:#{1,6}\s*)?(?:referencias bibliogr[aá]ficas|bibliograf[ií]a|referencias)\s*:?\s*$/i;
+  const blocks = [];
+  for (const block of article.blocks || []) {
+    const text = String(block?.text || "");
+    if (heading.test(text.trim())) break;
+    const lines = text.split(/\r?\n/);
+    const headingLine = lines.findIndex((line) => heading.test(line.trim()));
+    if (headingLine >= 0) {
+      const kept = lines.slice(0, headingLine).join("\n").trimEnd();
+      if (kept) blocks.push({ ...block, text: kept });
+      break;
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
 function isSourceCitationFormatApa() { return true; }
 function formatSourceForArticleView(source = {}) { return bibliography.format(source); }
 
@@ -3778,7 +4064,8 @@ function renderExportArticleBlock(block) {
   const text = formatExportInlineHtml(block.text || "");
 
   if (block.type === "heading") {
-    return `<h3>${text}</h3>`;
+    const level = block.level === "h2" ? "h2" : "h3";
+    return `<${level}>${text}</${level}>`;
   }
 
   if (block.type === "quote") {
@@ -3793,7 +4080,7 @@ function renderExportArticleBlock(block) {
     `;
   }
 
-  if (block.type === "bulletList" || block.type === "list") {
+  if (block.type === "bulletList" || block.type === "orderedList" || block.type === "list") {
     const items = Array.isArray(block.items) ? block.items : [];
     if (!items.length) return "";
     const isOrdered = block.listType === "ordered" || block.type === "orderedList";
@@ -3827,7 +4114,8 @@ function getArticleExportTypographyConfigForArticle(article = {}) {
   const template = getArticleTemplate(article.templateId);
   const appearance = article.appearance || {};
   const titleSizes = { xsmall: ["1.3rem", "1.75rem"], small: ["1.55rem", "1.8rem"], normal: ["1.55rem", "1.75rem"], large: ["2rem", "1.9rem"] };
-  const subtitleSizes = { small: ["1rem", "1.5rem", "1.125rem", "1.5rem"], normal: ["1.18rem", "1.6rem", "1.25rem", "1.75rem"], large: ["1.42rem", "1.75rem", "1.5rem", "2rem"] };
+  const subtitleSizes = { small: ["1rem", "1.5rem"], normal: ["1.18rem", "1.6rem"], large: ["1.42rem", "1.75rem"] };
+  const sectionSizes = { small: ["1.125rem", "1.5"], normal: ["1.25rem", "1.75"], large: ["1.5rem", "2"] };
   const paragraphSizes = { small: "0.875rem", normal: "1rem", large: "1.125rem" };
   const lineHeights = { compact: "1.25", normal: "1.5", loose: "1.8", auto: "normal" };
   const weights = { normal: 400, medium: 500, semibold: 600, bold: 700 };
@@ -3840,12 +4128,16 @@ function getArticleExportTypographyConfigForArticle(article = {}) {
   };
   const title = appearance["data-text-title-size"] ? titleSizes[appearance["data-text-title-size"]] : [template.vars.titleSize, template.vars.titleLine];
   const subtitle = appearance["data-text-subtitle-size"] ? subtitleSizes[appearance["data-text-subtitle-size"]] : [template.vars.subtitleSize, template.vars.subtitleLine, "1.25rem", "1.75rem"];
+  const section = sectionSizes[appearance["data-text-section-size"]] || sectionSizes.normal;
   const quoteOverride = appearance["data-quote-color"] ? quoteColors[appearance["data-quote-color"]] : null;
   return {
     fontFamily: fonts[appearance["data-text-font"]] || template.vars.fontBody,
+    headingFontFamily: appearance["data-text-font"] === "serif" || appearance["data-text-font"] === "mono"
+      ? fonts[appearance["data-text-font"]] : template.vars.fontHeading,
     titleSize: title[0], titleLineHeight: title[1], titleWeight: weights[appearance["data-text-title-weight"]] || 600,
     subtitleSize: subtitle[0], subtitleLineHeight: subtitle[1], subtitleWeight: weights[appearance["data-text-subtitle-weight"]] || 400,
-    h3Size: subtitle[2], h3LineHeight: subtitle[3], pSize: paragraphSizes[appearance["data-text-p-size"]] || template.vars.bodySize,
+    sectionSize: section[0], sectionLineHeight: section[1], sectionWeight: weights[appearance["data-text-section-weight"]] || 600,
+    pSize: paragraphSizes[appearance["data-text-p-size"]] || template.vars.bodySize,
     lineHeight: lineHeights[appearance["data-text-line-height"]] || template.vars.bodyLine,
     quote: quoteOverride || { background: template.vars.quoteBg, border: template.vars.quoteBorder, text: template.vars.quoteText, accent: template.vars.accent, icon: template.vars.quoteIcon }
   };
@@ -3853,10 +4145,14 @@ function getArticleExportTypographyConfigForArticle(article = {}) {
 
 function buildArticleHtmlDocument(session = {}, { coverSrc = "", author = "" } = {}) {
   const article = normalizeLegacyAidaClosing(session, session.article || {});
+  const evidenceVerified = article.verification?.status === "verified" && articleVerificationBlockers(article, { editorialMode: session.editorialMode }).length === 0;
+  const disclosure = evidenceVerified
+    ? "Este artículo ha sido elaborado con el apoyo de herramientas de IA para la investigación de fuentes y la revisión editorial, verificado por nuestro equipo."
+    : "Este artículo conserva contenido de autor elaborado con apoyo de IA. La comprobación documental de algunas afirmaciones está pendiente.";
   const title = article.seo?.title || article.title || session.title || "Artículo educativo";
   const template = getArticleTemplate(article.templateId);
   const typography = getArticleExportTypographyConfigForArticle(article);
-  const blocksHtml = (article.blocks || []).map((block) => bibliography.renderCitations(article, block, renderExportArticleBlock(block))).join("\n");
+  const blocksHtml = articleBodyBlocksForExport(article).map((block) => bibliography.renderCitations(article, block, renderExportArticleBlock(block))).join("\n");
   const sourceMode = isSourceCitationFormatApa(article) ? "apa" : "default";
   const sources = getArticleExportSources(article);
   const sourceHtml = sources.length
@@ -3865,7 +4161,7 @@ function buildArticleHtmlDocument(session = {}, { coverSrc = "", author = "" } =
         const safeSourceHref = sanitizeExportSourceUrl(source.url);
         const citationText = formatSourceForExport(sourceMode, source);
         const linkLabel = sourceMode === "apa" ? "Ver referencia" : "Visitar fuente externa";
-        return `<li id="source-${escapeHtml(source.id)}" class="article-source-item"><span class="article-source-item-icon">${exportSourceBadgeIcon("link")}</span><div class="article-source-item-content"><span class="article-source-title" style="display:block;padding-left:2em;text-indent:-2em" title="${escapeHtml(citationText)}">${bibliography.formatHtml(source)}</span><a href="${escapeHtml(safeSourceHref)}" target="${safeSourceHref === "#" ? "_self" : "_blank"}" rel="noopener noreferrer" class="article-source-link">${linkLabel} ${exportSourceBadgeIcon("external")}</a></div></li>`;
+        return `<li id="source-${escapeHtml(source.id)}" class="article-source-item"><span class="article-source-item-icon">${exportSourceBadgeIcon("link")}</span><div class="article-source-item-content"><span class="article-source-title" title="${escapeHtml(citationText)}">${bibliography.formatHtml(source)}</span><a href="${escapeHtml(safeSourceHref)}" target="${safeSourceHref === "#" ? "_self" : "_blank"}" rel="noopener noreferrer" class="article-source-link">${linkLabel} ${exportSourceBadgeIcon("external")}</a></div></li>`;
       })
       .join("")}</ul>\n    </section>`
     : "";
@@ -3924,8 +4220,9 @@ Featured Image: ${escapeHtml(resolvedCoverSrc)}
       --subtitle-size: ${typography.subtitleSize};
       --subtitle-line: ${typography.subtitleLineHeight};
       --subtitle-weight: ${typography.subtitleWeight};
-      --h3-size: ${typography.h3Size};
-      --h3-line: ${typography.h3LineHeight};
+      --section-size: ${typography.sectionSize};
+      --section-line: ${typography.sectionLineHeight};
+      --section-weight: ${typography.sectionWeight};
       --p-size: ${typography.pSize};
       --line-height: ${typography.lineHeight};
     }
@@ -4015,12 +4312,13 @@ Featured Image: ${escapeHtml(resolvedCoverSrc)}
       margin-bottom: 2.5rem;
     }
 
+    #article-body-container h2,
     #article-body-container h3 {
       margin: 2rem 0 0.8rem;
-      font-size: var(--h3-size);
-      line-height: var(--h3-line);
+      font-size: var(--section-size);
+      line-height: var(--section-line);
       color: #1e293b;
-      font-weight: 600;
+      font-weight: var(--section-weight);
       letter-spacing: -0.025em;
     }
 
@@ -4191,7 +4489,9 @@ Featured Image: ${escapeHtml(resolvedCoverSrc)}
 <body class="article-template-root" data-article-template="${escapeHtml(template.id)}" style="${escapeHtml(articleTemplateStyle(template, {
     titleSize: typography.titleSize, titleLine: typography.titleLineHeight, subtitleSize: typography.subtitleSize,
     subtitleLine: typography.subtitleLineHeight, bodySize: typography.pSize, bodyLine: typography.lineHeight,
-    fontBody: typography.fontFamily, quoteBg: typography.quote.background, quoteBorder: typography.quote.border,
+    fontBody: typography.fontFamily, fontHeading: typography.headingFontFamily,
+    sectionSize: typography.sectionSize, sectionLine: typography.sectionLineHeight, sectionWeight: typography.sectionWeight,
+    quoteBg: typography.quote.background, quoteBorder: typography.quote.border,
     quoteText: typography.quote.text, quoteIcon: typography.quote.icon
   }))}">
   <script>
@@ -4220,7 +4520,7 @@ Featured Image: ${escapeHtml(resolvedCoverSrc)}
     <div class="article-divider" data-article-divider></div>
     <div id="article-body-container" class="outline-none focus:ring-2 focus:ring-teal-100 rounded px-2 -mx-2">${blocksHtml}</div>
     <div class="article-ai-disclaimer" style="font-size:0.75rem; font-style:italic; color:#64748b; background:#f8fafc; border:1px solid #e2e8f0; padding:0.75rem 1rem; border-radius:0.5rem; margin-top:2rem; margin-bottom:1rem;">
-      Este artículo ha sido elaborado con el apoyo de herramientas de IA para la investigación de fuentes y la revisión editorial, verificado por nuestro equipo.
+      ${disclosure}
     </div>
     ${sourceHtml}
   </article>
@@ -4268,16 +4568,32 @@ function articleExportFilename(title = "Artículo educativo", extension = "html"
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
-    .toLowerCase() || "articulo-educativo";
+    .toLowerCase().slice(0, 80).replace(/-+$/g, "") || "articulo-educativo";
   return `${base}.${extension}`;
 }
 
+function articleExportFolderName(session = {}) {
+  return String(session.topic || session.title || "Artículos")
+    .normalize("NFC")
+    .replace(/[\\/<>:"|?*\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[. ]+|[. ]+$/g, "")
+    .slice(0, 80)
+    .trim() || "Artículos";
+}
+
 const ARTICLE_EXPORT_AUDIENCES = [
-  { id: "students", slug: "estudiantes", label: "Estudiantes" },
-  { id: "parents", slug: "padres", label: "Padres y tutores" },
-  { id: "educators", slug: "docentes", label: "Docentes y directivos" },
-  { id: "coordinators", slug: "coordinadores", label: "Coordinadores académicos" }
+  { id: "students", slug: "estudiantes", label: "Estudiantes", fileBase: "Estudiantes" },
+  { id: "parents", slug: "padres", label: "Padres y tutores", fileBase: "Familia" },
+  { id: "educators", slug: "docentes", label: "Docentes y directivos", fileBase: "Docentes" },
+  { id: "coordinators", slug: "coordinadores", label: "Coordinadores académicos", fileBase: "Coordinadores" }
 ];
+
+function articleAudienceExportName(entry = {}) {
+  const known = ARTICLE_EXPORT_AUDIENCES.find(({ id }) => id === entry.id);
+  return known?.fileBase || articleExportFolderName({ topic: entry.label || entry.id || "Artículo" }).slice(0, 40);
+}
 
 function getSessionArticleExportEntries(session = {}) {
   const audienceCatalog = new Map(ARTICLE_EXPORT_AUDIENCES.map((audience) => [audience.id, audience]));
@@ -4326,7 +4642,7 @@ async function exportArticlesAsZip(session, entries = []) {
   if (!entries.length) throw new Error("No hay artículos para exportar.");
 
   const zip = new window.JSZip();
-  const isSingleArticle = entries.length === 1;
+  const folder = zip.folder(articleExportFolderName(session));
   for (const entry of entries) {
     const article = entry.article || {};
     if (!Array.isArray(article.blocks) || article.blocks.length === 0) {
@@ -4334,14 +4650,15 @@ async function exportArticlesAsZip(session, entries = []) {
     }
     const resolvedAuthor = await resolveAuthorDisplayName({ article, session, articleUid: entry.id });
     const cover = await fetchArticleCover(article);
-    const htmlFilename = isSingleArticle ? "index.html" : `articulo-${entry.slug}.html`;
-    const imageFilename = isSingleArticle ? `portada.${cover.extension}` : `portada-${entry.slug}.${cover.extension}`;
+    const fileBase = articleAudienceExportName(entry);
+    const htmlFilename = `${fileBase}.html`;
+    const imageFilename = `${fileBase}.${cover.extension}`;
     const exportSession = { ...session, title: article.title || session.title, article };
-    zip.file(htmlFilename, buildArticleHtmlDocument(exportSession, {
+    folder.file(htmlFilename, buildArticleHtmlDocument(exportSession, {
       coverSrc: `assets/${imageFilename}`,
       author: resolvedAuthor || getPrimaryAuthorFallback(article, session) || "Autor"
     }));
-    zip.folder("assets").file(imageFilename, cover.blob);
+    folder.folder("assets").file(imageFilename, cover.blob);
   }
 
   const zipBlob = await zip.generateAsync({
@@ -4352,11 +4669,97 @@ async function exportArticlesAsZip(session, entries = []) {
   const url = URL.createObjectURL(zipBlob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = isSingleArticle
-    ? articleExportFilename(entries[0].article?.title || session.title, "zip")
-    : articleExportFilename(`${session.topic || session.title}-tres-articulos`, "zip");
+  link.download = articleExportFilename(`${session.topic || session.title || "Artículos"}-html`, "zip");
   link.click();
   URL.revokeObjectURL(url);
+}
+
+async function wordImageDataUri(blob) {
+  const image = new Image();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("No se pudo preparar una imagen para Word."));
+      image.src = objectUrl;
+    });
+    const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function articleWordHtml(session, entry) {
+  const article = entry.article;
+  const cover = await fetchArticleCover(article);
+  const coverDataUri = await wordImageDataUri(cover.blob);
+  const author = await resolveAuthorDisplayName({ article, session, articleUid: entry.id });
+  const blocks = [];
+  for (const block of articleBodyBlocksForExport(article)) {
+    const imageUrl = block?.image?.url || block?.imageUrl || block?.src;
+    if ((block?.type === "image" || imageUrl) && imageUrl) {
+      if (!isSafeExportImageUrl(imageUrl)) throw new Error("Una imagen del artículo no tiene una URL válida para Word.");
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`No se pudo incorporar una imagen del artículo (${response.status}).`);
+      const dataUri = await wordImageDataUri(await response.blob());
+      blocks.push(`<p><img src="${dataUri}" alt="${escapeHtml(block.alt || "Imagen del artículo")}" style="width:100%;max-width:560px;height:auto"></p>`);
+      if (block.caption) blocks.push(`<p><em>${escapeHtml(block.caption)}</em></p>`);
+      continue;
+    }
+    if (block?.type === "heading") {
+      blocks.push(`<${block.level === "h2" ? "h2" : "h3"}>${formatExportInlineHtml(block.text || "")}</${block.level === "h2" ? "h2" : "h3"}>`);
+      continue;
+    }
+    let html = renderExportArticleBlock(block);
+    html = html.replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/g, "");
+    blocks.push(bibliography.renderCitations(article, block, html));
+  }
+  const references = getArticleExportSources(article);
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;color:#1e293b;font-size:11pt}h1{font-size:22pt;color:#0f172a}h2{font-size:16pt;margin-top:24pt}h3{font-size:13pt;margin-top:18pt}p,li{line-height:1.5}blockquote{border-left:3px solid #0f766e;padding-left:12pt;color:#334155}img{display:block;max-width:100%}.reference{margin-left:28pt;text-indent:-28pt;margin-bottom:9pt}</style></head><body>
+    <h1>${escapeHtml(article.title || session.title || "Artículo educativo")}</h1>
+    ${article.subtitle ? `<p><em>${escapeHtml(article.subtitle)}</em></p>` : ""}
+    <p>${escapeHtml(author || getPrimaryAuthorFallback(article, session) || "Autor")} · ${escapeHtml(entry.label)}</p>
+    <p><img src="${coverDataUri}" alt="Portada del artículo" style="width:100%;max-width:560px;height:auto"></p>
+    ${blocks.join("\n")}
+    ${references.length ? `<h2>Referencias bibliográficas</h2>${references.map((source) => `<p id="source-${escapeHtml(source.id)}" class="reference">${bibliography.formatHtml(source)}</p>`).join("\n")}` : ""}
+    </body></html>`;
+}
+
+function downloadExportBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportArticlesAsWord(session, entries = [], { bundle = false } = {}) {
+  if (typeof window.JSZip !== "function") throw new Error("El generador Word no está disponible.");
+  if (!entries.length) throw new Error("No hay artículos para exportar.");
+  const documents = [];
+  for (const entry of entries) {
+    const html = await articleWordHtml(session, entry);
+    const documentHtml = new DOMParser().parseFromString(html, "text/html").body.innerHTML;
+    documents.push({
+      filename: `${articleAudienceExportName(entry)}.docx`,
+      blob: await buildStyledDocxBlob({ html: documentHtml, title: entry.article.title || session.title, subtitle: entry.article.subtitle || "", appTitle: "Marcie Blog Editor", includeTitleInBody: false })
+    });
+  }
+  if (documents.length === 1 && !bundle) {
+    downloadExportBlob(documents[0].blob, documents[0].filename);
+    return;
+  }
+  if (typeof window.JSZip !== "function") throw new Error("El generador ZIP no está disponible.");
+  const zip = new window.JSZip();
+  const folder = zip.folder(articleExportFolderName(session));
+  for (const document of documents) folder.file(document.filename, document.blob);
+  downloadExportBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }), articleExportFilename(`${session.topic || session.title}-articulos-word`, "zip"));
 }
 
 function getWordPressPublicationForSession(session = {}) {
@@ -4480,16 +4883,17 @@ function updateAudienceSelector(selectedAudience = "educators") {
   dom.audienceButtons.forEach((btn) => {
     const audience = btn.getAttribute("data-audience");
     if (audience === selectedAudience) {
-      btn.className = "px-3.5 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0 transition-all cursor-pointer font-bold shadow-xs flex items-center gap-1.5";
+      btn.className = "audience-btn px-3 py-1.5 rounded-full bg-purple-100/80 text-purple-800 border-0 border-transparent shrink-0 transition-all cursor-pointer font-bold shadow-none flex items-center gap-1.5";
     } else {
-      btn.className = "px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5";
+      btn.className = "audience-btn px-3 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border-0 border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5";
     }
   });
 }
 
-const AUTOMATION_STAGE_ORDER = ["proposals", "articles", "covers", "review", "corrections"];
+const AUTOMATION_STAGE_ORDER = ["proposals", "articles", "review", "covers", "corrections"];
 
 function stopAutomationProgressAnimations() {
+  automationProgressAnimationRun += 1;
   stopStageOrbitalAnimation();
   automationProgressAnimations.forEach((animation) => {
     if (typeof animation?.pause === "function") animation.pause();
@@ -4500,9 +4904,10 @@ function stopAutomationProgressAnimations() {
 
 function startAutomationProgressAnimations(root, stage = "proposals") {
   stopAutomationProgressAnimations();
+  const animationRun = automationProgressAnimationRun;
   if (!root || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
   void getAnimeModule().then(({ animate }) => {
-    if (!root.isConnected) return;
+    if (!root.isConnected || animationRun !== automationProgressAnimationRun) return;
     const addAnimation = (target, options) => {
       const animation = animateSpinnerTarget(animate, target, options);
       if (animation) automationProgressAnimations.push(animation);
@@ -4516,8 +4921,7 @@ function startAutomationProgressAnimations(root, stage = "proposals") {
     const stageNodes = root.querySelectorAll("[data-automation-stage]");
     if (stageNodes.length) {
       addAnimation(stageNodes, {
-        translateY: [14, 0], opacity: [0, 1], duration: 620, ease: "out(3)",
-        onComplete: () => stageNodes.forEach(n => n.style.removeProperty("transform"))
+        translateY: [14, 0], opacity: [0, 1], duration: 620, ease: "out(3)"
       });
     }
 
@@ -4541,16 +4945,25 @@ function celebrateAutomationCompletion(root) {
 function showAutomatedSessionProgress(session) {
   window.__lastAutomationSession = session;
   const currentProgress = session?.automation?.progress || 0;
-  const currentMessage = session?.automation?.message || "Estoy organizando las ideas y preparando cuatro enfoques únicos...";
+  const configuredAudienceCount = automationAudienceCount(session);
+  const stageCaptions = automationStageCaptions(session);
+  const currentMessage = session?.automation?.message || `Estoy organizando las ideas y preparando ${configuredAudienceCount} ${configuredAudienceCount === 1 ? "enfoque único" : "enfoques únicos"}...`;
   const currentStage = session?.automation?.stage || "proposals";
   const currentStagePercent = session?.automation?.stagePercent ?? null;
   const currentIndex = AUTOMATION_STAGE_ORDER.indexOf(currentStage);
+  const stageMessages = automationStageMessages(session, currentStage, currentMessage);
+  const resumeLabel = automationResumeLabel(session);
+  const finished = canRegenerateAutomationSession(session);
+  const reusableResearch = hasReusableAutomationResearch(session);
 
+  let stopProductionClock = () => {};
   const modal = showModal({
     title: "Marcie está creando tu producción",
     widthClass: "max-w-3xl",
+    footerButtonsHtml: `<button type="button" data-automation-cancel class="btn btn-secondary" ${["running", "queued", "failed", "retrying"].includes(session?.automation?.status) ? "" : "hidden"}>Cancelar</button><button type="button" data-automation-reconfigure class="btn btn-secondary" ${session?.automation?.status === "cancelled" ? "" : "hidden"}>Modificar configuración</button><button type="button" data-automation-regenerate-clean class="btn btn-outline ${finished ? "" : "hidden"}">Regenerar todo desde cero</button><button type="button" data-automation-redraft class="btn btn-outline ${finished && reusableResearch ? "" : "hidden"}">Redactar de nuevo con fuentes guardadas</button><button type="button" data-automation-resume class="btn btn-primary" ${session?.automation?.status === "failed" && !automationRecoveryRuns.has(session.id) ? "" : "hidden"}>${resumeLabel}</button>`,
     onClose: () => {
       stopAutomationProgressAnimations();
+      stopProductionClock();
       // Desbloquear botones de reconfigurar, pero mantener automationWorkflowActive
       // para que el spinner del toolbar siga visible y permita reabrir el modal.
       appState.isGeneratingArticle = false;
@@ -4577,28 +4990,27 @@ function showAutomatedSessionProgress(session) {
           <div class="automation-agent-copy">
             <div class="automation-agent-kicker"><span></span> Agente editorial en vivo</div>
             <h4>${escapeHtml(session.topic || session.title)}</h4>
-            <p data-automation-message class="automation-agent-status-msg">${escapeHtml(currentMessage)}</p>
-            <div class="automation-agent-progress-meta"><span>Producción completa</span><strong data-automation-percent>${currentProgress}%</strong></div>
-            <div class="automation-agent-progress-track"><div data-automation-bar class="automation-agent-progress-bar" style="width: ${currentProgress}%"></div></div>
+            <div class="automation-agent-progress-meta"><strong data-automation-percent>${currentProgress}%</strong></div>
+            <div class="automation-agent-elapsed">Tiempo total <span role="timer" aria-live="off" data-automation-elapsed>00:00:00</span></div>
           </div>
         </section>
         <div class="automation-agent-steps">
           ${[
-            ["proposals", "✦", "Enfoques", "4 propuestas"],
-            ["articles", "✎", "Artículos", "Redacción"],
-            ["covers", "▧", "Portadas", "Imagen IA"],
-            ["review", "◎", "Análisis", "Calidad + SEO"],
-            ["corrections", "✓", "Pulido", "Corrección final"]
+            ["proposals", "✦", "Enfoques y búsquedas", stageCaptions.proposals],
+            ["articles", "✎", "Artículos", stageCaptions.articles],
+            ["review", "◎", "Análisis", stageCaptions.review],
+            ["covers", "▧", "Portadas", stageCaptions.covers],
+            ["corrections", "✓", "Pulido", stageCaptions.corrections]
           ].map(([id, icon, label, caption], stepIdx) => {
             const completed = stepIdx < currentIndex || currentProgress === 100;
             const active = stepIdx === currentIndex && currentProgress < 100;
-            const initialStagePercent = completed ? "100%" : (active ? `${currentStagePercent ?? 0}%` : "0%");
             return `
-            <div data-automation-stage="${id}" class="automation-agent-step ${completed ? "is-complete" : ""} ${active ? "is-active" : ""}" style="--step-progress: ${initialStagePercent};">
-              <div class="automation-agent-step-fill"></div>
+            <div data-automation-stage="${id}" class="automation-agent-step ${completed ? "is-complete" : ""} ${active ? "is-active" : ""}">
+              <progress class="automation-agent-step-fill" value="${completed ? 100 : 0}" max="100" aria-label="Progreso de ${label}"></progress>
               <span data-automation-stage-icon>${completed ? "✓" : icon}</span>
               <strong>${label}</strong>
               <small data-automation-stage-caption>${caption}</small>
+              <em data-automation-stage-message>${escapeHtml(stageMessages[id] || "")}</em>
             </div>
           `;
           }).join("")}
@@ -4606,37 +5018,252 @@ function showAutomatedSessionProgress(session) {
       </div>
     `
   });
+  stopProductionClock = mountProductionClock(modal.element, () => session.automation || {});
+  modal.element.querySelector("[data-automation-resume]")?.addEventListener("click", async (event) => {
+    if (automationRecoveryRuns.has(session.id) || sessionOperations.has(session.id)) return;
+    const resumeButton = event.currentTarget;
+    resumeButton.disabled = true;
+    try {
+      await runAutomatedSessionWorkflow(session, session.sessionConfiguration?.specifications || session.specifications || []);
+    } catch (error) {
+      showToast(error?.userMessage || error?.message || "No se pudo reanudar la producción.", "error");
+    } finally {
+      resumeButton.disabled = false;
+    }
+  });
+  const handleRegeneration = async (event, reuseResearch) => {
+    if (appState.automationWorkflowActive || sessionOperations.has(session.id)) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    closeActiveModal();
+    try {
+      await regenerateAutomatedSession(session, { reuseResearch });
+    } catch (error) {
+      showToast(error?.userMessage || error?.message || "No se pudo regenerar la producción.", "error");
+    } finally {
+      button.disabled = false;
+    }
+  };
+  modal.element.querySelector("[data-automation-regenerate-clean]")?.addEventListener("click", (event) => handleRegeneration(event, false));
+  modal.element.querySelector("[data-automation-redraft]")?.addEventListener("click", (event) => handleRegeneration(event, true));
+  modal.element.querySelector("[data-automation-cancel]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await cancelAutomatedSession(session); }
+    catch (error) { showToast(error?.message || "No se pudo confirmar la cancelación. Reintenta cuando vuelva la conexión.", "error"); }
+    finally { button.disabled = false; }
+  });
+  modal.element.querySelector("[data-automation-reconfigure]")?.addEventListener("click", () => {
+    closeActiveModal();
+    void createEditorialSessionFromModal({ initialConfiguration: { ...session.sessionConfiguration, videoResearch: session.videoResearch } });
+  });
   startAutomationProgressAnimations(modal.element.querySelector("[data-automation-progress-root]"), currentStage);
-  updateAutomatedSessionProgress(currentStage, currentMessage, currentProgress, currentStagePercent);
+  updateAutomatedSessionProgress(currentStage, currentMessage, currentProgress, currentStagePercent, session);
 }
 
-function updateAutomatedSessionProgress(stage, message, percent, stagePercent = null) {
+function automationAudienceCount(session = {}) {
+  if (Array.isArray(session?.selectedAudiences) && session.selectedAudiences.length) return session.selectedAudiences.length;
+  if (Array.isArray(session?.proposals) && session.proposals.length) return session.proposals.length;
+  if (session?.articlesByAudience && typeof session.articlesByAudience === "object") return Object.keys(session.articlesByAudience).length || 4;
+  return 4;
+}
+
+function automationAudienceIds(session = {}) {
+  return Array.isArray(session?.selectedAudiences) && session.selectedAudiences.length
+    ? session.selectedAudiences
+    : ARTICLE_EXPORT_AUDIENCES.map(({ id }) => id);
+}
+
+function canResumeAutomatedSession(session = {}) {
+  return session?.automation?.status === "failed" && !session?.automation?.regenerationFailed;
+}
+
+function automationResumeLabel(session = {}) {
+  return session?.automation?.regenerationFailed
+    ? "Regenerar producción"
+    : session?.automation?.stage === "proposals"
+    ? "Reanudar investigación y artículos"
+    : "Reanudar artículos pendientes";
+}
+
+function isAutomationFinished(session = {}) {
+  return ["completed", "completed_with_findings"].includes(String(session?.automation?.status || ""));
+}
+
+function canRegenerateAutomationSession(session = {}) {
+  return isAutomationFinished(session) || session?.automation?.regenerationFailed === true;
+}
+
+function hasReusableAutomationResearch(session = {}) {
+  const policy = globalThis.MarcieResearchPolicy;
+  if (!policy?.readiness) return false;
+  const audienceIds = automationAudienceIds(session);
+  return audienceIds.length > 0 && audienceIds.every((audience) => policy.readiness(
+    session.researchByAudience?.[audience] || {},
+    policy.target(session)
+  ).ready);
+}
+
+function emptyAutomationArticle(session = {}, audience = "educators") {
+  const title = session.topic || session.title || "Artículo educativo";
+  return {
+    schemaVersion: "1.0",
+    title,
+    subtitle: "",
+    audience,
+    blocks: [],
+    sources: [],
+    researchSources: [],
+    editorialMode: session.editorialMode || "marcie",
+    modeCompatibility: session.editorialMode === "aida" ? "empty" : "compatible",
+    seo: { title, description: "", keywords: [], slug: "" }
+  };
+}
+
+async function regenerateAutomatedSession(session, { reuseResearch = false } = {}) {
+  if (!session || sessionOperations.has(session.id)) return;
+  sessionOperations.add(session.id);
+  const previousSession = JSON.parse(JSON.stringify(session));
+  try {
+    const selectedAudiences = automationAudienceIds(session);
+    const firstAudience = selectedAudiences[0] || "educators";
+    session.articlesByAudience = {};
+    session.articleDraftsByAudience = {};
+    session.auditsByAudience = {};
+    session.audit = null;
+    session.approvedAudiences = [];
+    session.article = emptyAutomationArticle(session, firstAudience);
+    session.audience = firstAudience;
+    session.status = "researching";
+    if (!reuseResearch) {
+      session.researchByAudience = {};
+      session.researchGlobal = null;
+      session.researchGlobalFingerprint = "";
+      session.proposals = [];
+      session.trends = [];
+    }
+    session.automation = {
+      ...(session.automation || {}),
+      mode: "automated",
+      status: "queued",
+      startedAt: new Date().toISOString(),
+      stage: "proposals",
+      progress: 0,
+      stagePercent: 0,
+      message: reuseResearch
+        ? "Fuentes verificadas reutilizadas. Preparando una nueva redacción..."
+        : "Reiniciando investigación, propuestas y redacción desde cero..."
+    };
+    delete session.automation.productionId;
+    delete session.automation.engine;
+    delete session.automation.cancelRequested;
+    delete session.automation.cancelledAt;
+    delete session.automation.failure;
+    delete session.automation.failedAt;
+    delete session.automation.completedAt;
+    delete session.automation.regenerationFailed;
+    appState.activeSessionId = session.id;
+    renderSessionList();
+    renderActiveSession();
+    showAutomatedSessionProgress(session);
+    await runAutomatedSessionWorkflow(session, session.sessionConfiguration?.specifications || session.specifications || []);
+    if (!isAutomationFinished(session)) {
+      throw new Error("La regeneración no terminó. Se conservó la producción anterior.");
+    }
+  } catch (error) {
+    const failedAutomation = session.automation || {};
+    Object.assign(session, previousSession);
+    session.automation = {
+      ...(previousSession.automation || {}),
+      status: "failed",
+      stage: failedAutomation.stage || previousSession.automation?.stage || "proposals",
+      progress: Number(failedAutomation.progress || 0),
+      message: "La regeneración no se completó. Se conservó la producción anterior.",
+      failure: failedAutomation.failure || { code: "marcie_regeneration_failed", status: Number(error?.status || 0) },
+      regenerationFailed: true,
+      failedAt: new Date().toISOString()
+    };
+    rememberAutomation(session);
+    await saveMarcieSession(session).catch(() => {});
+    closeActiveModal();
+    renderSessionList();
+    renderActiveSession();
+    showAutomatedSessionProgress(session);
+    throw error;
+  } finally {
+    sessionOperations.delete(session.id);
+    renderSessionList();
+    renderActiveSession();
+  }
+}
+
+function automationStageCaptions(session = {}) {
+  const count = automationAudienceCount(session);
+  return {
+    proposals: `${count} ${count === 1 ? "enfoque" : "enfoques"}`,
+    articles: `${count} ${count === 1 ? "artículo" : "artículos"}`,
+    covers: `${count} ${count === 1 ? "portada" : "portadas"}`,
+    review: `${count} ${count === 1 ? "análisis" : "análisis"}`,
+    corrections: `${count} ${count === 1 ? "pulido" : "pulidos"}`
+  };
+}
+
+function automationStageMessages(session = {}, activeStage = session?.automation?.stage || "proposals", activeMessage = session?.automation?.message || "") {
+  const count = automationAudienceCount(session);
+  const plural = (one, many) => count === 1 ? one : many;
+  const defaults = {
+    proposals: `Investigación y enfoques para ${count} ${plural("público", "públicos")}.`,
+    articles: `Redacción de ${count} ${plural("artículo", "artículos")}.`,
+    covers: `Diseño de ${count} ${plural("portada", "portadas")}.`,
+    review: `Revisión editorial y SEO de ${count} ${plural("artículo", "artículos")}.`,
+    corrections: `Pulido final de ${count} ${plural("entrega", "entregas")}.`
+  };
+  return Object.fromEntries(Object.entries(defaults).map(([stage, fallback]) => [
+    stage,
+    stage === activeStage && activeMessage ? activeMessage : fallback
+  ]));
+}
+
+function updateAutomatedSessionProgress(stage, message, percent, stagePercent = null, session = window.__lastAutomationSession) {
   const root = document.querySelector("[data-automation-progress-root]");
   if (root) {
+    if (["failed", "completed", "completed_with_findings", "cancelled"].includes(String(session?.automation?.status || ""))) {
+      stopAutomationProgressAnimations();
+    }
+    const resumeButton = root.closest("[role='dialog']")?.querySelector("[data-automation-resume]") || document.querySelector("[data-automation-resume]");
+    if (resumeButton) {
+      const running = (appState.automationWorkflowActive && appState.automationWorkflowSessionId === session?.id) || automationRecoveryRuns.has(session?.id) || sessionOperations.has(session?.id) || automationCancellations.has(session?.id);
+      resumeButton.hidden = session?.automation?.status !== "failed" || running;
+      resumeButton.disabled = running;
+      resumeButton.textContent = automationResumeLabel(session);
+    }
+    const finished = canRegenerateAutomationSession(session);
+    const regenerateButton = root.closest("[role='dialog']")?.querySelector("[data-automation-regenerate-clean]") || document.querySelector("[data-automation-regenerate-clean]");
+    if (regenerateButton) regenerateButton.hidden = !finished;
+    const redraftButton = root.closest("[role='dialog']")?.querySelector("[data-automation-redraft]") || document.querySelector("[data-automation-redraft]");
+    if (redraftButton) redraftButton.hidden = !finished || !hasReusableAutomationResearch(session);
+    const cancelButton = root.closest("[role='dialog']")?.querySelector("[data-automation-cancel]") || document.querySelector("[data-automation-cancel]");
+    if (cancelButton) cancelButton.hidden = !["running", "queued", "failed", "retrying"].includes(session?.automation?.status);
+    const reconfigureButton = root.closest("[role='dialog']")?.querySelector("[data-automation-reconfigure]") || document.querySelector("[data-automation-reconfigure]");
+    if (reconfigureButton) reconfigureButton.hidden = session?.automation?.status !== "cancelled";
     const currentIndex = AUTOMATION_STAGE_ORDER.indexOf(stage);
-    const messageNode = root.querySelector("[data-automation-message]");
+    const captions = automationStageCaptions(session || {});
+    const messages = automationStageMessages(session || {}, stage, message);
     const percentNode = root.querySelector("[data-automation-percent]");
-    const bar = root.querySelector("[data-automation-bar]");
-    if (messageNode) messageNode.textContent = message;
     if (percentNode) percentNode.textContent = `${percent}%`;
-    if (bar) bar.style.width = `${percent}%`;
 
     // Transicionar elementos orbitales dinámicos según la etapa actual
     if (stage && root.dataset.activeStage !== stage) {
       root.dataset.activeStage = stage;
-      void getAnimeModule().then(({ animate }) => {
-        transitionToStageVisuals(root, stage, animate);
-      }).catch(() => {
-        transitionToStageVisuals(root, stage, null);
-      });
+      transitionToStageVisuals(root, stage, null);
     }
 
     // Rangos de avance porcentual aproximados por etapa para animar el relleno horizontal
     const stageRanges = {
       proposals: [0, 22],
       articles: [22, 50],
-      covers: [50, 74],
-      review: [74, 95],
+      review: [50, 74],
+      covers: [74, 95],
       corrections: [95, 100]
     };
 
@@ -4644,8 +5271,10 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
       const stageKey = node.getAttribute("data-automation-stage");
       const index = AUTOMATION_STAGE_ORDER.indexOf(stageKey);
       const icon = node.querySelector("[data-automation-stage-icon]");
+      const caption = node.querySelector("[data-automation-stage-caption]");
+      const stageMessage = node.querySelector("[data-automation-stage-message]");
       const completed = index < currentIndex || percent === 100;
-      const active = index === currentIndex && percent < 100;
+      const active = index === currentIndex && percent < 100 && !["failed", "cancelled"].includes(session?.automation?.status);
       node.classList.toggle("is-complete", completed);
       node.classList.toggle("is-active", active);
 
@@ -4659,11 +5288,11 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
           const span = Math.max(1, end - start);
           calculatedStagePct = Math.min(100, Math.max(0, Math.round(((percent - start) / span) * 100)));
         }
-        node.style.setProperty("--step-progress", `${calculatedStagePct}%`);
+        node.querySelector(".automation-agent-step-fill")?.setAttribute("value", String(calculatedStagePct));
       } else if (completed) {
-        node.style.setProperty("--step-progress", "100%");
+        node.querySelector(".automation-agent-step-fill")?.setAttribute("value", "100");
       } else {
-        node.style.setProperty("--step-progress", "0%");
+        node.querySelector(".automation-agent-step-fill")?.setAttribute("value", "0");
       }
 
       if (icon) {
@@ -4680,6 +5309,8 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
           icon.textContent = originalIcons[stageKey] || "●";
         }
       }
+      if (caption && captions[stageKey]) caption.textContent = captions[stageKey];
+      if (stageMessage && messages[stageKey]) stageMessage.textContent = completed ? "Completado." : messages[stageKey];
     });
     if (percent === 100 && !root.dataset.celebrated) {
       root.dataset.celebrated = "true";
@@ -4688,7 +5319,12 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
   }
 
   let progressBanner = document.getElementById("center-panel-progress-banner");
-  if (!progressBanner && stage && percent < 100) {
+  const stopped = ["failed", "cancelled"].includes(session?.automation?.status);
+  if (progressBanner && stopped) {
+    progressBanner.remove();
+    return;
+  }
+  if (!progressBanner && stage && percent < 100 && !stopped) {
     const articleView = document.getElementById("article-view");
     if (articleView) {
       progressBanner = document.createElement("div");
@@ -4703,7 +5339,7 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
             <h4 class="text-xs font-bold text-slate-900">${escapeHtml(message || "Marcie está procesando tu producción...")}</h4>
             <div class="mt-1 flex items-center gap-2">
               <div class="h-2 w-36 overflow-hidden rounded-full bg-teal-200/80">
-                <div class="h-full bg-teal-600 transition-all duration-300" style="width: ${percent || 0}%"></div>
+                <progress class="marcie-progress-fill" value="${clampPercent(percent)}" max="100" aria-label="Progreso de producción"></progress>
               </div>
               <span class="text-[10px] font-bold text-teal-800">${percent || 0}%</span>
             </div>
@@ -4722,10 +5358,10 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
   }
   if (progressBanner) {
     const h4 = progressBanner.querySelector("h4");
-    const bar = progressBanner.querySelector(".h-full");
+    const bar = progressBanner.querySelector(".marcie-progress-fill");
     const span = progressBanner.querySelector("span.text-\\[10px\\]");
     if (h4 && message) h4.textContent = message;
-    if (bar) bar.style.width = `${percent}%`;
+    if (bar) bar.value = clampPercent(percent);
     if (span) span.textContent = `${percent}%`;
     if (percent === 100) {
       setTimeout(() => progressBanner?.remove(), 2500);
@@ -4736,7 +5372,8 @@ function updateAutomatedSessionProgress(stage, message, percent, stagePercent = 
 window.__marcieShowAutomatedSessionProgress = showAutomatedSessionProgress;
 window.__marcieUpdateAutomatedSessionProgress = updateAutomatedSessionProgress;
 
-async function saveAutomationStage(session, stage, progress, message, stagePercent = null) {
+async function saveAutomationStage(session, stage, progress, message, stagePercent = null, requirePersistence = false) {
+  if (automationCancellations.get(session.id)?.cancelled) throw automationAbortError();
   session.automation = {
     ...(session.automation || {}),
     mode: "automated",
@@ -4747,11 +5384,14 @@ async function saveAutomationStage(session, stage, progress, message, stagePerce
     message,
     updatedAt: new Date().toISOString()
   };
-  updateAutomatedSessionProgress(stage, message, progress, stagePercent);
+  updateAutomatedSessionProgress(stage, message, progress, stagePercent, session);
+  rememberAutomation(session);
   setSyncStatus(message);
   await saveMarcieSession(session).catch((err) => {
+    if (requirePersistence || session.saveConflict || err?.code === "marcie_save_conflict" || err?.remoteConflict) throw err;
     console.warn("[MarcieAutomation] Telemetría intermedia no persistida en Firestore (se continuará):", err?.message || err);
   });
+  if (session.saveConflict) throw Object.assign(new Error("Hay cambios remotos y un respaldo local pendiente. Resuelve el conflicto antes de continuar."), { code: "marcie_save_conflict" });
 }
 
 const AUTOMATED_COVER_GAP_MS = 20_000;
@@ -4772,13 +5412,233 @@ async function generateAutomatedCoverWithRetry(options, onQuotaWait) {
   }
 }
 
+function automatedFailureDetails(error, session = {}) {
+  let body = error?.detail;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch { body = null; }
+  }
+  if (!body) {
+    try { body = JSON.parse(String(error?.message || "")); } catch { body = null; }
+  }
+  const providerError = body?.error && typeof body.error === "object" ? body.error : body || {};
+  const status = Number(error?.status || providerError.code || providerError.statusCode || 0);
+  const codeValue = error?.code || providerError.status || providerError.code || body?.error || "";
+  const requestId = error?.requestId || body?.requestId || providerError.requestId || "";
+  const stage = String(session.automation?.stage || "proposals");
+  const researchDetails = String(error?.researchDetails || "").trim();
+  const userMessage = codeValue === "marcie_research_quota"
+    ? `La cuota de investigación se agotó antes de redactar los artículos. Se conservaron las fuentes y títulos ya obtenidos; reanuda investigación y artículos más tarde para continuar sin repetirlos.${researchDetails ? ` Detalle: ${researchDetails}` : ""}`
+    : codeValue === "marcie_research_incomplete"
+    ? `La investigación quedó incompleta, por eso todavía no se redactaron los artículos. Se conservaron las fuentes y títulos ya obtenidos; reanuda investigación y artículos para completar la evidencia.${researchDetails ? ` Detalle: ${researchDetails}` : ""}`
+    : codeValue === "marcie_save_conflict" || session.saveConflict
+    ? "La producción se pausó porque esta sesión tiene cambios locales y una versión distinta en Firebase. Elige qué versión conservar en el aviso de conflicto antes de reanudar; los artículos locales permanecen en el respaldo."
+    : status >= 500 && stage === "proposals"
+    ? "La investigación no respondió a tiempo, por eso todavía no se redactaron los artículos. Se conservaron las fuentes verificadas; reanuda investigación y artículos para buscar las faltantes."
+    : status >= 500
+    ? "Gemini tuvo un problema temporal. Los artículos terminados se conservaron; usa Reanudar artículos pendientes cuando el servicio responda."
+    : status === 429
+      ? "Gemini alcanzó temporalmente su límite de generación. Los artículos terminados se conservaron; reanuda los pendientes más tarde."
+    : isTransientFetchError(error)
+      ? "Se interrumpió la conexión durante la redacción. Los artículos terminados se conservaron; usa Reanudar artículos pendientes."
+    : String(providerError.message || error?.message || error || "No se pudo completar la automatización.");
+  return {
+    status,
+    code: String(codeValue).slice(0, 100),
+    requestId: String(requestId).slice(0, 100),
+    stage,
+    userMessage
+  };
+}
+
+function researchDiagnosticSummary(dossier = {}) {
+  const rejected = [...new Map((Array.isArray(dossier.rejectedSources) ? dossier.rejectedSources : [])
+    .filter((source) => source?.url).map((source) => [String(source.url).toLowerCase(), source])).values()];
+  const labels = {
+    incomplete_bibliographic_metadata: "metadatos bibliográficos insuficientes",
+    content_mismatch: "contenido no pertinente",
+    unreachable: "documento inaccesible",
+    not_found: "documento no encontrado",
+    empty_content: "contenido no recuperable",
+    publication_date_unknown: "fecha de publicación no comprobada",
+    outside_period: "fuera del periodo seleccionado",
+    generic_homepage: "página general sin documento",
+    unsupported_type: "formato no compatible",
+    unsafe_url: "dirección no segura",
+    verification_error: "error al verificar"
+  };
+  const counts = new Map();
+  const metadataGapLabels = { title: "título", author: "autoría o institución", year: "año", publication: "publicación", locator: "enlace" };
+  const metadataGaps = [...new Set(rejected.filter((source) => source.reason === "incomplete_bibliographic_metadata")
+    .flatMap((source) => Array.isArray(source.metadataGaps) ? source.metadataGaps : []))]
+    .map((gap) => metadataGapLabels[gap]).filter(Boolean).slice(0, 3);
+  rejected.forEach((source) => {
+    const reason = String(source.reason || "otro motivo");
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  });
+  const discarded = [...counts].sort((left, right) => right[1] - left[1]).slice(0, 3)
+    .map(([reason, count]) => `${count} ${labels[reason] || "otro motivo"}${reason === "incomplete_bibliographic_metadata" && metadataGaps.length ? ` (faltan ${metadataGaps.join(", ")})` : ""}`).join(", ");
+  const pending = Array.isArray(dossier.pendingCandidates) ? dossier.pendingCandidates.length : 0;
+  const platformResults = Array.isArray(dossier.platformResults) ? dossier.platformResults : [];
+  const platformNames = Object.fromEntries([...(globalThis.MarcieResearchPolicy?.platforms || []), globalThis.MarcieResearchPolicy?.supplemental].filter(Boolean).map((item) => [item.id, item.name]));
+  const searchedPlatforms = [...new Set(platformResults.map((item) => item.name || platformNames[item.id] || item.id).filter(Boolean))];
+  const selectedPlatforms = (Array.isArray(dossier.searchPlatforms) ? dossier.searchPlatforms : []).map((id) => platformNames[id] || id);
+  const failedPlatforms = [...new Set(platformResults.filter((item) => item.status === "error").map((item) => item.name || platformNames[item.id] || item.id).filter(Boolean))];
+  return [
+    (searchedPlatforms.length || selectedPlatforms.length) && `Plataformas ${searchedPlatforms.length ? "consultadas" : "seleccionadas"}: ${(searchedPlatforms.length ? searchedPlatforms : selectedPlatforms).join(", ")}.`,
+    discarded && `Descartes: ${discarded}.`,
+    pending && `${pending} candidatos pendientes.`,
+    failedPlatforms.length && `Búsquedas fallidas en: ${failedPlatforms.join(", ")}.`
+  ].filter(Boolean).join(" ");
+}
+
+function isExpectedResearchPause(error) {
+  return ["marcie_research_incomplete", "marcie_research_quota"].includes(String(error?.code || ""));
+}
+
+async function runPersistentProduction(session) {
+  session.automation.engine = "persistent";
+  const controller = new AbortController();
+  automationRecoveryControllers.set(session.id, controller);
+  appState.automationWorkflowActive = true;
+  appState.automationWorkflowSessionId = session.id;
+  const run = (async () => {
+    let result;
+    let preparation = null;
+    let failures = 0;
+    while (!controller.signal.aborted) {
+      try {
+        if (!session.automation.productionId && !preparation) {
+          const profileId = session.sessionConfiguration?.promptProfileId || getActiveMarciePromptProfileId();
+          const prompts = listMarciePromptProfiles().find(profile => profile.id === profileId)?.prompts || getDefaultMarciePrompts();
+          session.sessionConfiguration = { ...session.sessionConfiguration, productionPrompts: prompts, productionModel: getConfiguredGeminiModel() };
+          preparation = saveMarcieSession(session);
+          preparation.catch(() => { preparation = null; });
+        }
+        if (!session.automation.productionId) await waitForProductionSave(preparation, controller.signal);
+        result = await productionRequest(session.automation?.productionId ? (session.automation.status === "failed" ? "resume" : "status") : "start",
+          { sessionId: session.id, productionId: session.automation?.productionId }, controller.signal);
+        if (controller.signal.aborted || session.automation.cancelRequested) return;
+        session.automation = { ...session.automation, ...productionProgress(result) };
+        if (["completed", "completed_with_findings"].includes(result.status)) {
+          // The store's subscription remains responsible for resolving concurrent edits.
+          forgetAutomation(session);
+        } else rememberAutomation(session);
+        updateAutomatedSessionProgress(session.automation.stage, session.automation.message, session.automation.progress, null, session);
+        if (["completed", "completed_with_findings", "cancelled", "needs_attention"].includes(result.status)) return;
+        failures = 0;
+        await waitForAutomationRetry(2500, controller.signal);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (session.saveConflict || error?.remoteConflict || [400, 401, 403, 409, 413, 422].includes(Number(error?.status))) {
+          session.automation = { ...session.automation, status: "failed", message: error.message };
+          return;
+        }
+        failures++;
+        session.automation.message = "Reconectando con la producción; los checkpoints permanecen guardados.";
+        updateAutomatedSessionProgress(session.automation.stage, session.automation.message, session.automation.progress || 0, null, session);
+        await waitForAutomationRetry(automationRetryDelay(failures, error), controller.signal);
+      }
+    }
+  })();
+  automationRecoveryRuns.set(session.id, run);
+  try { await run; }
+  finally {
+    automationRecoveryRuns.delete(session.id);
+    automationRecoveryControllers.delete(session.id);
+    appState.automationWorkflowActive = false;
+    appState.automationWorkflowSessionId = null;
+    updateAutomatedSessionProgress(session.automation.stage, session.automation.message, session.automation.progress || 0, null, session);
+    renderActiveSession();
+  }
+}
+
 async function runAutomatedSessionWorkflow(session, specifications = []) {
+  if (!session?.id || session.automation?.status === "cancelled") return;
+  if (automationRecoveryRuns.has(session.id)) return automationRecoveryRuns.get(session.id);
+  session.automation = { ...session.automation, startedAt: session.automation?.startedAt || new Date().toISOString() };
+  if (session.automation?.engine === "persistent" || globalThis.__CHARLY_CONFIG__?.marcieParallelProduction === true) {
+    return runPersistentProduction(session);
+  }
+  const controller = new AbortController();
+  automationRecoveryControllers.set(session.id, controller);
+  const run = (async () => {
+    let attempt = 0;
+    const retry = async error => {
+      if (controller.signal.aborted || session.automation?.status === "cancelled") return;
+      if (error?.code === "marcie_automation_in_other_tab") {
+        updateAutomatedSessionProgress(session.automation?.stage || "proposals", "La producción continúa en otra pestaña. Esperando para sincronizar...", session.automation?.progress || 0, session.automation?.stagePercent, session);
+        await waitForAutomationRetry(15_000, controller.signal);
+        return;
+      }
+      attempt += 1;
+      const delayMs = automationRetryDelay(attempt, error);
+      session.automation = {
+        ...(session.automation || {}),
+        status: "retrying",
+        retryAttempts: attempt,
+        message: `Se interrumpió esta etapa. Reintentando automáticamente en ${Math.ceil(delayMs / 1000)} segundos; se conservó el avance.`,
+        retryAt: new Date(Date.now() + delayMs).toISOString()
+      };
+      rememberAutomation(session);
+      await saveMarcieSession(session).catch(() => {});
+      updateAutomatedSessionProgress(session.automation.stage || "proposals", session.automation.message, session.automation.progress || 0, session.automation.stagePercent, session);
+      renderActiveSession();
+      await waitForAutomationRetry(delayMs, controller.signal);
+    };
+    while (!controller.signal.aborted && session.automation?.status !== "cancelled") {
+      try {
+        await withMarcieAutomationLock(session.id, async () => {
+          while (!controller.signal.aborted && session.automation?.status !== "cancelled") {
+            try {
+              await runAutomatedSessionWorkflowUnlocked(session, specifications);
+              return;
+            } catch (error) {
+              await retry(error);
+            }
+          }
+        });
+        return;
+      } catch (error) {
+        await retry(error);
+      }
+    }
+  })();
+  automationRecoveryRuns.set(session.id, run);
+  try { return await run; }
+  finally {
+    automationRecoveryRuns.delete(session.id);
+    automationRecoveryControllers.delete(session.id);
+    updateAutomatedSessionProgress(session.automation?.stage || "proposals", session.automation?.message || "", session.automation?.progress || 0, session.automation?.stagePercent, session);
+    renderActiveSession();
+  }
+}
+
+async function runAutomatedSessionWorkflowUnlocked(session, specifications = []) {
+  if (automationCancellations.has(session.id)) return;
+  const resumingResearch = ["failed", "retrying"].includes(session?.automation?.status) && session?.automation?.stage === "proposals";
+  const researchResumeAttempts = resumingResearch
+    ? Math.min(10, Number(session.automation?.researchResumeAttempts || 0) + 1)
+    : 0;
+  const researchContinuationBudget = resumingResearch
+    ? Math.min(2, 1 + researchResumeAttempts)
+    : ["failed", "retrying"].includes(session?.automation?.status) ? 0 : 1;
+  let resolveCancellation;
+  const controller = new AbortController();
+  automationCancellations.set(session.id, { cancelled: false, controller, promise: new Promise((resolve) => { resolveCancellation = resolve; }), resolve: () => resolveCancellation() });
+  rememberAutomation(session);
+  if (resumingResearch) {
+    session.automation = {
+      ...(session.automation || {}),
+      researchResumeAttempts,
+      message: `Reanudando investigación (intento ${researchResumeAttempts})...`
+    };
+  }
   const toneSpecifications = specifications
     .filter((item) => String(item || "").toLowerCase().startsWith("#tono "))
     .map((item) => String(item).replace(/^#tono\s+/i, "").trim())
     .filter(Boolean);
   const toneInstruction = toneSpecifications.length
-    ? `\nTonos transversales obligatorios: ${toneSpecifications.join(", ")}. Conserva estos tonos en los cuatro enfoques y adáptalos sin perder su esencia: para docentes, voz de colega experto; para estudiantes, lenguaje directo y motivador sin infantilizar; para familias, voz clara, empática y práctica; para coordinadores, voz estratégica, institucional y accionable.`
+    ? `\nTonos transversales obligatorios: ${toneSpecifications.join(", ")}. Conserva estos tonos en cada enfoque y adáptalos sin perder su esencia para el público seleccionado.`
     : "";
   const specificationText = specifications.length
     ? `\nEspecificaciones obligatorias del usuario:\n${specifications.map((item) => `- ${item}`).join("\n")}${toneInstruction}`
@@ -4787,10 +5647,21 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
     ? session.selectedAudiences
     : ["educators", "students", "parents", "coordinators"];
   const audiences = ARTICLE_EXPORT_AUDIENCES.filter(({ id }) => selectedAudienceIds.includes(id));
+  const savingsPolicy = await readSavingsPolicy();
+  const newAudiences = audiences.filter(({ id }) => !hasCompleteArticle(session.articlesByAudience?.[id]));
+  if (savingsPolicy.limits.marcieAudiences != null && newAudiences.length > savingsPolicy.limits.marcieAudiences) {
+    throw new Error(`El modo ahorro permite hasta ${savingsPolicy.limits.marcieAudiences} públicos nuevos por día. Selecciona menos públicos.`);
+  }
+  await claimManySavings("marcieAudiences", newAudiences.map(audience => `${session.id}_${audience.id}`));
   restoreSessionResearchFromCache(session);
+  // El estado de la sesión debe reflejar que una ejecución nueva empieza por
+  // investigación. Si se interrumpe antes de redactar, no debe verse como una
+  // sesión de propuestas terminada ni como un artículo vacío ya completado.
+  session.status = "researching";
   appState.automationWorkflowActive = true;
   appState.automationWorkflowSessionId = session.id;
   renderActiveSession();
+  let proposalFallbackUsed = false;
   try {
     const hasAida = Boolean(sessionUsesAida(session) && session.trends?.[0]?.editorialMode !== "aida");
     const totalProposalSteps = (hasAida ? 1 : 0) + audiences.length;
@@ -4832,27 +5703,72 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
     }
 
     const startProposalPct = Math.round((completedProposalSteps / totalProposalSteps) * 100);
-    await saveAutomationStage(session, "proposals", 8, `Preparando investigación para ${audiences.length} enfoques...`, startProposalPct);
+    await saveAutomationStage(session, "proposals", 8, audiences.length > 1
+      ? `Buscando y verificando fuentes globales para ${audiences.length} públicos...`
+      : "Buscando y verificando fuentes para el artículo...", startProposalPct);
 
-    const proposalResponse = await generateProposalsForMode({
-      session,
-      topic: session.topic,
-      signals: toneInstruction ? [...specifications, toneInstruction.trim()] : specifications,
-      onResearchProgress: async ({ proposal, index, total }) => {
-        const stepNum = (hasAida ? 1 : 0) + index + 1;
-        const stagePct = Math.round((stepNum / totalProposalSteps) * 100);
-        const globalP = 8 + Math.round(((index + 1) / total) * 14);
-        const msg = `Investigando fuentes para ${proposal.audienceLabel || proposal.audience} (${index + 1}/${total})...`;
-        await saveAutomationStage(session, "proposals", globalP, msg, stagePct);
-      }
-    });
+    const reusableProposals = hasProposalsForAudiences(session.proposals, selectedAudienceIds);
+    const proposalResponse = await awaitAutomation(session, generateProposalsForMode({
+        session,
+        topic: session.topic,
+        signal: controller.signal,
+        signals: toneInstruction ? [...specifications, toneInstruction.trim()] : specifications,
+        reuseProposals: reusableProposals,
+        researchContinuations: researchContinuationBudget,
+        onResearchProgress: async ({ proposal, dossier, index, total, phase }) => {
+          if (phase === "selection") {
+            const count = session.researchGlobal?.sources?.filter(source => source.verificationStatus === "verified").length || 0;
+            await saveAutomationStage(session, "proposals", 10, `${count} fuentes verificadas guardadas. Seleccionando fuentes para ${total} públicos...`, 30);
+            return;
+          }
+          const stepNum = (hasAida ? 1 : 0) + index + 1;
+          const stagePct = Math.round((stepNum / totalProposalSteps) * 100);
+          const audienceLabel = proposal.audienceLabel || proposal.audience;
+          const researchState = dossier && globalThis.MarcieResearchPolicy.readiness(dossier, globalThis.MarcieResearchPolicy.target(session));
+          const readyCount = audiences.filter(({ id }) => globalThis.MarcieResearchPolicy.readiness(
+            session.researchByAudience?.[id] || {}, globalThis.MarcieResearchPolicy.target(session)
+          ).ready).length;
+          const globalP = 8 + Math.round((readyCount / Math.max(1, total)) * 14);
+          const msg = dossier
+            ? researchState.ready
+              ? `Fuentes globales seleccionadas para ${audienceLabel} (${index + 1}/${total}).`
+              : `Selección parcial para ${audienceLabel}: ${researchState.count}/${researchState.target} fuentes verificadas${researchState.reasons?.length ? ` · ${researchState.reasons[0]}` : ""}.`
+            : `Seleccionando fuentes para ${audienceLabel} (${index + 1}/${total})...`;
+          if (dossier) {
+            await saveAutomationStage(session, "proposals", Math.min(readyCount === total ? 22 : 21, globalP), msg, Math.round((readyCount / Math.max(1, total)) * 100));
+          } else {
+            updateAutomatedSessionProgress("proposals", msg, Math.max(8, globalP), Math.max(0, stagePct - Math.round(50 / Math.max(1, totalProposalSteps))), session);
+            setSyncStatus(msg);
+          }
+        }
+      }));
+    proposalFallbackUsed = proposalResponse?.fallbackUsed === true;
+    session.automation.proposalFallbackUsed = proposalFallbackUsed;
     const proposals = Array.isArray(proposalResponse?.proposals) ? proposalResponse.proposals : [];
     if (proposals.length < audiences.length) throw new Error("Marcie no devolvió una propuesta para cada público seleccionado.");
     session.proposals = proposals;
-    session.status = "proposal_ready";
     saveSessionResearchToCache(session);
-    await saveAutomationStage(session, "proposals", 22, "Propuestas listas.", 100);
+    const incompleteResearch = audiences.filter(({ id }) => !globalThis.MarcieResearchPolicy.readiness(
+      session.researchByAudience?.[id] || {}, globalThis.MarcieResearchPolicy.target(session)
+    ).ready);
+    const provisionalAudienceIds = new Set(incompleteResearch.map(({ id }) => id));
+    if (incompleteResearch.length) {
+      const details = incompleteResearch.map(({ id, label }) => {
+        const dossier = session.researchByAudience?.[id] || {};
+        const state = globalThis.MarcieResearchPolicy.readiness(dossier, globalThis.MarcieResearchPolicy.target(session));
+        const reasons = Array.isArray(state.reasons) && state.reasons.length ? `: ${state.reasons.slice(0, 3).join(" ")}` : "";
+        const diagnostics = researchDiagnosticSummary(dossier);
+        return `${label} (${state.count}/${state.target}${reasons}${diagnostics ? ` ${diagnostics}` : ""})`;
+      });
+      session.automation.researchWarning = `La investigación quedó parcial: ${details.join("; ")}`;
+      await saveAutomationStage(session, "proposals", 21, "Fuentes insuficientes. Marcie redactará borradores para revisión sin inventar referencias.", 95);
+    }
+    session.status = "proposal_ready";
+    await saveAutomationStage(session, "proposals", 22, proposalFallbackUsed
+      ? "Títulos de respaldo listos. Comenzando la redacción de los artículos..."
+      : "Propuestas listas.", 100);
 
+    session.status = "drafting";
     await saveAutomationStage(session, "articles", 22, `Propuestas listas. Comenzando redacción de ${audiences.length} artículos...`, 0);
 
     const articlesByAudience = { ...(session.articlesByAudience || {}) };
@@ -4861,7 +5777,12 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
       for (let index = 0; index < audiences.length; index += 1) {
         const audience = audiences[index];
         const proposal = proposals.find((item) => item.audience === audience.id) || proposals[index];
-        session.audience = audience.id;
+        if (hasCompleteArticle(articlesByAudience[audience.id])) {
+          const stageDonePct = Math.round(((index + 1) / totalArticleSteps) * 100);
+          const doneProgress = 22 + Math.round(((index + 1) / audiences.length) * 28);
+          await saveAutomationStage(session, "articles", doneProgress, `Artículo ${index + 1}/${audiences.length} conservado (${audience.label})`, stageDonePct);
+          continue;
+        }
         const stageStartPct = Math.round((index / totalArticleSteps) * 100);
         const currentProgress = 22 + Math.round((index / audiences.length) * 28);
         const msg = `Redactando artículo ${index + 1}/${audiences.length} con enfoque para ${audience.label}...`;
@@ -4889,14 +5810,22 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
         const audienceTitleSpec = audienceSpecs.find(item => /^#(titulo|title)\s+/i.test(item));
         const effectiveTitle = (audienceTitleSpec ? audienceTitleSpec.replace(/^#(titulo|title)\s+/i, "").trim() : "") || proposal.title || session.topic || session.title || "";
         const audienceSpecificTopic = session.audienceTopics?.[audience.id] || session.topic;
-        let article = await draftArticleForMode({
+        let article = await awaitAutomation(session, retryTransientFetch(() => draftArticleForMode({
           session,
+          signal: controller.signal,
           title: effectiveTitle,
           topic: audienceSpecificTopic,
           audience: audience.id,
           brief: (proposal.brief || proposal.angle || audienceSpecificTopic) + (audienceSpecs.length ? `\nEspecificaciones de este público:\n${audienceSpecs.join("\n")}` : ""),
-          isAutomated: true
-        });
+          isAutomated: true,
+          allowProvisionalDraft: provisionalAudienceIds.has(audience.id),
+          onDraftProgress: (checkpoint) => {
+            const fraction = (index + checkpoint.completedGroups / checkpoint.totalGroups) / audiences.length;
+            return saveAutomationStage(session, "articles", 22 + Math.round(fraction * 28), `Redactando ${audience.label}: ${checkpoint.completedGroups}/${checkpoint.totalGroups} partes listas...`, Math.round(fraction * 100), true);
+          }
+        })));
+        if (!hasCompleteArticle(article)) throw new Error(`Marcie no devolvió un artículo completo para ${audience.label}. Reintenta la redacción.`);
+        delete session.articleDraftsByAudience?.[audience.id];
         if (session.humanizationEnabled !== false) {
           article = humanizeArticleContent(article);
         }
@@ -4907,24 +5836,92 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
         saveSessionResearchToCache(session);
         const stageDonePct = Math.round(((index + 1) / totalArticleSteps) * 100);
         const doneProgress = 22 + Math.round(((index + 1) / audiences.length) * 28);
-        await saveAutomationStage(session, "articles", doneProgress, `Artículo ${index + 1}/${audiences.length} listo (${audience.label})`, stageDonePct);
+        await saveAutomationStage(session, "articles", doneProgress, `Artículo ${index + 1}/${audiences.length} listo (${audience.label})`, stageDonePct, true);
       }
     } finally {
+      const firstReady = audiences.find(({ id }) => hasCompleteArticle(articlesByAudience[id]));
+      if (firstReady) {
+        session.audience = firstReady.id;
+        session.article = articlesByAudience[firstReady.id];
+      }
       window.__marcieHideArticleGenerationSpinner?.();
     }
 
     session.articlesByAudience = { ...articlesByAudience };
-    await saveAutomationStage(session, "covers", 50, `Artículos listos. Generando ${audiences.length} portadas, una por una...`, 0);
+    const completedAudiences = audiences.filter(({ id }) => hasCompleteArticle(articlesByAudience[id]));
+    session.audience = completedAudiences[0]?.id || audiences[0]?.id || "educators";
+    session.article = articlesByAudience[session.audience] || session.article;
+    await saveAutomationStage(session, "review", 50, "Artículos listos. Iniciando control de calidad...", 0);
+    const auditsByAudience = {};
+    for (let index = 0; index < audiences.length; index += 1) {
+      const audience = audiences[index];
+      const stageStartPct = Math.round((index / audiences.length) * 100);
+      await saveAutomationStage(session, "review", 50 + Math.round((index / audiences.length) * 24), `Analizando calidad y SEO ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
+      let article = articlesByAudience[audience.id];
+      try {
+        if (article.provisionalDraft) {
+          article = await verifyArticleEvidence({ article, topic: session.topic || session.title, additionalSearches: 0, autoRepair: false, signal: controller.signal });
+        } else {
+          article = await verifyArticleEvidence({ article, topic: session.topic || session.title, additionalSearches: 1, autoRepair: true, signal: controller.signal });
+        }
+      } catch (error) {
+        if (error?.name === "AbortError" && controller.signal.aborted) throw error;
+        console.warn(`[MarcieAutomation] La comprobación de ${audience.id} quedó pendiente; se conserva el artículo:`, error);
+        const transient = [503, 504].includes(Number(error?.status || 0)) || isTransientFetchError(error);
+        article.verification = { status: "blocked", coverage: 0, blockers: [transient ? "La comprobación factual quedó pendiente por un error temporal del servidor." : "La comprobación factual quedó pendiente; revisa el error antes de aprobar."], contradictions: [], error: String(error?.message || "Error de verificación"), retryPending: transient, retryAttempts: 0 };
+      }
+      if (!hasCompleteArticle(article)) throw new Error(`La reparación factual dejó incompleto el artículo para ${audience.label}.`);
+      let audit;
+      try { audit = await runSessionReview(session, article, audience.id); }
+      catch (error) {
+        if (error?.name === "AbortError" && controller.signal.aborted) throw error;
+        console.warn(`[MarcieAutomation] La revisión de ${audience.id} quedó pendiente; se conserva el artículo:`, error);
+        audit = { reviewStatus: "pending", issues: [{ message: "Revisar el borrador y completar las fuentes verificadas." }] };
+      }
+      const issues = Array.isArray(audit.issues) ? audit.issues : [];
+      if (issues.length && audit.reviewStatus !== "pending") {
+        await saveAutomationStage(session, "review", 50 + Math.round((index / audiences.length) * 24), `Corrigiendo redacción ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
+        try {
+          const beforeCorrection = article;
+          const corrected = await withAutomationRequestDeadline(
+            (signal) => correctArticleAuditWithGemini({ article, issues, signal }), 90_000, controller.signal
+          );
+          if (corrected !== article) {
+            article = await verifyArticleEvidence({ article: corrected, topic: session.topic || session.title, additionalSearches: 0, autoRepair: !article.provisionalDraft, signal: controller.signal });
+            if (!hasCompleteArticle(article)) throw new Error(`La corrección dejó incompleto el artículo para ${audience.label}.`);
+            const oldBlocks = new Map((beforeCorrection.blocks || []).map((block) => [String(block.id), JSON.stringify(block)]));
+            const changedIds = (article.blocks || []).filter((block) => oldBlocks.get(String(block.id)) !== JSON.stringify(block)).map((block) => String(block.id));
+            if (changedIds.length) {
+              const focused = await runSessionReview(session, article, audience.id, changedIds);
+              const retainedIssues = issues.filter((issue) => issue.blockId && !changedIds.includes(String(issue.blockId)) && article.blocks.some((block) => String(block.id) === String(issue.blockId)));
+              audit = { ...focused, issues: [...retainedIssues, ...(focused.issues || [])] };
+            }
+          }
+        } catch (error) {
+          if (error?.name === "AbortError" && controller.signal.aborted) throw error;
+          console.warn(`[MarcieAutomation] La corrección editorial de ${audience.id} quedó pendiente:`, error);
+        }
+      }
+      auditsByAudience[audience.id] = audit;
+      articlesByAudience[audience.id] = article;
+      retainVerifiedAudienceSources(session, audience.id, article);
+      session.articlesByAudience = { ...articlesByAudience };
+      if (session.audience === audience.id) session.article = article;
+      session.auditsByAudience = auditsByAudience;
+      await saveAutomationStage(session, "review", 50 + Math.round(((index + 1) / audiences.length) * 24), `Análisis ${index + 1}/${audiences.length} completado (${audience.label})`, Math.round(((index + 1) / audiences.length) * 100));
+    }
+
+    await saveAutomationStage(session, "covers", 74, `Control de calidad listo. Generando ${audiences.length} portadas...`, 0);
     const coverErrors = [];
     const totalCoverSteps = audiences.length;
     for (let index = 0; index < audiences.length; index += 1) {
       const audience = audiences[index];
       const stageStartPct = Math.round((index / totalCoverSteps) * 100);
       if (index > 0) {
-        await saveAutomationStage(session, "covers", 52 + index * 5, `Esperando antes de la portada ${index + 1}/${audiences.length} para proteger la cuota de Marcie...`, stageStartPct);
+        await saveAutomationStage(session, "covers", 74 + Math.round((index / totalCoverSteps) * 21), `Esperando antes de la portada ${index + 1}/${audiences.length} para proteger la cuota de Marcie...`, stageStartPct);
         await waitForAutomatedCover(AUTOMATED_COVER_GAP_MS);
       }
-      await saveAutomationStage(session, "covers", 54 + index * 5, `Creando portada ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
+      await saveAutomationStage(session, "covers", 74 + Math.round((index / totalCoverSteps) * 21), `Creando portada ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
       try {
         articlesByAudience[audience.id].featuredImage = await generateAutomatedCoverWithRetry({
           article: articlesByAudience[audience.id],
@@ -4932,7 +5929,7 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
           approachId: audience.id,
           approachLabel: audience.label
         }, (retryDelayMs) => {
-          updateAutomatedSessionProgress("covers", `Cuota temporal alcanzada para ${audience.label}. Reintentando en ${Math.round(retryDelayMs / 1000)} segundos...`, 54 + index * 5, stageStartPct);
+          updateAutomatedSessionProgress("covers", `Cuota temporal alcanzada para ${audience.label}. Reintentando en ${Math.round(retryDelayMs / 1000)} segundos...`, 74 + Math.round((index / totalCoverSteps) * 21), stageStartPct);
         });
       } catch (error) {
         coverErrors.push(`${audience.label}: ${error.message}`);
@@ -4942,24 +5939,10 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
       session.article = articlesByAudience[audience.id];
       session.audience = audience.id;
       const stageDonePct = Math.round(((index + 1) / totalCoverSteps) * 100);
-      await saveAutomationStage(session, "covers", 54 + index * 5, `Portada ${index + 1}/${audiences.length} lista (${audience.label})`, stageDonePct);
+      await saveAutomationStage(session, "covers", 74 + Math.round(((index + 1) / totalCoverSteps) * 21), `Portada ${index + 1}/${audiences.length} lista (${audience.label})`, stageDonePct);
     }
 
-    await saveAutomationStage(session, "review", 74, "Analizando calidad, tono, SEO y hallazgos por audiencia...", 0);
-    const auditsByAudience = {};
-    const totalReviewSteps = audiences.length;
-    for (let index = 0; index < audiences.length; index += 1) {
-      const audience = audiences[index];
-      const stageStartPct = Math.round((index / totalReviewSteps) * 100);
-      await saveAutomationStage(session, "review", 76 + index * 5, `Analizando calidad y SEO ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
-      auditsByAudience[audience.id] = await runSessionReview(session, articlesByAudience[audience.id], audience.id);
-      session.articlesByAudience = { ...articlesByAudience };
-      session.auditsByAudience = auditsByAudience;
-      const stageDonePct = Math.round(((index + 1) / totalReviewSteps) * 100);
-      await saveAutomationStage(session, "review", 76 + index * 5, `Análisis ${index + 1}/${audiences.length} completado (${audience.label})`, stageDonePct);
-    }
-
-    await saveAutomationStage(session, "corrections", 95, "Consolidando producción editorial aprobada...", 60);
+    await saveAutomationStage(session, "corrections", 95, "Preparando artículos para tu revisión...", 60);
 
     const remainingFindings = Object.values(auditsByAudience).reduce((total, audit) => total + (Array.isArray(audit?.issues) ? audit.issues.length : 0), 0);
     const evidenceBlockers = audiences.flatMap(({ id }) => articleVerificationBlockers(articlesByAudience[id] || {}, { editorialMode: session.editorialMode }).map((reason) => `${id}: ${reason}`));
@@ -4968,57 +5951,87 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
     session.audience = audiences[0]?.id || "educators";
     session.article = articlesByAudience[session.audience];
     session.audit = auditsByAudience[session.audience];
-    session.status = remainingFindings || evidenceBlockers.length ? "review_required" : "approved";
-    session.approvedAudiences = remainingFindings || evidenceBlockers.length ? [] : audiences.map((audience) => audience.id);
-    if (!remainingFindings && !evidenceBlockers.length) {
-      audiences.forEach(({ id }) => {
-        if (articlesByAudience[id]) {
-          articlesByAudience[id].approval = { approvedAt: new Date().toISOString(), contentHash: articlesByAudience[id].verification?.contentHash || "", articleVersion: session.updatedAt || "" };
-        }
-      });
-    }
+    session.status = "review_required";
+    session.approvedAudiences = [];
+    audiences.forEach(({ id }) => { if (articlesByAudience[id]) delete articlesByAudience[id].approval; });
     session.automation = {
       ...(session.automation || {}),
       status: remainingFindings || evidenceBlockers.length || coverErrors.length ? "completed_with_findings" : "completed",
       stage: "corrections",
       progress: 100,
-      message: evidenceBlockers.length ? `Producción terminada; ${evidenceBlockers.length} comprobaciones de evidencia pendientes.` : remainingFindings
-        ? `Automatización completada con ${remainingFindings} observaciones disponibles para revisión.`
+      message: provisionalAudienceIds.size ? `Se generaron ${provisionalAudienceIds.size} borrador(es) con evidencia parcial. Revisa las afirmaciones y completa las fuentes verificadas antes de aprobarlos.` : evidenceBlockers.length ? `Marcie no pudo cerrar ${evidenceBlockers.length} comprobaciones de evidencia; estos artículos aún no están listos para aprobar.` : remainingFindings
+        ? `Marcie no pudo cerrar ${remainingFindings} hallazgos editoriales; estos artículos aún no están listos para aprobar.`
         : coverErrors.length
           ? `Automatización completada con ${coverErrors.length} portada(s) pendiente(s); pueden reintentarse individualmente.`
-          : "Producción editorial completada con sus portadas y artículos por audiencia.",
+          : proposalFallbackUsed
+            ? "Artículos generados. Gemini no pudo proponer los títulos; se usaron títulos de respaldo. Revisa cada artículo antes de aprobarlo."
+          : "Artículos revisados y corregidos, listos para tu revisión y aprobación.",
       coverErrors,
       remainingFindings,
       completedAt: new Date().toISOString()
     };
     await saveMarcieSession(session);
+    audiences.forEach(({ id }) => {
+      if (session.articlesByAudience[id]?.verification?.retryPending) schedulePendingVerification(session.id, id);
+    });
+    forgetAutomation(session);
     updateAutomatedSessionProgress("corrections", session.automation.message, 100);
     setSyncStatus("🟢 Automatización sincronizada con Firebase");
     renderSessionList();
     renderActiveSession();
     showToast(session.automation.status === "completed" ? "Sesión automatizada completada con éxito." : session.automation.message, session.automation.status === "completed" ? "success" : "info");
   } catch (error) {
+    if (automationCancellations.get(session.id)?.cancelled) {
+      if (session.automation?.status !== "cancelled") await cancelAutomatedSession(session);
+      return;
+    }
+    const failure = automatedFailureDetails(error, session);
+    if (!isExpectedResearchPause(error)) {
+      console.error("[MarcieAutomation] Error en workflow", {
+        sessionId: String(session.id || "").slice(0, 100),
+        stage: failure.stage,
+        progress: Number(session.automation?.progress || 0),
+        status: failure.status,
+        code: failure.code,
+        requestId: failure.requestId,
+        message: String(error?.message || error || "").slice(0, 500)
+      });
+    }
+    if (error && typeof error === "object") {
+      try { error.userMessage = failure.userMessage; } catch (_) {}
+    }
     session.automation = {
       ...(session.automation || {}),
       status: "failed",
-      message: error.message,
+      message: failure.userMessage,
+      failure: { stage: failure.stage, status: failure.status, code: failure.code, requestId: failure.requestId },
       failedAt: new Date().toISOString()
     };
+    rememberAutomation(session);
+    const completed = audiences.find(({ id }) => hasCompleteArticle(session.articlesByAudience?.[id]));
+    if (completed && !hasCompleteArticle(session.articlesByAudience?.[session.audience])) {
+      session.audience = completed.id;
+      session.article = session.articlesByAudience[completed.id];
+      session.audit = session.auditsByAudience?.[completed.id] || null;
+    }
     saveSessionResearchToCache(session);
     await saveMarcieSession(session).catch(() => {});
-    updateAutomatedSessionProgress(session.automation.stage || "proposals", `La automatización se detuvo: ${error.message}`, session.automation.progress || 0);
+    updateAutomatedSessionProgress(session.automation.stage || "proposals", failure.userMessage, session.automation.progress || 0);
     throw error;
   } finally {
+    automationCancellations.delete(session.id);
     // Limpiar siempre el flag de workflow activo al terminar (éxito o error)
     appState.automationWorkflowActive = false;
     appState.automationWorkflowSessionId = null;
+    updateAutomatedSessionProgress(session.automation?.stage || "proposals", session.automation?.message || "", session.automation?.progress || 0, session.automation?.stagePercent, session);
     renderActiveSession();
   }
 }
 
-async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSession = true, sourceTrend = null, requestOverride = null, agentRunId = "" } = {}) {
+async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSession = true, sourceTrend = null, requestOverride = null, agentRunId = "", initialConfiguration = null } = {}) {
   const editorialProfiles = await listEditorialProfilesOnce().catch(() => []);
   const request = requestOverride || await showNewSessionModal({
+    initialConfiguration,
     defaultValue,
     allowBlankSession,
     freeModeDefault: getActiveMarciePromptProfileId() === FREE_PROMPT_PROFILE_ID,
@@ -5057,7 +6070,7 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
     seo: { title, description: trendSnapshot?.summary || "", keywords: [], slug: "" }
   };
   const automation = request.mode === "automated"
-    ? { mode: "automated", promptMode: request.freeMode ? "free" : "configured", promptProfileId: request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID, status: "queued", stage: "proposals", progress: 0 }
+    ? { mode: "automated", promptMode: request.freeMode ? "free" : "configured", promptProfileId: request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID, status: "queued", startedAt: new Date().toISOString(), stage: "proposals", progress: 0 }
     : null;
   const sessionPayload = {
     title,
@@ -5089,6 +6102,8 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
   try {
     newId = await createMarcieSession(sessionPayload);
   } catch (err) {
+    const savingsState = await readSavingsPolicy().catch(() => null);
+    if (savingsState?.level !== "off") throw err;
     console.warn("[MarcieBlogEditor] Error al crear sesión en Firestore, continuando localmente:", err);
     newId = `session-${Date.now()}`;
   }
@@ -5112,8 +6127,17 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
     try {
       await runAutomatedSessionWorkflow(localSession, request.specifications);
     } catch (err) {
-      console.error("[MarcieBlogEditor] Error en workflow automatizado:", err);
-      showToast(`Error durante la generación: ${err.message || err}`, "error");
+      if (!isExpectedResearchPause(err)) {
+        console.error("[MarcieBlogEditor] Workflow automatizado detenido", {
+          sessionId: String(localSession.id || "").slice(0, 100),
+          stage: localSession.automation?.failure?.stage || localSession.automation?.stage || "unknown",
+          status: localSession.automation?.failure?.status || 0,
+          code: localSession.automation?.failure?.code || "",
+          requestId: localSession.automation?.failure?.requestId || "",
+          error: String(err?.message || err || "").slice(0, 500)
+        });
+      }
+      showToast(err?.userMessage || `Error durante la generación: ${err.message || err}`, "error");
     }
   } else if (trendSnapshot) {
     setSyncStatus("Generando propuestas desde la tendencia...");
@@ -5186,6 +6210,7 @@ async function selectAudienceSafely(session, audience) {
 
   sessionOperations.add(session.id);
   let generationSpinnerShown = false;
+  let articleCommitted = false;
   try {
     const action = await chooseEditorialAction("Artículo para " + getEditorialAudienceLabel(audience),
       "Se investigarán fuentes y se generará un artículo para esta audiencia.",
@@ -5204,19 +6229,22 @@ async function selectAudienceSafely(session, audience) {
       const previousRevision = existing?.revision || 0;
       const working = JSON.parse(JSON.stringify(session));
       working.audience = audience;
-      article = await draftArticleForMode({
+      article = await retryTransientFetch(() => draftArticleForMode({
         session: working,
         title: working.proposals?.find(p => p.audience === audience)?.title || working.topic || working.title,
         topic: working.topic,
         audience,
         brief: working.proposals?.find(p => p.audience === audience)?.brief || "",
         isAutomated: false
-      });
+      }));
+      if (!hasCompleteArticle(article)) throw new Error("Marcie no devolvió un artículo completo. Intenta generarlo de nuevo.");
       if (session.humanizationEnabled !== false) {
         article = humanizeArticleContent(article);
       }
       if ((session.configurationRevision || 0) !== configRevision || (session.articlesByAudience?.[audience]?.revision || 0) !== previousRevision) throw new Error("El artículo cambió durante la generación. Se conservó la versión más reciente.");
       session.researchByAudience = working.researchByAudience;
+      session.researchGlobal = working.researchGlobal || session.researchGlobal || null;
+      session.researchGlobalFingerprint = working.researchGlobalFingerprint || session.researchGlobalFingerprint || "";
       article.revision = previousRevision + 1;
       session.approvedAudiences = (session.approvedAudiences || []).filter(id => id !== audience);
       if (session.auditsByAudience) delete session.auditsByAudience[audience];
@@ -5227,21 +6255,35 @@ async function selectAudienceSafely(session, audience) {
     session.audit = session.auditsByAudience?.[audience] || null;
     session.title = article.title || session.title;
     invalidateMaterialApproval(session);
-    await saveMarcieSession(session);
+    articleCommitted = true;
+    const savePromise = saveMarcieSession(session);
+    window.__marcieHideArticleGenerationSpinner?.();
+    generationSpinnerShown = false;
     renderSessionList(); renderActiveSession();
+    await savePromise;
     setSyncStatus("Sincronizado");
-  } catch (error) { showToast(error.message, "error"); setSyncStatus("No se pudo completar la operación", true); }
+  } catch (error) {
+    console.error("[MarcieBlogEditor] No se completó el artículo para el público seleccionado:", error);
+    showToast(articleCommitted ? `Artículo creado, pero pendiente de sincronizar: ${error.message}` : error.message, "error");
+    setSyncStatus(articleCommitted ? "Artículo pendiente de sincronizar" : "No se pudo completar la operación", true);
+  }
   finally {
     if (generationSpinnerShown) window.__marcieHideArticleGenerationSpinner?.();
     sessionOperations.delete(session.id);
   }
 }
-async function reconfigureSession(session) {
+async function reconfigureSession(session, { requestOverride = null } = {}) {
   if (!session || sessionOperations.has(session.id)) return;
   sessionOperations.add(session.id);
   try {
+    const creationMode = requestOverride ? "agent" : await showSessionCreationChoiceModal({ reconfigure: true });
+    if (!creationMode) return;
+    if (creationMode === "agent" && !requestOverride) {
+      await marcieAgentPanel?.startGuidedSession({ sessionId: session.id });
+      return;
+    }
     const existingProposals = session.titleProposals || session.sessionConfiguration?.titleProposals || null;
-    const request = await showNewSessionModal({
+    const request = requestOverride || await showNewSessionModal({
       defaultValue: session.topic || session.title,
       initialConfiguration: {
         ...(session.sessionConfiguration || { ...session, mode: session.automation?.mode || "manual" }),
@@ -5277,6 +6319,7 @@ async function reconfigureSession(session) {
     renderActiveSession();
     showAutomatedSessionProgress(working);
     await runAutomatedSessionWorkflow(working, request.specifications || []);
+    if (working.automation?.status === "cancelled") throw automationAbortError();
     if (JSON.stringify(session.articlesByAudience) !== before) throw new Error("La sesión se editó durante la generación. Se conservan esas ediciones.");
     for (const [audience, publication] of Object.entries(session.publicationsByAudience || {})) {
       if (publication.status === "future") await cancelScheduledPublication({ ...session, audience }, "Sesión reconfigurada");
@@ -5290,6 +6333,7 @@ async function reconfigureSession(session) {
     appState.sessions = appState.sessions.map(item => item.id === session.id ? session : item);
     renderSessionList(); renderActiveSession();
     showToast("Sesión recreada. Revisa los artículos antes de aprobar.", "success");
+    return session.id;
   } catch (error) { showToast(error.message, "error"); }
   finally { sessionOperations.delete(session.id); }
 }
@@ -5322,46 +6366,18 @@ function setupEventListeners() {
     if (active) showAutomatedSessionProgress(active);
   });
 
-  if (dom.btnSourceCitationFormat) { dom.btnSourceCitationFormat.hidden = true; dom.btnSourceCitationFormat.style.display = "none"; }
+  if (dom.btnSourceCitationFormat) dom.btnSourceCitationFormat.hidden = true;
 
   // Toggle del sub-header de pestañas y audiencia
   const btnToggleSubheader = document.getElementById("btn-toggle-subheader");
   const centerSubheader = document.getElementById("center-subheader");
   if (btnToggleSubheader && centerSubheader) {
-    // Configurar transición y overflow antes de medir
-    centerSubheader.style.overflow = "hidden";
-    centerSubheader.style.transition = "max-height 0.25s ease, padding 0.25s ease, border 0.25s ease";
-
-    // Medir la altura real del contenido y fijar como inicial
-    const naturalHeight = centerSubheader.scrollHeight;
-    centerSubheader.style.maxHeight = naturalHeight + "px";
-
     btnToggleSubheader.addEventListener("click", () => {
       const isCollapsed = centerSubheader.classList.contains("collapsed-subheader");
       if (isCollapsed) {
-        // Expandir: usar scrollHeight real en el momento de abrir
-        const openHeight = centerSubheader.scrollHeight;
-        centerSubheader.style.maxHeight = Math.max(openHeight, 56) + "px";
-        centerSubheader.style.paddingTop = "";
-        centerSubheader.style.paddingBottom = "";
-        centerSubheader.style.borderBottomWidth = "";
         centerSubheader.classList.remove("collapsed-subheader");
         btnToggleSubheader.title = "Ocultar opciones";
-        // Después de la transición, quitar maxHeight fijo para dejar fluir el contenido
-        setTimeout(() => {
-          if (!centerSubheader.classList.contains("collapsed-subheader")) {
-            centerSubheader.style.maxHeight = "none";
-          }
-        }, 280);
       } else {
-        // Colapsar: primero fijar la altura actual para que la transición funcione
-        centerSubheader.style.maxHeight = centerSubheader.scrollHeight + "px";
-        // Forzar reflow
-        centerSubheader.getBoundingClientRect();
-        centerSubheader.style.maxHeight = "0px";
-        centerSubheader.style.paddingTop = "0";
-        centerSubheader.style.paddingBottom = "0";
-        centerSubheader.style.borderBottomWidth = "0";
         centerSubheader.classList.add("collapsed-subheader");
         btnToggleSubheader.title = "Mostrar opciones";
       }
@@ -5545,8 +6561,57 @@ function setupEventListeners() {
   const btnToggleRightPanelFs = document.getElementById("btn-toggle-right-panel-fullscreen");
   const rightPanel = document.getElementById("right-panel");
   const rightResizer = document.getElementById("right-resizer");
+  const mobilePanelQuery = window.matchMedia("(max-width: 599px) and (max-device-width: 599px) and (orientation: portrait) and (pointer: coarse)");
+  const mobilePanelBackdrop = document.getElementById("marcie-mobile-panel-backdrop");
+  const mobileSessionsButton = document.getElementById("btn-mobile-sessions");
+  const mobileAssistantButton = document.getElementById("btn-mobile-assistant");
+
+  const syncMobilePanels = () => {
+    if (!mobilePanelQuery.matches) delete marcieAppRoot.dataset.mobilePanel;
+    const activePanel = marcieAppRoot.dataset.mobilePanel || "";
+    if (mobilePanelBackdrop) mobilePanelBackdrop.hidden = !activePanel;
+    for (const [button, panel, name] of [
+      [mobileSessionsButton, "sessions", "sesiones"],
+      [mobileAssistantButton, "assistant", "agente Marcie"]
+    ]) {
+      if (!button) continue;
+      const expanded = activePanel === panel;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", `${expanded ? "Cerrar" : "Abrir"} ${name}`);
+    }
+  };
+
+  const toggleMobilePanel = (panel) => {
+    if (!mobilePanelQuery.matches) return;
+    if (marcieAppRoot.dataset.mobilePanel === panel) delete marcieAppRoot.dataset.mobilePanel;
+    else marcieAppRoot.dataset.mobilePanel = panel;
+    syncMobilePanels();
+  };
+
+  mobileSessionsButton?.addEventListener("click", () => toggleMobilePanel("sessions"));
+  mobileAssistantButton?.addEventListener("click", () => toggleMobilePanel("assistant"));
+  mobilePanelBackdrop?.addEventListener("click", () => {
+    delete marcieAppRoot.dataset.mobilePanel;
+    syncMobilePanels();
+  });
+  dom.sessionList?.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-session-id]")) return;
+    delete marcieAppRoot.dataset.mobilePanel;
+    syncMobilePanels();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !marcieAppRoot.dataset.mobilePanel) return;
+    delete marcieAppRoot.dataset.mobilePanel;
+    syncMobilePanels();
+  });
+  mobilePanelQuery.addEventListener("change", syncMobilePanels);
+  syncMobilePanels();
 
   const toggleRightPanel = () => {
+    if (mobilePanelQuery.matches) {
+      toggleMobilePanel("assistant");
+      return;
+    }
     if(rightPanel) rightPanel.classList.toggle("hidden");
     if(rightResizer) rightResizer.classList.toggle("hidden");
   };
@@ -5602,7 +6667,7 @@ function setupEventListeners() {
             <div class="relative">
               <!-- Línea conectora -->
               <div class="absolute top-5 left-0 right-0 h-[2px] bg-slate-200 z-0 mx-[10%]"></div>
-              <div id="guide-progress-line" class="absolute top-5 left-[10%] h-[2px] bg-gradient-to-r from-teal-400 to-purple-500 z-0 transition-all duration-500" style="width:0%"></div>
+              <div id="guide-progress-line" class="absolute top-5 left-[10%] h-[2px] bg-gradient-to-r from-teal-400 to-purple-500 z-0 transition-all duration-500"></div>
 
               <!-- Bolitas de pasos -->
               <div class="relative z-10 flex justify-between px-[6%]">
@@ -5663,7 +6728,7 @@ function setupEventListeners() {
         3: {
           color:   "purple",
           title:   "Paso 3 — Crear propuestas",
-          desc:    "Genera hasta 4 propuestas de artículo con diferentes enfoques para docentes, estudiantes, familias y coordinadores académicos. Incluye título, subtítulo, estructura y ángulo diferenciador.",
+          desc:    "Genera propuestas de artículo según los públicos seleccionados. Incluye título, subtítulo, estructura y ángulo diferenciador.",
           tips:    ["Cambia la audiencia en la barra superior antes de generar.", "Puedes seleccionar una propuesta como base y redactar el artículo completo.", "Las propuestas respetan el brief editorial de tu institución."],
           badge:   "Creatividad"
         },
@@ -5706,7 +6771,7 @@ function setupEventListeners() {
         btns.forEach(b => b.setAttribute("data-active", b.getAttribute("data-guide-step") === String(n) ? "true" : "false"));
 
         // Avanzar barra de progreso
-        if (progress) progress.style.width = progressMap[n] || "0%";
+        if (progress) progress.dataset.step = String(n);
 
         // Renderizar detalle
         detail.className = `min-h-[132px] rounded-xl border ${c.border} ${c.bg} bg-gradient-to-br from-slate-50/80 to-white p-5 transition-all duration-300`;
@@ -5824,7 +6889,7 @@ function setupEventListeners() {
         widthClass: "max-w-2xl",
         contentHtml: `
           <div class="flex flex-col gap-4">
-            <p class="text-xs text-slate-500 leading-relaxed mb-1">Personaliza cómo se muestra el artículo generado en el panel de lectura. Estos cambios afectan la visualización local y la exportación de estilos.</p>
+            <p class="text-xs text-slate-500 leading-relaxed mb-1">Personaliza cómo se muestra el artículo en el panel de lectura y al exportarlo. Si una opción no está resaltada, se usa el estilo de la plantilla.</p>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <!-- Typography & Spacing Column -->
@@ -5834,8 +6899,8 @@ function setupEventListeners() {
                   <h4 class="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2">Familia Tipográfica</h4>
                   <div class="flex flex-col gap-2">
                     <button id="ts-font-sans" class="text-left px-3 py-2 text-xs font-medium rounded-lg border transition-colors bg-white border-slate-200 text-slate-700 hover:border-teal-400">
-                      <span class="font-sans text-sm block mb-0.5">Inter (Moderno)</span>
-                      <span class="text-[10px] text-slate-400">Limpia, sin serifas, ideal para pantallas.</span>
+                      <span class="font-sans text-sm block mb-0.5">Fuente de la plantilla</span>
+                      <span class="text-[10px] text-slate-400">Conserva la tipografía del diseño seleccionado.</span>
                     </button>
                     <button id="ts-font-serif" class="text-left px-3 py-2 text-xs font-medium rounded-lg border transition-colors bg-white border-slate-200 text-slate-700 hover:border-teal-400">
                       <span class="font-serif text-sm block mb-0.5">Georgia (Clásico)</span>
@@ -5927,6 +6992,25 @@ function setupEventListeners() {
                   </div>
 
                   <div>
+                    <label class="block text-xs font-bold text-slate-800 mb-2">Tamaño de títulos de sección</label>
+                    <div class="flex items-center p-1 bg-slate-200/50 rounded-lg">
+                      <button id="ts-sectionSize-small" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Pequeño</button>
+                      <button id="ts-sectionSize-normal" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Normal</button>
+                      <button id="ts-sectionSize-large" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Grande</button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-bold text-slate-800 mb-2">Peso de títulos de sección</label>
+                    <div class="flex items-center p-1 bg-slate-200/50 rounded-lg">
+                      <button id="ts-sectionWeight-normal" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Normal</button>
+                      <button id="ts-sectionWeight-medium" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Medio</button>
+                      <button id="ts-sectionWeight-semibold" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Semi-bold</button>
+                      <button id="ts-sectionWeight-bold" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Bold</button>
+                    </div>
+                  </div>
+
+                  <div>
                     <label class="block text-xs font-bold text-slate-800 mb-2">Tamaño de Párrafos</label>
                     <div class="flex items-center p-1 bg-slate-200/50 rounded-lg">
                       <button id="ts-pSize-small" class="flex-1 py-1 text-xs font-medium rounded-md text-slate-600 hover:bg-slate-200 transition-colors">Pequeño</button>
@@ -5963,9 +7047,11 @@ function setupEventListeners() {
         const valuesByGroup = {
           'ts-titleSize': ['xsmall', 'small', 'normal', 'large'],
           'ts-subtitleSize': ['small', 'normal', 'large'],
+          'ts-sectionSize': ['small', 'normal', 'large'],
           'ts-pSize': ['small', 'normal', 'large'],
           'ts-titleWeight': ['normal', 'medium', 'semibold', 'bold'],
-          'ts-subtitleWeight': ['normal', 'medium', 'semibold', 'bold']
+          'ts-subtitleWeight': ['normal', 'medium', 'semibold', 'bold'],
+          'ts-sectionWeight': ['normal', 'medium', 'semibold', 'bold']
         };
         const values = valuesByGroup[groupPrefix] || ['small', 'normal', 'large'];
 
@@ -6027,21 +7113,23 @@ function setupEventListeners() {
       };
 
       // Set initial states
-      setSegmentedControl('ts-titleSize', articleView.getAttribute('data-text-title-size') || 'xsmall');
-      setSegmentedControl('ts-subtitleSize', articleView.getAttribute('data-text-subtitle-size') || 'small');
-      setSegmentedControl('ts-pSize', articleView.getAttribute('data-text-p-size') || 'normal');
-      setSegmentedControl('ts-titleWeight', articleView.getAttribute('data-text-title-weight') || 'semibold');
-      setSegmentedControl('ts-subtitleWeight', articleView.getAttribute('data-text-subtitle-weight') || 'normal');
+      setSegmentedControl('ts-titleSize', articleView.getAttribute('data-text-title-size'));
+      setSegmentedControl('ts-subtitleSize', articleView.getAttribute('data-text-subtitle-size'));
+      setSegmentedControl('ts-sectionSize', articleView.getAttribute('data-text-section-size') || 'normal');
+      setSegmentedControl('ts-pSize', articleView.getAttribute('data-text-p-size'));
+      setSegmentedControl('ts-titleWeight', articleView.getAttribute('data-text-title-weight'));
+      setSegmentedControl('ts-subtitleWeight', articleView.getAttribute('data-text-subtitle-weight'));
+      setSegmentedControl('ts-sectionWeight', articleView.getAttribute('data-text-section-weight') || 'semibold');
       setFontControl(articleView.getAttribute('data-text-font') || 'sans');
-      setQuoteControl(articleView.getAttribute('data-quote-color') || 'teal');
-      setLineHeightControl(articleView.getAttribute('data-text-line-height') || 'normal');
+      setQuoteControl(articleView.getAttribute('data-quote-color'));
+      setLineHeightControl(articleView.getAttribute('data-text-line-height'));
 
       // Bind events
       const bindOption = (id, attr, val, updateFn, prefix = '') => {
         document.getElementById(id)?.addEventListener('click', () => {
           articleView.setAttribute(attr, val);
-          localStorage.setItem('marcie_textSettings_' + attr, val);
-          persistArticleAppearance(attr, val);
+          try { localStorage.setItem('marcie_textSettings_' + attr, val); } catch { /* La sesión conserva la preferencia aunque el almacenamiento local esté lleno. */ }
+          void persistArticleAppearance(attr, val);
           if (prefix) updateFn(prefix, val);
           else updateFn(val);
         });
@@ -6065,6 +7153,15 @@ function setupEventListeners() {
       bindOption('ts-subtitleWeight-medium', 'data-text-subtitle-weight', 'medium', setSegmentedControl, 'ts-subtitleWeight');
       bindOption('ts-subtitleWeight-semibold', 'data-text-subtitle-weight', 'semibold', setSegmentedControl, 'ts-subtitleWeight');
       bindOption('ts-subtitleWeight-bold', 'data-text-subtitle-weight', 'bold', setSegmentedControl, 'ts-subtitleWeight');
+
+      bindOption('ts-sectionSize-small', 'data-text-section-size', 'small', setSegmentedControl, 'ts-sectionSize');
+      bindOption('ts-sectionSize-normal', 'data-text-section-size', 'normal', setSegmentedControl, 'ts-sectionSize');
+      bindOption('ts-sectionSize-large', 'data-text-section-size', 'large', setSegmentedControl, 'ts-sectionSize');
+
+      bindOption('ts-sectionWeight-normal', 'data-text-section-weight', 'normal', setSegmentedControl, 'ts-sectionWeight');
+      bindOption('ts-sectionWeight-medium', 'data-text-section-weight', 'medium', setSegmentedControl, 'ts-sectionWeight');
+      bindOption('ts-sectionWeight-semibold', 'data-text-section-weight', 'semibold', setSegmentedControl, 'ts-sectionWeight');
+      bindOption('ts-sectionWeight-bold', 'data-text-section-weight', 'bold', setSegmentedControl, 'ts-sectionWeight');
 
       bindOption('ts-pSize-small', 'data-text-p-size', 'small', setSegmentedControl, 'ts-pSize');
       bindOption('ts-pSize-normal', 'data-text-p-size', 'normal', setSegmentedControl, 'ts-pSize');
@@ -6102,6 +7199,51 @@ function setupEventListeners() {
   document.getElementById("btn-publish-wordpress-header")?.addEventListener("click", openWordPressPublicationDialog);
   document.getElementById("opt-publish-wordpress")?.addEventListener("click", openWordPressPublicationDialog);
 
+  // Crear Guión de Video
+  const handleOpenCreateVideoScript = () => {
+    const session = getActiveSession();
+    if (!session) {
+      showToast("Selecciona una sesión editorial para crear el guión de video.", "warning");
+      return;
+    }
+    openCreateVideoScriptModal({
+      session,
+      onGenerated: () => {
+        updateVideoScriptButtonsState(session);
+        renderActiveSession();
+      }
+    });
+  };
+
+  document.getElementById("btn-create-video-script")?.addEventListener("click", handleOpenCreateVideoScript);
+  document.getElementById("opt-create-video-script")?.addEventListener("click", handleOpenCreateVideoScript);
+
+  // Ver Guiones de Video
+  const handleOpenViewVideoScripts = () => {
+    const session = getActiveSession();
+    if (!session) {
+      showToast("Selecciona una sesión editorial para ver los guiones de video.", "warning");
+      return;
+    }
+    openVideoScriptsListModal({
+      session,
+      onNewScript: () => handleOpenCreateVideoScript(),
+      onSelectScript: (script) => {
+        openVideoScriptViewerModal({
+          script,
+          session,
+          onSaveScript: () => {
+            updateVideoScriptButtonsState(session);
+          }
+        });
+      }
+    });
+  };
+
+  document.getElementById("btn-view-video-scripts-grid")?.addEventListener("click", handleOpenViewVideoScripts);
+  document.getElementById("btn-view-video-scripts-header")?.addEventListener("click", handleOpenViewVideoScripts);
+  document.getElementById("opt-view-video-scripts")?.addEventListener("click", handleOpenViewVideoScripts);
+
   // Copiar JSON
   const btnCopyJson = document.getElementById("opt-copy-json");
   if (btnCopyJson) {
@@ -6137,35 +7279,35 @@ function setupEventListeners() {
       const completeArticles = exportEntries.length;
       const completeCovers = exportEntries.filter(({ article }) => Boolean(article?.featuredImage?.url)).length;
       const modal = showModal({
-        title: "Exportar artículos en HTML",
+        title: "Exportar",
         widthClass: "max-w-2xl",
         contentHtml: `
-          <div class="space-y-4">
-            <p class="text-xs leading-relaxed text-slate-500">Elige el contenido que deseas incluir. La descarga será un ZIP con archivos HTML e imágenes optimizadas para web.</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button type="button" data-html-export-scope="current" class="group text-left rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-sm transition-all cursor-pointer">
-                <span class="w-9 h-9 mb-3 grid place-items-center rounded-lg bg-teal-50 text-teal-700 border border-teal-100">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h6"/></svg>
-                </span>
-                <strong class="block text-sm text-slate-900">Exportar artículo actual</strong>
-                <span class="block mt-1 text-[11px] leading-relaxed text-slate-500">Un HTML y la portada del enfoque abierto.</span>
-              </button>
-              <button type="button" data-html-export-scope="all" class="group text-left rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-sm transition-all cursor-pointer">
-                <span class="w-9 h-9 mb-3 grid place-items-center rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-                </span>
-                <strong class="block text-sm text-slate-900">Exportar todos los estilos</strong>
-                <span class="block mt-1 text-[11px] leading-relaxed text-slate-500">Incluye cada variante existente, también las creadas manualmente.</span>
-                <span class="inline-flex mt-3 rounded-full px-2 py-0.5 text-[10px] font-bold ${completeArticles > 0 && completeCovers === completeArticles ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}">${completeArticles} artículo${completeArticles === 1 ? "" : "s"} · ${completeCovers} portada${completeCovers === 1 ? "" : "s"}</span>
-              </button>
-            </div>
+          <div class="space-y-5">
+            <p class="text-sm text-slate-600">${completeArticles} artículo${completeArticles === 1 ? "" : "s"} disponible${completeArticles === 1 ? "" : "s"} · ${completeCovers} portada${completeCovers === 1 ? "" : "s"}</p>
+            ${[["html", "HTML", "Archivos web con imágenes en ZIP", "file-code-2"], ["word", "Word", "Documentos .docx con imágenes y referencias APA 7", "file-text"]].map(([format, label, description, icon]) => `
+              <section class="space-y-3" aria-label="Exportar ${label}">
+                <div class="flex items-start gap-3">
+                  <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700"><i data-lucide="${icon}" class="h-4 w-4"></i></span>
+                  <div><h4 class="text-sm font-semibold text-slate-900">${label}</h4><p class="text-xs text-slate-500">${description}</p></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  ${[["current", "Artículo actual", format === "word" ? "Descargar .docx" : "Descargar ZIP", "file-down"], ["all", "Todos los creados", `${completeArticles} archivo${completeArticles === 1 ? "" : "s"} en ZIP`, "files"]].map(([scope, title, detail, buttonIcon]) => `
+                    <button type="button" data-export-format="${format}" data-export-scope="${scope}" ${completeArticles === 0 ? "disabled" : ""} class="flex min-h-16 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left text-slate-800 transition-colors hover:border-teal-500 hover:bg-teal-50/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:cursor-not-allowed disabled:opacity-50">
+                      <i data-lucide="${buttonIcon}" class="h-4 w-4 shrink-0 text-teal-700"></i>
+                      <span class="min-w-0"><strong class="block text-sm">${title}</strong><small class="block text-xs text-slate-500">${detail}</small></span>
+                    </button>
+                  `).join("")}
+                </div>
+              </section>
+            `).join("")}
           </div>
         `
       });
-
-      modal.element.querySelectorAll("[data-html-export-scope]").forEach((option) => {
+      window.lucide?.createIcons?.();
+      modal.element.querySelectorAll("[data-export-format]").forEach((option) => {
         option.addEventListener("click", async () => {
-          const scope = option.getAttribute("data-html-export-scope");
+          const scope = option.getAttribute("data-export-scope");
+          const format = option.getAttribute("data-export-format");
           const entries = scope === "all"
             ? exportEntries
             : [{
@@ -6174,18 +7316,21 @@ function setupEventListeners() {
                 label: "Artículo actual",
                 article: session.article
               }];
+          const buttons = [...modal.element.querySelectorAll("[data-export-format]")];
           const originalHtml = option.innerHTML;
-          modal.element.querySelectorAll("[data-html-export-scope]").forEach((button) => { button.disabled = true; });
-          option.innerHTML = `<span class="min-h-[108px] flex items-center justify-center gap-2 text-sm font-semibold text-teal-700"><span class="w-4 h-4 rounded-full border-2 border-teal-200 border-t-teal-700 animate-spin"></span> Preparando ZIP...</span>`;
+          buttons.forEach((button) => { button.disabled = true; });
+          option.innerHTML = `<span class="flex items-center gap-2 text-sm font-semibold text-teal-700"><span class="h-4 w-4 rounded-full border-2 border-teal-200 border-t-teal-700 animate-spin"></span> Preparando ${format === "word" ? "Word" : "HTML"}...</span>`;
           try {
-            await exportArticlesAsZip(session, entries);
+            if (format === "word") await exportArticlesAsWord(session, entries, { bundle: scope === "all" });
+            else await exportArticlesAsZip(session, entries);
             modal.close();
-            showToast(scope === "all" ? `ZIP exportado con ${entries.length} estilo${entries.length === 1 ? "" : "s"}` : "ZIP del artículo exportado", "success");
+            showToast(scope === "all" ? `${entries.length} artículos exportados en ${format === "word" ? "Word" : "HTML"}` : `Artículo exportado en ${format === "word" ? "Word" : "HTML"}`, "success");
           } catch (error) {
-            console.error("[MarcieBlogEditor] Error al exportar HTML en ZIP:", error);
+            console.error("[MarcieBlogEditor] Error al exportar:", error);
             showToast(`No se pudo exportar: ${error.message}`, "error");
             option.innerHTML = originalHtml;
-            modal.element.querySelectorAll("[data-html-export-scope]").forEach((button) => { button.disabled = false; });
+            buttons.forEach((button) => { button.disabled = completeArticles === 0; });
+            window.lucide?.createIcons?.();
           }
         });
       });
@@ -6305,8 +7450,8 @@ function setupEventListeners() {
       // Ajustar posición tomando en cuenta el contenedor relativo (ahora está en center-panel)
       const centerPanel = dom.articleView.parentElement;
       const panelRect = centerPanel.getBoundingClientRect();
-      inlineToolbar.style.top = `${rect.top - panelRect.top - 8}px`;
-      inlineToolbar.style.left = `${rect.left - panelRect.left + (rect.width / 2)}px`;
+      inlineToolbar.getAnimations().forEach((animation) => animation.cancel());
+      inlineToolbar.animate([{ transform: `translate3d(${rect.left - panelRect.left + (rect.width / 2)}px, ${rect.top - panelRect.top - 8}px, 0) translateX(-50%)` }], { duration: 1, fill: "forwards" });
 
       inlineToolbar.classList.remove("hidden");
       // Pequeño delay para la transición de opacidad
@@ -6320,6 +7465,12 @@ function setupEventListeners() {
 
     // Funciones de formato al hacer click en los botones
     const applyFormat = (command, value = null) => {
+      if (command === "formatBlock") {
+        const template = document.createElement("template");
+        template.innerHTML = renderBlockContent({ type: value === "P" ? "paragraph" : "heading", level: value.toLowerCase(), text: "" });
+        formatSelectedArticleBlocks(dom.articleBodyContainer, value, template.content.firstElementChild.className);
+        return;
+      }
       document.execCommand(command, false, value);
 
       const target = document.activeElement;
@@ -6329,6 +7480,7 @@ function setupEventListeners() {
     document.getElementById("it-bold")?.addEventListener("click", () => applyFormat("bold"));
     document.getElementById("it-italic")?.addEventListener("click", () => applyFormat("italic"));
     document.getElementById("it-underline")?.addEventListener("click", () => applyFormat("underline"));
+    document.getElementById("it-paragraph")?.addEventListener("click", () => applyFormat("formatBlock", "P"));
     document.getElementById("it-h2")?.addEventListener("click", () => applyFormat("formatBlock", "H2"));
     document.getElementById("it-h3")?.addEventListener("click", () => applyFormat("formatBlock", "H3"));
 
@@ -6363,8 +7515,8 @@ function setupEventListeners() {
           const centerPanel = dom.articleView.parentElement;
           const panelRect = centerPanel.getBoundingClientRect();
 
-          blockAiToolbar.style.top = `${rect.top - panelRect.top - 14}px`;
-          blockAiToolbar.style.right = `20px`; // Fijar a la derecha del contenedor
+          blockAiToolbar.getAnimations().forEach((animation) => animation.cancel());
+          blockAiToolbar.animate([{ transform: `translateY(${rect.top - panelRect.top - 14}px)` }], { duration: 1, fill: "forwards" });
           blockAiToolbar.classList.remove("hidden");
         }
       });
@@ -6404,10 +7556,27 @@ function escapeHtml(str = "") {
     .replace(/'/g, "&#039;");
 }
 
+function clampPercent(value, fallback = 0) {
+  if (value === null && fallback === null) return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(numeric * 100) / 100));
+}
+
+function getSafeImageUrl(value = "") {
+  const clean = String(value || "").trim();
+  if (clean.startsWith("/")) return clean;
+  if (/^data:image\/(?:png|gif|jpe?g|webp);base64,[a-z0-9+/=]+$/i.test(clean)) return clean;
+  try {
+    return new URL(clean, window.location.origin).protocol === "https:" ? clean : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 // Inicialización de la aplicación
 export async function initApp() {
   initMarcieUiTheme();
-  console.log(`[MarcieBlogEditor] Verificando acceso de usuario aprobado...`);
   setSyncStatus("Verificando acceso...");
 
   // 1. Auth Guard: Verificar que el usuario esté autenticado y aprobado
@@ -6420,8 +7589,10 @@ export async function initApp() {
   appState.currentUser = user;
 
   marcieAgentPanel = initMarcieAgentPanel({
+    userId: user.uid,
     getActiveSession: () => getActiveSession(),
     onCreateSession: (request, agentRunId) => createEditorialSessionFromModal({ requestOverride: request, agentRunId }),
+    onReconfigureSession: (sessionId, request) => reconfigureSession(appState.sessions.find(item => item.id === sessionId), { requestOverride: request }),
     onNewSessionRequest: async () => {
       const creationMode = await showSessionCreationChoiceModal();
       if (creationMode === "manual") return createEditorialSessionFromModal({ allowBlankSession: true });
@@ -6485,12 +7656,12 @@ export async function initApp() {
     button.disabled = true;
     button.textContent = "Reintentando…";
     try {
-      await runAutomaticEvidenceVerification(session, { notify: true });
+      await runAutomaticEvidenceVerification(session, { notify: true, additionalSearches: 0, autoRepair: true });
     } catch (error) {
       showToast(`No fue posible verificar: ${error.message}`, "error");
     } finally {
       button.disabled = false;
-      button.textContent = "Reintentar";
+      button.textContent = "Reintentar comprobación";
     }
   });
 
@@ -6579,10 +7750,17 @@ export async function initApp() {
     }
   });
 
+  let automationRecoveryHandled = false;
   // 6. Escuchar sesiones de Firestore en tiempo real filtradas por ownerId
   subscribeToMarcieSessions(
     (sessions) => {
       appState.sessions = sessions;
+      sessions.forEach((session) => {
+        if (session.automation?.status === "cancelled") return;
+        Object.entries(session.articlesByAudience || {}).forEach(([audienceId, article]) => {
+          if (article?.verification?.retryPending) schedulePendingVerification(session.id, audienceId, 15_000);
+        });
+      });
       setSyncStatus("🟢 Firebase conectado");
 
       if (!appState.activeSessionId && sessions.length > 0) {
@@ -6592,6 +7770,33 @@ export async function initApp() {
       renderSessionList();
       const editing = document.activeElement?.isContentEditable || dom.seoView?.contains(document.activeElement);
       if (!editing) renderActiveSession();
+      if (!automationRecoveryHandled) {
+        const key = automationRecoveryKey();
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) { if (key) localStorage.removeItem(key); }
+        let recover = sessions.find((item) => item.id === saved?.sessionId);
+        if (!recover && saved?.sessionId) {
+          // No reconstruir una sesión desde una copia potencialmente truncada:
+          // Firestore es la fuente de verdad y el marcador se conserva hasta que
+          // la sesión vuelva a aparecer en la suscripción.
+          removeAutomationRecoverySnapshot(key);
+        }
+        if (recover) {
+          automationRecoveryHandled = true;
+          if (automationCancellations.has(recover.id)) return;
+          if (["running", "queued", "failed", "retrying"].includes(recover.automation?.status)) {
+            appState.activeSessionId = recover.id;
+            renderSessionList();
+            renderActiveSession();
+            showAutomatedSessionProgress(recover);
+            if (["running", "queued", "failed", "retrying"].includes(recover.automation.status)) {
+              void runAutomatedSessionWorkflow(recover, recover.sessionConfiguration?.specifications || recover.specifications || []).catch((error) => {
+                if (error?.name !== "AbortError") console.warn("[MarcieAutomation] No se pudo recuperar la producción:", error);
+              });
+            }
+          } else forgetAutomation(recover);
+        }
+      }
     },
     (err) => {
       console.warn("[MarcieBlogEditor] Error en tiempo real:", err);

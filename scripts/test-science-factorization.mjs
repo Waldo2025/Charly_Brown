@@ -60,7 +60,8 @@ test("Factorización usa un perfil dedicado y conserva el estado serializable", 
   assert.equal(profile.simulatorProfile.modelId, "quadratic-factorization-rectangle");
   assert.equal(profile.simulatorProfile.objective.dynamicTarget, "factorizationProgress");
   assert.deepEqual(profile.simulatorProfile.controls.map(({ id }) => id), ["factorMode", "commonFactor", "factorP", "factorQ", "factorR", "factorS"]);
-  assert.equal(polynomialProfile.simulatorProfile.modelId, "math", "Los demás temas algebraicos deben conservar el modelo genérico");
+  assert.equal(polynomialProfile.simulatorProfile.modelId, "math-polynomial", "Polinomios debe conservar su modelo cuadrático dedicado, independiente de la caja de factorización");
+  assert.deepEqual(polynomialProfile.simulatorProfile.controls.map(({ id }) => id), ["a", "b", "c", "x"]);
   const activity = applyCurriculumProfile({ simulator: {} }, profile);
   assert.equal(activity.simulator.objectiveEnabled, true);
   assert.equal(activity.simulator.objectiveTargetMetric, "factorizationProgress");

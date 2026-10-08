@@ -1,0 +1,470 @@
+{
+  "period": {
+    "start": "2026-09-01T05:00:00.000Z",
+    "end": "2026-09-30T16:28:50.340Z",
+    "timezone": "America/Cancun"
+  },
+  "videoDays": [
+    "2026-09-02",
+    "2026-09-10",
+    "2026-09-11",
+    "2026-09-14",
+    "2026-09-15",
+    "2026-09-17",
+    "2026-09-18",
+    "2026-09-21",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30"
+  ],
+  "rows": [
+    {
+      "id": "session_3gp8dair",
+      "title": "La entrevista Español 1 bloque 2",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-02T13:28:36.687Z",
+      "firstVideoAt": "2026-09-02T13:43:03.327Z",
+      "lastVideoAt": "2026-09-11T20:31:26.868Z",
+      "lastAudioAt": "2026-09-11T21:57:54.082Z",
+      "readyVideos": 20,
+      "readyAudio": 39,
+      "activeVideoDays": [
+        "2026-09-02",
+        "2026-09-10",
+        "2026-09-11"
+      ],
+      "activeVideoDayCount": 3,
+      "calendarDaysToLastVideo": 10,
+      "sessionUpdatedAt": "2026-09-14T14:21:23.952Z"
+    },
+    {
+      "id": "session_3fj393qy",
+      "title": "La narrativa contemporánea, Español 2, Bloque 2, Tema 1",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-14T14:05:23.449Z",
+      "firstVideoAt": "2026-09-14T14:11:35.645Z",
+      "lastVideoAt": "2026-09-15T17:48:56.278Z",
+      "lastAudioAt": "2026-09-15T18:36:25.161Z",
+      "readyVideos": 13,
+      "readyAudio": 43,
+      "activeVideoDays": [
+        "2026-09-14",
+        "2026-09-15"
+      ],
+      "activeVideoDayCount": 2,
+      "calendarDaysToLastVideo": 2,
+      "sessionUpdatedAt": "2026-09-21T15:08:04.016Z"
+    },
+    {
+      "id": "session_fr49vh6w",
+      "title": "La monografía Español 1 Tema 2",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-14T17:53:14.855Z",
+      "firstVideoAt": "2026-09-17T13:36:14.970Z",
+      "lastVideoAt": "2026-09-17T15:06:17.558Z",
+      "lastAudioAt": "2026-09-17T15:18:47.665Z",
+      "readyVideos": 18,
+      "readyAudio": 36,
+      "activeVideoDays": [
+        "2026-09-17"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 4,
+      "sessionUpdatedAt": "2026-09-21T14:08:03.720Z"
+    },
+    {
+      "id": "session_uml4sxmu",
+      "title": "La narrativa contemporánea experimenta con",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-14T17:55:58.989Z",
+      "firstVideoAt": "2026-09-14T18:04:18.273Z",
+      "lastVideoAt": "2026-09-14T18:04:18.273Z",
+      "lastAudioAt": "2026-09-14T18:05:14.139Z",
+      "readyVideos": 1,
+      "readyAudio": 1,
+      "activeVideoDays": [
+        "2026-09-14"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-14T18:05:13.956Z"
+    },
+    {
+      "id": "session_if4k1pmr",
+      "title": "leer, analizar, escribir y compartir textos narrativos Español 1 Tema 3",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-17T15:20:25.551Z",
+      "firstVideoAt": "2026-09-18T17:53:23.072Z",
+      "lastVideoAt": "2026-09-18T19:22:31.218Z",
+      "lastAudioAt": "2026-09-21T14:01:23.862Z",
+      "readyVideos": 23,
+      "readyAudio": 39,
+      "activeVideoDays": [
+        "2026-09-18"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 2,
+      "sessionUpdatedAt": "2026-09-21T14:05:16.161Z"
+    },
+    {
+      "id": "session_uba5k0ip",
+      "title": "La historieta como forma narrativa, Español 2",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-17T17:00:30.180Z",
+      "firstVideoAt": "2026-09-17T17:12:08.176Z",
+      "lastVideoAt": "2026-09-17T17:40:41.593Z",
+      "lastAudioAt": "2026-09-17T18:03:03.757Z",
+      "readyVideos": 10,
+      "readyAudio": 15,
+      "activeVideoDays": [
+        "2026-09-17"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-21T15:09:53.654Z"
+    },
+    {
+      "id": "session_lkzeji8d",
+      "title": "Analizar canciones como textos líricos y productos culturales",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-18T16:06:36.450Z",
+      "firstVideoAt": "2026-09-18T16:19:38.252Z",
+      "lastVideoAt": "2026-09-18T17:28:25.876Z",
+      "lastAudioAt": "2026-09-18T17:38:23.115Z",
+      "readyVideos": 18,
+      "readyAudio": 32,
+      "activeVideoDays": [
+        "2026-09-18"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-21T15:10:37.438Z"
+    },
+    {
+      "id": "session_mky7z3p5",
+      "title": "creación y lectura en voz alta de poemas Español 1 Tema 4",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-18T19:29:53.226Z",
+      "firstVideoAt": "2026-09-21T14:16:57.643Z",
+      "lastVideoAt": "2026-09-21T17:40:13.981Z",
+      "lastAudioAt": "2026-09-21T18:03:53.881Z",
+      "readyVideos": 16,
+      "readyAudio": 38,
+      "activeVideoDays": [
+        "2026-09-21"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 4,
+      "sessionUpdatedAt": "2026-09-21T18:07:50.562Z"
+    },
+    {
+      "id": "session_ys3mrk9v",
+      "title": "La lectura dramatizada de una obra de teatro",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-21T15:19:25.686Z",
+      "firstVideoAt": "2026-09-21T15:53:23.906Z",
+      "lastVideoAt": "2026-09-21T17:38:22.069Z",
+      "lastAudioAt": "2026-09-21T17:44:28.832Z",
+      "readyVideos": 13,
+      "readyAudio": 32,
+      "activeVideoDays": [
+        "2026-09-21"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-21T18:21:43.418Z"
+    },
+    {
+      "id": "session_lfiu63j4",
+      "title": "Analizar manifestaciones poéticas dentro de un movimiento literario",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-21T18:22:36.667Z",
+      "firstVideoAt": "2026-09-21T18:33:20.628Z",
+      "lastVideoAt": "2026-09-21T19:22:07.134Z",
+      "lastAudioAt": "2026-09-21T19:25:07.020Z",
+      "readyVideos": 15,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-21"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-22T17:06:30.371Z"
+    },
+    {
+      "id": "session_7xj1taha",
+      "title": "Las obras literarias del Renacimiento",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-22T17:07:44.800Z",
+      "firstVideoAt": "2026-09-22T17:14:58.601Z",
+      "lastVideoAt": "2026-09-22T17:58:54.304Z",
+      "lastAudioAt": "2026-09-22T18:02:27.847Z",
+      "readyVideos": 11,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-22"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-22T18:05:49.237Z"
+    },
+    {
+      "id": "session_lhe58bi9",
+      "title": "Comprender la función de los textos introductorios",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-22T18:35:36.320Z",
+      "firstVideoAt": "2026-09-22T18:42:06.745Z",
+      "lastVideoAt": "2026-09-22T19:25:23.571Z",
+      "lastAudioAt": "2026-09-22T19:27:43.930Z",
+      "readyVideos": 12,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-22"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-22T19:30:31.879Z"
+    },
+    {
+      "id": "session_id3xuppb",
+      "title": "Panel de discusión: argumentar para comprender",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-22T19:31:13.113Z",
+      "firstVideoAt": "2026-09-22T19:39:44.882Z",
+      "lastVideoAt": "2026-09-22T20:29:38.301Z",
+      "lastAudioAt": "2026-09-22T20:31:50.451Z",
+      "readyVideos": 16,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-22"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-23T17:31:10.962Z"
+    },
+    {
+      "id": "session_ruumx9sg",
+      "title": "Funciones: relaciones que cambian",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-23T17:36:59.198Z",
+      "firstVideoAt": "2026-09-23T17:43:53.555Z",
+      "lastVideoAt": "2026-09-23T18:13:59.448Z",
+      "lastAudioAt": "2026-09-23T18:17:05.286Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-23"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-23T18:19:31.748Z"
+    },
+    {
+      "id": "session_ajc35j2v",
+      "title": "Comprender y calcular la probabilidad de eventos aleatorios",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-24T17:44:45.113Z",
+      "firstVideoAt": "2026-09-24T17:52:07.628Z",
+      "lastVideoAt": "2026-09-28T16:05:19.741Z",
+      "lastAudioAt": "2026-09-28T16:12:55.899Z",
+      "readyVideos": 12,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-24",
+        "2026-09-25",
+        "2026-09-28"
+      ],
+      "activeVideoDayCount": 3,
+      "calendarDaysToLastVideo": 5,
+      "sessionUpdatedAt": "2026-09-28T17:38:19.360Z"
+    },
+    {
+      "id": "session_g86a2ez7",
+      "title": "Sucesiones y expresiones equivalentes: descubre el patrón",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-24T18:05:26.304Z",
+      "firstVideoAt": "2026-09-24T18:10:18.123Z",
+      "lastVideoAt": "2026-09-24T18:49:28.322Z",
+      "lastAudioAt": "2026-09-24T18:51:36.926Z",
+      "readyVideos": 12,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-24"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-24T18:52:45.635Z"
+    },
+    {
+      "id": "session_0k1k0dv1",
+      "title": "Porcentajes y proporciones: relaciones que están en todas partes",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-25T16:21:11.403Z",
+      "firstVideoAt": "2026-09-25T16:30:10.774Z",
+      "lastVideoAt": "2026-09-25T16:52:12.801Z",
+      "lastAudioAt": "2026-09-25T16:54:38.389Z",
+      "readyVideos": 12,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-25"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-25T16:58:09.975Z"
+    },
+    {
+      "id": "session_x6zple76",
+      "title": "Polígonos: formas, ángulos y estructuras",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-28T15:15:46.269Z",
+      "firstVideoAt": "2026-09-28T15:20:26.683Z",
+      "lastVideoAt": "2026-09-28T15:37:34.092Z",
+      "lastAudioAt": "2026-09-28T15:39:47.327Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-28"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-28T15:48:56.406Z"
+    },
+    {
+      "id": "session_967o3z99",
+      "title": "Pendiente y razón de cambio: cómo cambia una recta",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-28T15:50:10.736Z",
+      "firstVideoAt": "2026-09-28T15:57:54.407Z",
+      "lastVideoAt": "2026-09-28T16:15:48.144Z",
+      "lastAudioAt": "2026-09-28T16:17:47.353Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-28"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-28T16:25:51.685Z"
+    },
+    {
+      "id": "session_k6s1v6lb",
+      "title": "Sistemas de ecuaciones: modelar para resolver",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-28T16:26:52.019Z",
+      "firstVideoAt": "2026-09-28T16:32:24.402Z",
+      "lastVideoAt": "2026-09-28T16:49:00.364Z",
+      "lastAudioAt": "2026-09-28T16:51:26.911Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-28"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-28T16:55:11.507Z"
+    },
+    {
+      "id": "session_3qy0o5a6",
+      "title": "Ecuaciones cuadráticas: modelar para encontrar soluciones",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-29T16:20:12.640Z",
+      "firstVideoAt": "2026-09-29T16:24:41.356Z",
+      "lastVideoAt": "2026-09-29T16:44:48.547Z",
+      "lastAudioAt": "2026-09-29T16:57:35.895Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-29"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-29T17:02:07.476Z"
+    },
+    {
+      "id": "session_cm186i38",
+      "title": "Ecuaciones cuadráticas: de la parábola a la solución",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-29T17:04:12.671Z",
+      "firstVideoAt": "2026-09-29T17:09:20.926Z",
+      "lastVideoAt": "2026-09-29T17:28:29.459Z",
+      "lastAudioAt": "2026-09-29T17:31:58.193Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-29"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-29T17:35:13.546Z"
+    },
+    {
+      "id": "session_zw9r60sw",
+      "title": "Parábolas: del modelo a la gráfica",
+      "user": "rmora@asc.education",
+      "createdAt": "2026-09-29T17:38:34.338Z",
+      "firstVideoAt": "2026-09-29T17:48:03.071Z",
+      "lastVideoAt": "2026-09-29T18:07:04.519Z",
+      "lastAudioAt": "2026-09-29T18:09:28.531Z",
+      "readyVideos": 10,
+      "readyAudio": 12,
+      "activeVideoDays": [
+        "2026-09-29"
+      ],
+      "activeVideoDayCount": 1,
+      "calendarDaysToLastVideo": 1,
+      "sessionUpdatedAt": "2026-09-29T18:14:14.170Z"
+    },
+    {
+      "id": "session_dgcv8avs",
+      "title": "¡Mira a tu alrededor! Podemos",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-29T18:24:21.262Z",
+      "firstVideoAt": "2026-09-29T22:26:15.787Z",
+      "lastVideoAt": "2026-09-30T15:24:47.543Z",
+      "lastAudioAt": "2026-09-29T19:20:00.204Z",
+      "readyVideos": 20,
+      "readyAudio": 14,
+      "activeVideoDays": [
+        "2026-09-29",
+        "2026-09-30"
+      ],
+      "activeVideoDayCount": 2,
+      "calendarDaysToLastVideo": 2,
+      "sessionUpdatedAt": "2026-09-30T15:49:59.486Z"
+    },
+    {
+      "id": "hLYPCxeqPj0m0wJkakNS",
+      "title": "Nueva sesión",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-30T02:46:13.556Z",
+      "firstVideoAt": "",
+      "lastVideoAt": "",
+      "lastAudioAt": "",
+      "readyVideos": 0,
+      "readyAudio": 0,
+      "activeVideoDays": [],
+      "activeVideoDayCount": 0,
+      "calendarDaysToLastVideo": null,
+      "sessionUpdatedAt": "2026-09-30T02:46:13.556Z"
+    },
+    {
+      "id": "v8Kl45ENB4xhaPZdN08P",
+      "title": "Nueva sesión",
+      "user": "wlopez@asc.education",
+      "createdAt": "2026-09-30T02:48:44.359Z",
+      "firstVideoAt": "",
+      "lastVideoAt": "",
+      "lastAudioAt": "",
+      "readyVideos": 0,
+      "readyAudio": 0,
+      "activeVideoDays": [],
+      "activeVideoDayCount": 0,
+      "calendarDaysToLastVideo": null,
+      "sessionUpdatedAt": "2026-09-30T02:48:44.359Z"
+    }
+  ]
+}

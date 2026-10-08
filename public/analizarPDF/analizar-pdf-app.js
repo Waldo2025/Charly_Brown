@@ -3427,7 +3427,7 @@ async function queueUploadForSession(session = null, sessionId = "", file = null
   });
   return {
     ...uploadState,
-    response: await queueAnalizarPdfUpload(sessionId, file, uploadState.sourceType, fileContext)
+    response: await queueAnalizarPdfUpload(sessionId, file, uploadState.sourceType, { ...fileContext, localSession: { indexConfig: session?.indexConfig || {} } })
   };
 }
 
@@ -8921,7 +8921,7 @@ async function startPolling(jobId = "", context = {}) {
           action: context?.action || "Analizando",
           index: context?.index || 0,
           total: context?.total || 0,
-          step: getPollingStageLabel(payload?.status || ""),
+          step: payload?.progress?.phase==='upload' ? `Guardando PDF para el servidor: ${Math.round(payload.progress.uploaded/payload.progress.total*100)} %` : payload?.progress ? `Páginas ${payload.progress.completed}/${payload.progress.pageCount}` : getPollingStageLabel(payload?.status || ""),
         }));
         logAnalizarPdfFlow("startPolling:tick", {
           jobId: cleanJobId,

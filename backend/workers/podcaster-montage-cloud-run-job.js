@@ -4,6 +4,13 @@ process.env.BACKEND_SERVICE_ROLE = process.env.BACKEND_SERVICE_ROLE || "export";
 process.env.FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "charly-brown";
 process.env.FIREBASE_STORAGE_BUCKET = process.env.FIREBASE_STORAGE_BUCKET || "charly-brown.firebasestorage.app";
 
+const activeJobId = String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim();
+console.info("[cloud-run-job][montage-export] container_entrypoint", {
+  jobId: activeJobId,
+  taskIndex: String(process.env.CLOUD_RUN_TASK_INDEX || "0"),
+  execution: String(process.env.CLOUD_RUN_EXECUTION || "")
+});
+
 const {
   montageExportJobStore,
   db,
@@ -14,7 +21,6 @@ const {
 const { createProcessMontageExportJob } = require("../montage-export/worker-runner.js");
 const admin = require("firebase-admin");
 
-const activeJobId = String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim();
 let terminationPromise = null;
 
 async function releaseMontageSlot(jobId) {
@@ -71,8 +77,19 @@ process.once("SIGINT", () => { void markInterruptedAndExit("SIGINT"); });
 async function main() {
   const jobId = activeJobId;
   if (!jobId) throw new Error("montage_job_id_required");
+  console.info("[cloud-run-job][montage-export] runtime_ready", {
+    jobId,
+    taskIndex: String(process.env.CLOUD_RUN_TASK_INDEX || "0"),
+    execution: String(process.env.CLOUD_RUN_EXECUTION || "")
+  });
   const storedJob = await montageExportJobStore.getJob(jobId);
   if (!storedJob) throw new Error("montage_job_not_found");
+  await montageExportJobStore.updateJob(jobId, {
+    status: "running",
+    stage: "worker_booting",
+    hint: "El worker de Cloud Run inició y está preparando los datos de la exportación.",
+    heartbeatAt: new Date().toISOString()
+  });
   const processor = createProcessMontageExportJob({
     jobStore: montageExportJobStore,
     executeMontageExportPipeline,

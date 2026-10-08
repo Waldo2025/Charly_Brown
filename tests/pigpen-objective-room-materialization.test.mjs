@@ -5,7 +5,7 @@ import test from "node:test";
 const source = await readFile(new URL("../public/js/PigPenCreator.js", import.meta.url), "utf8");
 
 test("el objetivo final materializa y conserva cada sala completa", () => {
-  assert.match(source, /const OBJECTIVE_ROOM_GENERATION_CONTRACT_VERSION = 1;/);
+  assert.match(source, /const OBJECTIVE_ROOM_GENERATION_CONTRACT_VERSION = 3;/);
   assert.match(source, /const mission = await requestGeneratedRoomBundle\(materializationContext, roomIndex,/);
   assert.match(source, /setObjectiveGeneratedRoom\(foundation, roomIndex, mission, materializationContext, roomInteractionPlan\)/);
   assert.match(source, /generated_room: normalizeObjectiveGeneratedRoom\(room, index\)/);
@@ -30,8 +30,8 @@ test("el fallback persiste solamente la sala recuperada para reutilizarla", () =
   assert.match(generationFlow, /persistObjectiveBlueprint\(state\.objectiveBlueprintKey, state\.objectiveBlueprint\)/);
 });
 
-test("la compatibilidad invalida materializaciones con contrato, cantidad o interacciones distintas", () => {
-  assert.match(source, /generated\.meta\.contractVersion !== OBJECTIVE_ROOM_GENERATION_CONTRACT_VERSION/);
+test("la compatibilidad migra contratos anteriores y rechaza cantidad o interacciones distintas", () => {
+  assert.match(source, /const declaredMeta = room\?\.generated_room\?\.meta \|\| \{\};/);
   assert.match(source, /generated\.meta\.questionCount !== expectedQuestionCount/);
   assert.match(source, /JSON\.stringify\(generated\.meta\.interactions\) !== JSON\.stringify\(expectedInteractions\)/);
   assert.match(source, /actualQuestions\.length !== expectedQuestionCount/);

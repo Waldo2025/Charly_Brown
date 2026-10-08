@@ -1,0 +1,50 @@
+{
+  "period": {
+    "start": "2026-09-01T05:00:00.000Z",
+    "end": "2026-09-30T16:28:50.340Z"
+  },
+  "collections": {
+    "lecturasASC": {
+      "allDocuments": 167,
+      "septemberRows": [
+        {
+          "id": "wCo22Yavam558iY6IeRi",
+          "title": "La gota que encontró su camino",
+          "createdAt": "2026-09-18T18:49:21.225Z",
+          "user": "mserrano@asc.education",
+          "hasText": true,
+          "grade": "3",
+          "level": "Primaria",
+          "trim": "3"
+        }
+      ]
+    },
+    "lecturasNuevas": {
+      "allDocuments": 75,
+      "septemberRows": [
+        {
+          "id": "sRvkYrq1jVk17mA2J8TI",
+          "title": "El secreto de los delfines en altamar",
+          "createdAt": "2026-09-14T18:08:55.339Z",
+          "user": "wlopez@asc.education",
+          "hasText": true,
+          "grade": "Tercero",
+          "level": "Primaria",
+          "trim": "2"
+        }
+      ]
+    },
+    "lecturas": {
+      "allDocuments": 0,
+      "septemberRows": []
+    },
+    "analisisLecturas": {
+      "allDocuments": 3,
+      "septemberRows": []
+    },
+    "conversacionIA": {
+      "allDocuments": 6,
+      "septemberRows": []
+    }
+  }
+}

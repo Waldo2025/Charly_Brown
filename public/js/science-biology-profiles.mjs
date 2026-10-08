@@ -56,6 +56,17 @@ export function applyBiologySimulatorProfile(topic, baseProfile) {
   if (!configured) throw new Error(`Falta simulador biológico curado para: ${topic}`);
   baseProfile.profileVersion = BIOLOGY_PROFILE_VERSION;
   baseProfile.simulatorProfile = structuredClone(configured);
+  const quantitative = ["Nutrición", "Sistema respiratorio", "Sistema circulatorio", "Herencia", "Transformación de la energía en los ecosistemas", "Cadenas alimentarias"].includes(topic);
+  baseProfile.simulatorProfile.modelFidelity = quantitative ? "ideal" : "illustrative";
+  baseProfile.simulatorProfile.modelAssumptions = topic === "Herencia" ? "Un locus, dos alelos y dominancia completa; los conteos son valores esperados, no una muestra aleatoria."
+    : quantitative ? "Modelo ideal con las variables indicadas; los balances derivados muestran las hipótesis simplificadas." : "Modelo didáctico cualitativo; índices y tasas relativas no predicen valores biológicos experimentales. Las fases de división usan controles simplificados de replicación, separación y revisión.";
+  if(topic === "Bacterias") baseProfile.simulatorProfile.formula = "índice = nutrientes·óptimo térmico − antibiótico·(1−resistencia/100)";
+  if(topic === "Ecosistemas") baseProfile.simulatorProfile.formula = "índice didáctico = recursos − desequilibrio − perturbación";
+  if(topic === "Evolución") baseProfile.simulatorProfile.formula = "Δf=(selección+migración)·generaciones/20; sin deriva aleatoria";
+  if(topic === "Mitosis") baseProfile.simulatorProfile.objective.targets.find(target => target.metric === "checkpoint").operator = "gte";
+  if(/al menos|por debajo|menos de/.test(configured.objective.label)) {
+    baseProfile.simulatorProfile.objective.targets[0].operator = /al menos/.test(configured.objective.label) ? "gte" : "lte";
+  }
   baseProfile.gameProfile.learningObjective = `Comprender ${topic}: ${configured.explanation}`;
   baseProfile.gameProfile.evidence = `La evidencia debe derivarse del modelo biológico ${configured.modelId}/${configured.sceneVariant}.`;
   return baseProfile;

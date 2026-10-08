@@ -6046,3 +6046,86 @@ html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .scien
 .science-structured-game.is-timeline-order{container-name:science-timeline-question;container-type:inline-size;height:auto!important;min-height:100%!important;max-height:none!important;margin-top:0!important;display:flex!important;flex-direction:column!important;align-content:normal!important;overflow:visible!important}.science-structured-game.is-timeline-order>header{margin-top:0!important}.science-structured-game.is-timeline-order .science-structured-board{order:3;height:auto!important;min-height:0!important;max-height:none!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;align-content:normal!important;gap:clamp(16px,2.5cqi,24px)!important;overflow:visible!important;contain:none!important}.science-structured-game.is-timeline-order .science-timeline{order:1;min-height:0!important}.science-structured-game.is-timeline-order :is(.science-token-bank-label,.science-timeline-bank-title){order:2;margin:0!important}.science-structured-game.is-timeline-order .science-timeline-bank{order:3}.science-structured-game.is-timeline-order .science-timeline-track{min-height:0!important;height:auto!important;padding:14px 18px 24px!important;align-items:start!important;overflow-x:auto!important;overflow-y:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{top:45px!important;transform:none!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:150px!important;min-height:0!important;height:auto!important;padding:0 0 8px!important;display:grid!important;grid-template-rows:62px minmax(0,auto) auto!important;align-content:start!important;gap:10px!important;overflow:visible!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:relative!important;inset:auto!important;grid-row:1!important;align-self:center!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;width:100%!important;min-height:150px!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:50%!important;top:-8px!important;bottom:auto!important;transform:translateX(-50%) rotate(225deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{position:relative!important;inset:auto!important;grid-row:3!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order>footer{order:4;position:relative!important;inset:auto!important;z-index:1!important;width:100%!important;margin:0!important;padding:0!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;background:transparent!important;box-shadow:none!important;transform:none!important}.science-structured-game.is-timeline-order>footer>button{width:100%!important;min-width:0!important}
 @container science-timeline-question (max-width:760px){.science-timeline>header{align-items:flex-start!important;flex-direction:column!important}.science-structured-game.is-timeline-order .science-timeline-track{padding:12px 0 12px 48px!important;grid-template-columns:1fr!important;gap:18px!important;overflow:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{left:17px!important;right:auto!important;top:20px!important;bottom:20px!important;width:5px!important;height:auto!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:0!important;grid-template-rows:auto auto!important;gap:8px!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;left:-31px!important;top:50%!important;transform:translateY(-50%)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{grid-row:1!important;min-height:0!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:-8px!important;top:50%!important;transform:translateY(-50%) rotate(135deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{grid-row:2!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:1!important;align-self:center!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-bank{grid-template-columns:1fr!important}}
 @container science-timeline-question (max-width:480px){.science-structured-game.is-timeline-order>footer{grid-template-columns:1fr!important}}
+
+/* Shared by editor previews and offline scientific simulator packages. */
+.science-sim-objective[hidden] { display: none !important; }
+.science-sim-controls .science-sim-select {
+  width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--sim-line);
+  border-radius: 10px; background: var(--sim-panel); color: var(--sim-text); font: inherit;
+}
+.science-sim-controls .science-sim-select:focus-visible { outline: 2px solid var(--sim-accent); outline-offset: 2px; }
+.science-sim-telemetry > [data-model-assumptions] {
+  margin-top: 12px; color: var(--sim-muted); font-size: .78rem; line-height: 1.5;
+  font-weight: 400; letter-spacing: normal; text-transform: none;
+}
+.science-generated-simulator-frame { display: block; width: 100%; min-height: 480px; height: min(80dvh, 900px); border: 0; }
+/* Keep scrollable periodic elements usable below their persistent instructions. */
+.sa-game-frame .science-phaser-simulator .science-sim-viewport:has(.science-periodic-table) {
+  min-height: 400px !important;
+}
+/* Illustrated scenes share the scientific theme tokens and retain all controls. */
+.science-phaser-simulator.is-illustrated-realism {
+  display: block; padding: clamp(16px, 2.4vw, 28px); container-type: inline-size;
+}
+.is-illustrated-realism > * + * { margin-top: 18px; }
+.is-illustrated-realism .science-sim-header h2 { font-size: clamp(1.35rem, 2.4vw, 2rem); }
+.is-illustrated-realism .science-sim-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 270px); gap: 18px;
+  align-items: start; min-height: 0 !important;
+}
+.sa-game-frame .science-phaser-simulator.is-illustrated-realism .science-sim-viewport {
+  height: clamp(400px, 48vw, 600px) !important; min-height: 400px !important;
+  max-height: none !important; border-radius: 22px; overflow: hidden;
+  border: 1px solid var(--sim-line); box-shadow: 0 18px 42px color-mix(in srgb, var(--sim-bg) 40%, transparent);
+}
+.sa-game-frame .is-illustrated-realism .science-sim-telemetry {
+  height: auto !important; min-height: 0 !important; max-height: none !important;
+  padding: 20px; gap: 12px;
+}
+.is-illustrated-realism .science-sim-telemetry > strong { font-size: clamp(1.7rem, 3vw, 2.7rem); }
+.is-illustrated-realism .science-sim-telemetry code { font-size: .82rem; }
+.is-illustrated-realism .science-sim-analysis {
+  position: relative; height: 290px; min-height: 240px; overflow: hidden;
+  background: var(--sim-panel); border: 1px solid var(--sim-line); border-radius: 18px;
+}
+.is-illustrated-realism .science-sim-controls {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px;
+}
+.is-illustrated-realism .science-sim-control { min-width: 0; padding: 16px; }
+.is-illustrated-realism .science-sim-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.is-illustrated-realism .science-sim-actions button { flex: 1; min-height: 48px; }
+.is-illustrated-realism .science-sim-viewport svg text {
+  paint-order: stroke fill; stroke: var(--sim-bg); stroke-width: 3px; stroke-linejoin: round;
+}
+@container (max-width: 780px) {
+  .is-illustrated-realism .science-sim-grid { grid-template-columns: minmax(0, 1fr); }
+  .is-illustrated-realism .science-sim-telemetry { display: flex; flex-wrap: wrap; }
+  .is-illustrated-realism .science-sim-telemetry > * { max-width: 100%; }
+  .is-illustrated-realism .science-sim-telemetry > code,
+  .is-illustrated-realism .science-sim-telemetry > [data-model-assumptions],
+  .is-illustrated-realism .science-sim-objective { flex-basis: 100%; }
+}
+@media (max-width: 600px) {
+  .is-illustrated-realism .science-sim-grid { grid-template-columns: minmax(0, 1fr); }
+  .sa-game-frame .science-phaser-simulator.is-illustrated-realism .science-sim-viewport {
+    height: 400px !important; min-height: 400px !important;
+  }
+  .is-illustrated-realism .science-sim-controls { grid-template-columns: minmax(0, 1fr); }
+  .is-illustrated-realism .science-sim-analysis { height: 240px; }
+}
+.is-illustrated-realism.has-loaded-hero .science-sim-viewport [data-illustrated-apparatus] { display: none !important; }
+.sa-game-frame .science-phaser-simulator.is-illustrated-realism .science-sim-grid {
+  height: auto !important; max-height: none !important; align-items: start !important;
+}
+.sa-game-frame .science-phaser-simulator.is-illustrated-realism .science-sim-telemetry {
+  display: block !important; height: auto !important; min-height: 0 !important;
+  max-height: none !important; min-width: 0; overflow-wrap: anywhere;
+}
+.is-illustrated-realism .science-sim-telemetry > * { display: block; min-width: 0; }
+.is-illustrated-realism .science-sim-telemetry > * + * { margin-top: 14px; }
+.is-illustrated-realism .science-sim-telemetry > [data-model-assumptions] {
+  color: var(--sim-muted); font-size: .78rem; line-height: 1.5; font-weight: 400;
+}
+.is-illustrated-realism .science-sim-illustration-note {
+  color: var(--sim-muted); font-size: .78rem; line-height: 1.5; margin-top: 10px;
+}

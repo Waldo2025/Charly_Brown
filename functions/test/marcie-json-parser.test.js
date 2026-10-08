@@ -23,7 +23,8 @@ test("repara comas finales de Gemini sin alterar el contenido de las cadenas", a
   assert.deepEqual(parsed.seo.keywords, ["aprendizaje"]);
 });
 
-test("sigue rechazando respuestas que no pueden convertirse en JSON", async () => {
+test("recupera un JSON estructuralmente truncado, pero rechaza contenido sin datos", async () => {
   const { parseMarcieJson } = await loadParser();
-  assert.throws(() => parseMarcieJson('{"blocks":[{"id":"b1"}'), SyntaxError);
+  assert.deepEqual(parseMarcieJson('{"blocks":[{"id":"b1"}'), { blocks: [{ id: "b1" }] });
+  assert.throws(() => parseMarcieJson("{broken"), SyntaxError);
 });

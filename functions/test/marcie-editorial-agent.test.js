@@ -4,6 +4,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
+const { normalizeArticleRevision, withoutBibliographyBlocks } = require("../src/marcie-article-revision.js");
+const bibliography = require("../src/marcie-bibliography.js");
+const researchPolicy = require("../src/marcie-research-policy.js");
+const { autoRepairEvidence, buildEvidenceRepairPreview, selectEvidenceClaim } = require("../src/marcie-evidence-repair.js");
 const {
   advanceRun,
   createMarcieEditorialMcpServer,
@@ -15,6 +19,7 @@ const {
   normalizeKey,
   phasePrompt,
   processAgentTurn,
+  SEARCH_PLATFORMS,
   readSessionHistory,
   sessionRequestFromRun,
   uniqueStrings,
@@ -40,12 +45,17 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   const voiceSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-agent-voice.js"), "utf8");
   assert.match(panelSource, /renderPanelMessages\(\);[\s\S]*openVoiceGuide\(\);/);
   assert.doesNotMatch(panelSource, /host\.hidden = true/);
-  assert.match(panelSource, /Marcie te guía por voz/);
+  assert.match(panelSource, /Agente Marcie/);
+  assert.doesNotMatch(panelSource, /Agente editorial MCP/);
   assert.match(panelSource, /data-guide-messages/);
   assert.match(panelSource, /const panelMessages = \[\]/);
   assert.match(panelSource, /const guideMessages = \[\]/);
   assert.match(panelSource, /guide \? guideMessages : panelMessages/);
   assert.match(panelSource, /function renderGuideMessages\(\)/);
+  assert.match(panelSource, /data-agent-message-action="copy"/);
+  assert.match(panelSource, /data-agent-message-action="edit"/);
+  assert.match(panelSource, /navigator\.clipboard\?\.writeText/);
+  assert.match(panelSource, /Mensaje listo para editar y volver a enviar/);
   assert.match(panelSource, /const target = options\.target \|\| \(guide \? "guide" : "panel"\)/);
   assert.match(panelSource, /showResponse\(response, \{ target \}\)/);
   assert.match(panelSource, /target === "guide" \? guideMessages : panelMessages/);
@@ -89,11 +99,11 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(voiceSource, /onComplete\?\.\(completedTranscript\)/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
   assert.match(voiceSource, /tono profesional, sereno y cordial/);
-  assert.match(voiceSource, /Evita una entonación excesivamente informal/);
-  assert.match(voiceSource, /outputTranscription/);
-  assert.match(voiceSource, /onSpokenText/);
-  assert.match(panelSource, /const visibleText = shouldSpeak \? \(response\.speechText \|\| response\.message\) : response\.message/);
-  assert.match(panelSource, /guide\.question\.textContent = spoken/);
+  assert.match(voiceSource, /respuesta final del agente MCP/);
+  assert.match(voiceSource, /parts: \[\{ text: String\(text \|\| ""\)\.trim\(\) \}\]/);
+  assert.doesNotMatch(voiceSource, /onSpokenText/);
+  assert.match(panelSource, /const visibleText = response\.message/);
+  assert.match(panelSource, /ignoredSpeechText: Boolean\(response\.speechText && response\.speechText !== visibleText\)/);
   assert.doesNotMatch(voiceSource, /speechSynthesis|SpeechSynthesisUtterance|speakWithBrowser/);
   assert.match(voiceSource, /cancelOutput\(\);/);
   assert.match(voiceSource, /socket\.readyState === WebSocket\.CONNECTING/);
@@ -101,20 +111,36 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /if \(responseState\) renderOptions\(responseState\)/);
 });
 
+test("el modal de opciones muestra la pregunta concreta de la fase", () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "proposals";
+  run.configuration.selectedAudiences = ["parents"];
+  const response = phasePrompt(run);
+  assert.match(response.uiPrompt.question, /Elige una propuesta para Padres y familias/);
+  const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
+  assert.match(panelSource, /data-options-question/);
+  assert.match(panelSource, /prompt\.question \|\| response\.message/);
+});
+
 test("el chat permanente se asocia a la sesión activa sin iniciar el cuestionario", () => {
   const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
+  const editorSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/editor-app.js"), "utf8");
   const apiSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-agent-api.js"), "utf8");
   const run = initialAssistantRun({ uid: "user-1", sessionId: "session-1" });
   assert.equal(run.phase, "reviewing");
   assert.equal(run.status, "reviewing");
   assert.equal(run.sessionId, "session-1");
-  assert.match(panelSource, /mode: target === "guide" \? "configuration" : "assistant"/);
-  assert.match(panelSource, /sessionId: activeSession\?\.id/);
+  assert.match(panelSource, /const mode = target === "guide" \? "configuration" : "assistant"/);
+  assert.match(panelSource, /const sessionId = activeSession\?\.id \|\| ""/);
+  assert.match(panelSource, /sendAgentTurn\(runId, contextualInput,[\s\S]*sessionId/);
   assert.match(apiSource, /\{ runId, input, mode, sessionId \}/);
   assert.match(apiSource, /\/api\/marcie\/agent\/history\?sessionId=/);
   assert.match(panelSource, /async function loadSession\(session/);
   assert.match(panelSource, /history\.messages/);
-  assert.match(panelSource, /return \{ loadSession, startGuidedSession \}/);
+  assert.match(panelSource, /return \{ loadSession, startGuidedSession, resolveEvidenceClaim \}/);
+  assert.match(panelSource, /action: "resolve_evidence", value: id/);
+  assert.match(editorSource, /data-review-evidence-claim=.*Resolver con Marcie/);
+  assert.match(editorSource, /marcieAgentPanel\?\.resolveEvidenceClaim\(claim\)/);
   assert.match(panelSource, /Vista previa de cambios/);
   assert.match(panelSource, />Antes</);
   assert.match(panelSource, />Después</);
@@ -166,6 +192,52 @@ test("conserva la intención escrita junto al video como objetivo obligatorio", 
   assert.equal(run.configuration.videoResearch.objective, receivedObjective);
 });
 
+test("recupera la guía cuando YouTube no entrega contenido analizable", async () => {
+  const run = initialRun({ uid: "user-1" });
+  const error = Object.assign(new Error("No pude analizar ninguno de los videos."), {
+    code: "youtube_analysis_empty",
+    status: 422,
+    rejectedVideos: [{ videoId: "dQw4w9WgXcQ", reason: "youtube_public_captions_unavailable" }]
+  });
+  const response = await advanceRun(run, { text: "Usa este video como base https://youtu.be/dQw4w9WgXcQ" }, {
+    db: {},
+    analyzeYoutubeVideos: async () => { throw error; }
+  });
+
+  assert.equal(response.phase, "youtube_urls");
+  assert.equal(response.uiPrompt.type, "url_list");
+  assert.match(response.message, /No pude analizar el contenido del video/);
+  assert.equal(response.rejectedVideos[0].videoId, "dQw4w9WgXcQ");
+  assert.equal(run.status, "configuring");
+});
+
+test("permite continuar con tema escrito después de un bloqueo de YouTube", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "youtube_urls";
+  run.configuration.creationSource = "youtube";
+
+  const response = await advanceRun(run, { text: "Estrategias de evaluación formativa para docentes" }, { db: {} });
+
+  assert.equal(response.phase, "audiences");
+  assert.equal(run.configuration.creationSource, "topic");
+  assert.equal(run.configuration.topic, "Estrategias de evaluación formativa para docentes");
+  assert.deepEqual(run.configuration.sourceInputs.youtube, []);
+  assert.equal(run.configuration.videoResearch, null);
+});
+
+test("no activa YouTube por menciones negadas o ambiguas de video", async () => {
+  const run = initialRun({ uid: "user-1" });
+  let called = false;
+  const response = await advanceRun(run, { text: "Crea un artículo nuevo sin video sobre aprendizaje activo" }, {
+    db: {},
+    analyzeYoutubeVideos: async () => { called = true; }
+  });
+
+  assert.equal(response.phase, "audiences");
+  assert.equal(run.configuration.creationSource, "topic");
+  assert.equal(called, false);
+});
+
 test("responde preguntas durante la configuración sin avanzar ni seleccionar opciones", async () => {
   const run = initialRun({ uid: "user-1" });
   run.phase = "resources";
@@ -183,10 +255,28 @@ test("responde preguntas durante la configuración sin avanzar ni seleccionar op
   assert.deepEqual(run.configuration, before);
   assert.equal(response.conversationalInterruption, true);
   assert.match(response.message, /organiza las referencias/i);
+  assert.equal(response.speechText, response.message);
   assert.equal(response.uiPrompt.type, "multi_choice");
 });
 
-test("personaliza la transición oral sin alterar el estado determinista", async () => {
+test("un título que empieza por Cómo avanza la configuración en vez de repetirse como pregunta", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "proposals";
+  run.configuration.topic = "Diálogo interno";
+  run.configuration.selectedAudiences = ["parents"];
+  run.configuration.proposalOptionsByAudience = { parents: [{ id: "parents-hook-1", title: "Cómo fomentar el diálogo interno en casa", kind: "hook" }] };
+  const response = await processAgentTurn(run, { value: "parents-hook-1", text: "Cómo fomentar el diálogo interno en casa" }, {});
+  assert.equal(response.phase, "tone");
+  assert.equal(run.configuration.proposalsByAudience.parents, "Cómo fomentar el diálogo interno en casa");
+
+  run.phase = "proposals";
+  run.configuration.proposalsByAudience = {};
+  const custom = await processAgentTurn(run, { text: "Cómo promover un diálogo saludable en casa" }, {});
+  assert.equal(custom.phase, "tone");
+  assert.equal(run.configuration.proposalsByAudience.parents, "Cómo promover un diálogo saludable en casa");
+});
+
+test("avanza con la respuesta base sin alterar el estado determinista", async () => {
   const run = initialRun({ uid: "user-1" });
   run.phase = "tone";
   run.configuration.topic = "Evaluación formativa";
@@ -196,8 +286,8 @@ test("personaliza la transición oral sin alterar el estado determinista", async
   });
   assert.equal(run.configuration.tone, "Cálido y cercano");
   assert.equal(run.phase, "length_mode");
-  assert.match(response.message, /acercar el tema/i);
-  assert.match(response.speechText, /misma extensión/i);
+  assert.match(response.message, /misma extensión/i);
+  assert.equal(response.speechText, response.message);
 });
 
 test("publica las herramientas MCP editoriales de Marcie", async () => {
@@ -212,7 +302,7 @@ test("publica las herramientas MCP editoriales de Marcie", async () => {
     "get_session_context", "get_trending_topics", "create_editorial_session",
     "generate_audience_proposals", "analyze_youtube_videos", "research_sources", "draft_articles",
     "verify_article_claims", "format_bibliography_apa7", "review_article",
-    "revise_article", "manage_vocabulary", "prepare_wordpress_draft"
+    "revise_article", "resolve_evidence_issue", "manage_vocabulary", "prepare_wordpress_draft"
   ].forEach((name) => assert.ok(names.includes(name), `falta ${name}`));
   await client.close();
   await server.close();
@@ -232,11 +322,46 @@ test("inicia con una pregunta abierta y permite indicar una URL sin opción dedi
   const run = initialRun({ uid: "user-1", displayName: "Waldo" });
   const response = phasePrompt(run);
   assert.equal(response.phase, "creation_source");
-  assert.match(response.speechText, /Hola, Waldo/);
+  assert.equal(response.speechText, response.message);
   assert.equal(response.uiPrompt.type, "text");
   assert.deepEqual(response.uiPrompt.options, []);
   assert.match(response.message, /URL de YouTube/);
   assert.deepEqual(response.missingFields, ["creationSource", "topic", "selectedAudiences", "tone", "resources"]);
+});
+
+test("el chat ofrece las mismas plataformas que el formulario manual y conserva la selección", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "sources";
+  const prompt = phasePrompt(run);
+  assert.equal(prompt.uiPrompt.type, "multi_choice");
+  assert.deepEqual(prompt.uiPrompt.options.map((option) => option.id), SEARCH_PLATFORMS.map((platform) => platform.id));
+  assert.deepEqual(SEARCH_PLATFORMS.map((platform) => platform.id), [...researchPolicy.platforms.map((platform) => platform.id), researchPolicy.supplemental.id]);
+  assert.deepEqual(prompt.uiPrompt.options.map((option) => option.label), SEARCH_PLATFORMS.map((platform) => platform.label));
+  assert.ok(prompt.uiPrompt.options.some((option) => option.id === "supplemental" && option.label === "Otros sitios fiables"));
+
+  const selected = ["ebsco", "cochrane", "redalyc", "scielo", "dialnet", "base", "refseek", "supplemental"];
+  const response = await advanceRun(run, { selectedValues: selected }, { db: {} });
+  assert.equal(response.phase, "resource_mode");
+  assert.deepEqual(run.configuration.searchPlatforms, selected);
+  assert.deepEqual(sessionRequestFromRun(run).searchPlatforms, selected);
+  assert.ok(sessionRequestFromRun(run).specifications.some((item) => item.startsWith("#plataformas[all]")));
+});
+
+test("Atrás vuelve a la fase anterior y las peticiones naturales abren la sección que se desea corregir", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "tone";
+  run.configuration.selectedAudiences = ["educators"];
+  run.configuration.proposalOptionsByAudience = { educators: [{ id: "educators-hook-1", title: "Título" }] };
+
+  let response = await processAgentTurn(run, { text: "Atrás" }, { db: {} });
+  assert.equal(response.navigation, "back");
+  assert.equal(response.phase, "proposals");
+  assert.equal(run.phase, "proposals");
+
+  run.phase = "sources";
+  response = await processAgentTurn(run, { text: "Quiero cambiar el tono y hacerlo más profesional" }, { db: {} });
+  assert.equal(response.phase, "tone");
+  assert.equal(run.phase, "tone");
 });
 
 test("completa la configuración guiada y exige confirmación", async () => {
@@ -251,11 +376,11 @@ test("completa la configuración guiada y exige confirmación", async () => {
 
   response = await advanceRun(run, { selectedValues: ["educators", "parents"] }, context);
   assert.equal(response.phase, "proposals");
-  assert.equal(response.uiPrompt.options.length, 3);
+  assert.equal(response.uiPrompt.options.length, 6);
 
-  response = await advanceRun(run, { value: "educators-1" }, context);
+  response = await advanceRun(run, { value: "educators-hook-1" }, context);
   assert.equal(response.phase, "proposals");
-  response = await advanceRun(run, { value: "parents-1" }, context);
+  response = await advanceRun(run, { value: "parents-hook-1" }, context);
   assert.equal(response.phase, "tone");
 
   response = await advanceRun(run, { value: "warm" }, context);
@@ -432,6 +557,190 @@ test("la revisión posterior requiere vista previa y detecta la revisión base",
   assert.deepEqual(stored.approvedAudiences, []);
 });
 
+test("la revisión actualiza fuentes existentes sin insertar otra bibliografía en el cuerpo", async () => {
+  const source = { id: "source-1", title: "Título anterior", authors: ["Ana Pérez"], year: "2024", url: "https://example.org/estudio", verified: true };
+  const article = {
+    title: "Tema", revision: 0,
+    blocks: [{ type: "paragraph", text: "Contenido original." }],
+    sources: [source], usedSources: [source]
+  };
+  let stored = {
+    ownerId: "user-1", title: "Tema", topic: "Tema", audience: "parents",
+    article, articlesByAudience: { parents: article }, approvedAudiences: ["parents"]
+  };
+  const ref = {
+    async get() { return { exists: true, id: "session-1", data: () => stored }; },
+    async set(value) { stored = { ...stored, ...value }; }
+  };
+  const db = { collection() { return { doc() { return ref; } }; } };
+  const run = { ...initialRun({ uid: "user-1" }), sessionId: "session-1", phase: "completed", status: "completed" };
+  let calls = 0;
+  const generateText = async () => {
+    calls += 1;
+    if (calls === 1) return JSON.stringify({ intent: "revise", audience: "parents", instruction: "Corrige el artículo" });
+    return JSON.stringify({
+      article: {
+        ...article,
+        blocks: [
+          { type: "paragraph", text: "Contenido corregido." },
+          { type: "heading", text: "Referencias bibliográficas" },
+          { type: "paragraph", text: "Ana Pérez (2024). Estudio. https://example.org/estudio" }
+        ],
+        sources: [{ ...source, title: "Título corregido" }, { id: "inventada", title: "Fuente no verificada", url: "https://example.org/falsa" }]
+      },
+      findings: []
+    });
+  };
+  const preview = await advanceRun(run, { text: "Corrige el artículo" }, { db, uid: "user-1", generateText });
+  assert.equal(preview.uiPrompt.type, "change_preview");
+  assert.deepEqual(preview.changePreview.preview.blocks.map((block) => block.text), ["Contenido corregido."]);
+  await advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" });
+  const revised = stored.articlesByAudience.parents;
+  assert.deepEqual(revised.blocks.map((block) => block.text), ["Contenido corregido."]);
+  assert.deepEqual(bibliography.sources(revised).map((item) => item.title), ["Título corregido"]);
+  assert.equal(revised.sources[0].id, "source-1");
+  assert.equal(revised.sources[0].url, source.url);
+  assert.equal(revised.sources[0].verified, true);
+  assert.equal(revised.revision, 1);
+});
+
+test("una vista previa pendiente anterior tampoco puede duplicar la bibliografía al aplicarse", async () => {
+  const original = { title: "Tema", revision: 2, blocks: [{ type: "paragraph", text: "Texto" }], sources: [{ id: "source-1", title: "Documento", url: "https://example.org/documento" }] };
+  let stored = { ownerId: "user-1", audience: "parents", article: original, articlesByAudience: { parents: original } };
+  const ref = {
+    async get() { return { exists: true, id: "session-1", data: () => stored }; },
+    async set(value) { stored = { ...stored, ...value }; }
+  };
+  const run = { ...initialRun({ uid: "user-1" }), sessionId: "session-1", phase: "completed", status: "completed",
+    pendingChange: { audience: "parents", baseRevision: 2, preview: { ...original, blocks: [{ type: "paragraph", text: "Texto mejorado.\n\nReferencias bibliográficas\nDocumento (2024)." }] } } };
+  await advanceRun(run, { action: "apply_change" }, { db: { collection() { return { doc() { return ref; } }; } }, uid: "user-1" });
+  assert.deepEqual(stored.article.blocks.map((block) => block.text), ["Texto mejorado."]);
+  assert.equal(stored.article.sources.length, 1);
+});
+
+test("el agente repara una afirmación científica citada solo con video usando documentos comprobados", async () => {
+  const claimText = "El rechazo activa una región cerebral relacionada con el dolor físico.";
+  const video = { id: "youtube-video-1", title: "Video", sourceType: "youtube_video", url: "https://youtube.com/watch?v=demo", verificationStatus: "attributed_only" };
+  const document = { id: "source-paper-1", title: "Estudio de rechazo social", authors: ["Autora, N."], year: "2024", url: "https://example.org/paper", verificationStatus: "verified" };
+  const article = {
+    title: "Tema", audience: "parents", revision: 2,
+    blocks: [
+      { id: "intro", type: "paragraph", text: "Introducción conservada." },
+      { id: "claim-block", type: "paragraph", text: `${claimText} [youtube-video-1]`, sourceIds: [video.id] }
+    ],
+    sources: [video], researchSources: [video], usedSources: [video],
+    articleClaims: [{ id: "claim-1", blockId: "claim-block", text: claimText, evidenceKind: "external_fact", status: "unsupported", sourceIds: [], supportSummary: "El video no respalda hechos independientes." }],
+    verification: { status: "blocked", blockers: [claimText] }
+  };
+  let stored = { ownerId: "user-1", title: "Tema", topic: "Tema", audience: "parents", article, articlesByAudience: { parents: article }, approvedAudiences: ["parents"] };
+  const ref = {
+    async get() { return { exists: true, id: "session-1", data: () => stored }; },
+    async set(value) { stored = { ...stored, ...value }; }
+  };
+  const db = { collection() { return { doc() { return ref; } }; } };
+  const run = { ...initialRun({ uid: "user-1" }), sessionId: "session-1", phase: "completed", status: "completed" };
+  let verificationCalls = 0;
+  const verifyArticleEvidence = async () => {
+    verificationCalls += 1;
+    return { ...article, sources: [video, document], researchSources: [video, document], articleClaims: [{ ...article.articleClaims[0], status: "supported", sourceIds: [document.id] }] };
+  };
+  const response = await advanceRun(run, { action: "resolve_evidence", value: "claim-1", audience: "parents", text: "Resuelve la afirmación sin respaldo" }, { db, uid: "user-1", verifyArticleEvidence });
+  assert.equal(response.uiPrompt.type, "change_preview");
+  assert.equal(verificationCalls, 1);
+  assert.deepEqual(response.changePreview.preview.blocks.map((block) => block.text), ["Introducción conservada.", claimText]);
+  assert.equal(run.pendingChange.kind, "evidence_repair");
+  assert.deepEqual(run.pendingChange.preview.blocks[1].sourceIds, [document.id]);
+  assert.equal(run.pendingChange.preview.verification.status, "pending");
+  assert.deepEqual(stored.article.sources, [video]);
+  assert.match(JSON.stringify(response.changePreview.changes), /Estudio de rechazo social/);
+  stored.article.blocks[0].text = "Introducción editada mientras Marcie investigaba.";
+  await assert.rejects(
+    advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" }),
+    (error) => error.status === 409
+  );
+  assert.equal(stored.article.revision, 2);
+  stored.article.blocks[0].text = "Introducción conservada.";
+  await advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" });
+  assert.equal(stored.article.revision, 3);
+  assert.deepEqual(stored.article.blocks[1].sourceIds, [document.id]);
+  assert.equal(stored.article.sources.some((source) => source.id === document.id), true);
+  assert.equal(bibliography.integrity(stored.article).valid, true);
+  assert.equal(stored.article.verification.status, "pending");
+  assert.deepEqual(stored.approvedAudiences, []);
+});
+
+test("sin documento comprobado conserva la afirmación del autor", async () => {
+  const claim = { id: "claim-1", text: "El video demuestra que el rechazo activa el dolor físico.", status: "unsupported" };
+  const article = { title: "Tema", revision: 1, blocks: [
+    { id: "intro", type: "paragraph", text: "Contexto válido." },
+    { id: "claim-block", type: "paragraph", text: claim.text, sourceIds: ["youtube-video-1"] }
+  ], articleClaims: [claim], sources: [{ id: "youtube-video-1", title: "Video", sourceType: "youtube_video", url: "https://youtube.com/watch?v=demo" }] };
+  const repair = buildEvidenceRepairPreview(article, claim, { ...article, articleClaims: [{ ...claim, status: "unsupported", sourceIds: [] }] });
+  assert.equal(repair, null);
+  assert.equal(article.blocks.length, 2);
+  assert.equal(selectEvidenceClaim(article, "claim-1"), claim);
+  assert.equal(selectEvidenceClaim({ ...article, articleClaims: [claim, { id: "claim-2", text: "Otra afirmación.", status: "unsupported" }] }), null);
+});
+
+test("un documento sin verificación no respalda una afirmación externa", () => {
+  const claim = { id: "claim-1", text: "Una afirmación científica sin respaldo.", status: "unsupported" };
+  const article = { blocks: [
+    { id: "intro", type: "paragraph", text: "Introducción conservada." },
+    { id: "claim-block", type: "paragraph", text: claim.text, sourceIds: ["youtube-video-1"] }
+  ], articleClaims: [claim] };
+  const source = { id: "paper-unverified", title: "Estudio sin verificar", sourceType: "journal_article", verificationStatus: "unverified" };
+  const repair = buildEvidenceRepairPreview(article, claim, {
+    sources: [source], articleClaims: [{ ...claim, status: "supported", sourceIds: [source.id] }]
+  });
+  assert.equal(repair, null);
+  assert.deepEqual(article.blocks.map((block) => block.text), ["Introducción conservada.", claim.text]);
+});
+
+test("la comprobación conserva afirmaciones y secciones aunque la evidencia quede pendiente", () => {
+  const document = { id: "source-valid", title: "Documento", authors: ["Autora, Ana"], year: "2024", publisher: "Universidad", url: "https://example.org/documento", verificationStatus: "verified" };
+  const video = { id: "youtube-demo", title: "Video", channel: "Canal", url: "https://youtube.com/watch?v=demo", sourceType: "youtube_video", verificationStatus: "attributed_only" };
+  const article = {
+    title: "Artículo", sources: [document, video], researchSources: [document, video],
+    blocks: [
+      { id: "intro", type: "paragraph", text: "Introducción respaldada.", sourceIds: [document.id] },
+      { id: "fact", type: "paragraph", text: "El rechazo activa un circuito cerebral específico.", sourceIds: [video.id] },
+      { id: "orphan", type: "paragraph", text: "Dato sin documento [source-missing]." },
+      { id: "video", type: "paragraph", text: "El video propone una estrategia.", sourceIds: [video.id] }
+    ],
+    articleClaims: [{ id: "claim-1", blockId: "fact", text: "El rechazo activa un circuito cerebral específico.", status: "unsupported", evidenceKind: "external_fact" }],
+    verification: { status: "blocked", blockers: ["Falta evidencia"] }
+  };
+  const result = autoRepairEvidence(article);
+  assert.equal(result.changed, false);
+  assert.equal(result.article, article);
+  assert.deepEqual(result.article.blocks.map((block) => block.id), ["intro", "fact", "orphan", "video"]);
+  assert.deepEqual(result.corrections, []);
+  assert.equal(result.article.verification.status, "blocked");
+});
+
+test("la corrección automática no sustituye las palabras del autor por un documento", () => {
+  const claimText = "La investigación describe una respuesta al rechazo.";
+  const document = { id: "source-paper", title: "Estudio", authors: ["Autora, Ana"], year: "2024", publisher: "Universidad", url: "https://example.org/paper", verificationStatus: "verified" };
+  const video = { id: "youtube-demo", title: "Video", channel: "Canal", url: "https://youtube.com/watch?v=demo", sourceType: "youtube_video", verificationStatus: "attributed_only" };
+  const article = {
+    title: "Artículo", sources: [document, video], researchSources: [document, video],
+    blocks: [{ id: "intro", type: "paragraph", text: "Introducción." }, { id: "claim", type: "paragraph", text: `${claimText} [youtube-demo]`, sourceIds: [video.id] }],
+    articleClaims: [{ id: "c1", blockId: "claim", text: claimText, evidenceKind: "external_fact", status: "supported", sourceIds: [document.id] }]
+  };
+  const result = autoRepairEvidence(article);
+  assert.equal(result.changed, false);
+  assert.equal(result.article.blocks[1].text, `${claimText} [youtube-demo]`);
+  assert.deepEqual(result.article.blocks[1].sourceIds, [video.id]);
+  assert.deepEqual(result.corrections, []);
+  assert.equal(autoRepairEvidence(result.article).changed, false);
+});
+
+test("conserva bloques normales y recorta solo la sección bibliográfica", () => {
+  const blocks = [{ type: "heading", text: "Conclusiones" }, { type: "paragraph", text: "Texto final.\n\n## Bibliografía\nFuente APA" }];
+  assert.deepEqual(withoutBibliographyBlocks(blocks).map((block) => block.text), ["Conclusiones", "Texto final."]);
+  assert.deepEqual(normalizeArticleRevision({ blocks }, { blocks }).blocks.map((block) => block.text), ["Conclusiones", "Texto final."]);
+});
+
 test("Marcie puede proponer la edición de un solo fragmento sin tocar el resto", async () => {
   let stored = {
     ownerId: "user-1",
@@ -460,16 +769,10 @@ test("Marcie puede proponer la edición de un solo fragmento sin tocar el resto"
     generationCall += 1;
     if (generationCall === 1) return JSON.stringify({ intent: "revise", audience: "educators", instruction: "Haz más claro el segundo párrafo" });
     return JSON.stringify({
-      article: {
-        ...stored.article,
-        blocks: [
-          stored.article.blocks[0],
-          { type: "paragraph", text: "Segundo párrafo explicado con mayor claridad." }
-        ]
-      },
+      patches: [{ index: 1, text: "Segundo párrafo explicado con mayor claridad.", rationale: "Mejora la claridad." }],
       findings: ["El segundo párrafo podía ser más directo."],
       summary: "Preparé una mejora puntual.",
-      changes: [{ scope: "paragraph", blockIndex: 1, label: "Segundo párrafo", before: "texto incorrecto del modelo", after: "otro texto", rationale: "Mejora la claridad." }]
+      article: { blocks: [{ text: "Intento de reemplazar todo el artículo" }] }
     });
   };
 
@@ -478,13 +781,21 @@ test("Marcie puede proponer la edición de un solo fragmento sin tocar el resto"
   assert.equal(response.changePreview.changes.length, 1);
   assert.deepEqual(response.changePreview.changes[0], {
     scope: "paragraph",
-    label: "Segundo párrafo",
+    label: "Bloque 2",
     before: "Segundo párrafo por mejorar.",
     after: "Segundo párrafo explicado con mayor claridad.",
     rationale: "Mejora la claridad."
   });
   assert.equal(response.changePreview.preview.blocks[0].text, "Primer párrafo intacto.");
   assert.equal(stored.articlesByAudience.educators.revision, 3);
+  assert.equal(run.pendingChange.kind, "targeted_revision");
+  stored.article.blocks[0].text = "Edición concurrente.";
+  await assert.rejects(advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" }), (error) => error.status === 409);
+  stored.article.blocks[0].text = "Primer párrafo intacto.";
+  await advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" });
+  assert.equal(stored.articlesByAudience.educators.blocks[0].text, "Primer párrafo intacto.");
+  assert.equal(stored.articlesByAudience.educators.blocks[1].text, "Segundo párrafo explicado con mayor claridad.");
+  assert.equal(stored.articlesByAudience.educators.verification.status, "pending");
 });
 
 test("restaura el historial de la sesión y conserva una propuesta pendiente", async () => {
@@ -604,7 +915,10 @@ test("las propuestas por público reciben la síntesis y los conceptos del video
   let receivedPrompt = "";
   const handlers = createToolHandlers({ generateText: async ({ prompt }) => {
     receivedPrompt = prompt;
-    return JSON.stringify({ proposals: { educators: [{ title: "Retroalimentar para aprender" }, { title: "Evaluación que orienta" }, { title: "Evidencia para ajustar la enseñanza" }] } });
+    return JSON.stringify({ proposals: { educators: {
+      hooks: [{ title: "Retroalimentar para aprender" }, { title: "Evaluación que orienta" }, { title: "Evidencia para ajustar la enseñanza" }],
+      antihooks: [{ title: "Cuando evaluar no ayuda" }, { title: "Errores que frenan la retroalimentación" }, { title: "Señales de una evaluación poco útil" }]
+    } } });
   } });
   const result = await handlers.generate_audience_proposals({
     topic: "Evaluación formativa",
@@ -615,7 +929,8 @@ test("las propuestas por público reciben la síntesis y los conceptos del video
   assert.match(receivedPrompt, /idea central comprobable del video y su relación pertinente con la neuroeducación/i);
   assert.match(receivedPrompt, /metacognición y autorregulación/);
   assert.match(receivedPrompt, /La autora diferencia calificar de retroalimentar/);
-  assert.equal(result.proposalsByAudience.educators.length, 3);
+  assert.equal(result.proposalsByAudience.educators.length, 6);
+  assert.deepEqual(result.proposalsByAudience.educators.map((item) => item.kind), ["hook", "hook", "hook", "antihook", "antihook", "antihook"]);
 });
 
 test("el redactor MCP exige idea central y relación con neuroeducación", async () => {

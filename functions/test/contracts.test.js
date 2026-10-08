@@ -4,7 +4,6 @@ const assert = require("node:assert/strict");
 const {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
-  DEFAULT_LIVE_MODEL,
   DEFAULT_VEO_MODEL,
   DEFAULT_VEO_FAST_MODEL,
   normalizeModel,
@@ -31,9 +30,6 @@ const {
   shouldRetainMontageLease
 } = require("../src/montage-dispatch.js");
 const {
-  normalizeVoiceName
-} = require("../src/live-tickets.js");
-const {
   safeSession,
   normalizeLibraryItem,
   isVideoSessionDocument,
@@ -57,9 +53,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 test("model aliases replace retired Gemini and Veo previews", () => {
+  assert.equal(DEFAULT_TEXT_MODEL, "gemini-3.5-flash-lite");
   assert.equal(normalizeModel("gemini-2.5-flash"), DEFAULT_TEXT_MODEL);
+  assert.equal(normalizeModel("gemini-3.6-flash"), "gemini-3.8-flash");
   assert.equal(normalizeModel("gemini-3.1-flash-image-preview"), DEFAULT_IMAGE_MODEL);
-  assert.equal(normalizeModel("gemini-2.5-flash-native-audio-preview-12-2025"), DEFAULT_LIVE_MODEL);
   assert.equal(normalizeModel("veo-3.1-generate-preview"), DEFAULT_VEO_MODEL);
   assert.equal(normalizeModel("veo-3.1-lite-generate-preview"), "veo-3.1-lite-generate-001");
 });
@@ -76,7 +73,7 @@ test("REST Gemini payload is translated to the Vertex SDK request shape", () => 
   });
   assert.equal(request.model, DEFAULT_TEXT_MODEL);
   assert.equal(request.contents[0].parts[0].text, "hola");
-  assert.equal(request.config.temperature, undefined, "Gemini 3.8 Flash no admite controles de muestreo explícitos en este proxy");
+  assert.equal(request.config.temperature, undefined, "Gemini Flash-Lite no admite controles de muestreo explícitos en este proxy");
   assert.equal(request.config.responseMimeType, "application/json");
   assert.equal(request.config.systemInstruction.parts[0].text, "responde en español");
   assert.equal(request.config.safetySettings.length, 1);
@@ -144,8 +141,12 @@ test("Gemini invalid arguments fall back to a minimal payload without losing ins
 
 test("Gemini proxy retries invalid generation configurations with the compatibility payload", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
-  assert.match(source, /if \(isVertexInvalidArgument\(error\)\)[\s\S]*buildVertexCompatibilityPayload\(payload\)/);
+  assert.match(source, /if \(isVertexInvalidArgument\(providerError\)\)[\s\S]*buildVertexCompatibilityPayload\(payload\)/);
   assert.match(source, /X-Gemini-Compatibility-Retry", "minimal-payload"/);
+});
+
+test("retired Gemini Flash models normalize to the supported replacement", () => {
+  assert.equal(normalizeModel("gemini-3.7-flash"), "gemini-3.8-flash");
 });
 
 test("Gemini proxy accepts bounded high-resolution inline vision references", () => {
@@ -175,6 +176,18 @@ test("large scene videos use a direct resumable upload contract", () => {
     "podcaster/sessions/Session_42/owners/user-1/videos/Row_7-upload-1-toma-final.mp4"
   );
   assert.throws(() => validateUploadRequest({ ...input, sessionId: "../Session_42" }), /invalid_session_id/);
+});
+
+test("scene voice uploads accept web audio formats and enforce the 24 MB limit", () => {
+  for (const [contentType, extension] of [
+    ["audio/mpeg", "mp3"], ["audio/wav", "wav"], ["audio/mp4", "m4a"],
+    ["audio/ogg", "ogg"], ["audio/webm", "webm"]
+  ]) {
+    const input = validateUploadRequest({ kind: "scene-audio", sessionId: "session-42", rowId: "row-1", fileName: `voz.${extension}`, contentType, size: 24 * 1024 * 1024 });
+    assert.match(buildStoragePath({ ...input, uploadId: "u-1", uid: "owner-1" }), new RegExp(`/audio/row-1-u-1-voz\\.${extension}$`));
+    assert.throws(() => validateUploadRequest({ ...input, size: input.size + 1 }), /invalid_upload_size/);
+  }
+  assert.throws(() => validateUploadRequest({ kind: "scene-audio", sessionId: "session-42", rowId: "row-1", fileName: "voz.flac", contentType: "audio/flac", size: 100 }), /invalid_upload_content_type/);
 });
 
 test("podcaster admin browser includes only video sessions", () => {
@@ -230,7 +243,13 @@ test("Cloud Tasks payload is thin, deterministic and authenticated with OIDC", (
 test("private task functions preserve the Cloud Tasks invoker across deploys", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
   assert.match(source, /const TASK_INVOKER_EMAIL = "charly-tasks-invoker@charly-brown\.iam\.gserviceaccount\.com"/);
-  assert.equal((source.match(/invoker: \[TASK_INVOKER_EMAIL\]/g) || []).length, 2);
+  const dispatchers = [...source.matchAll(/exports\.(dispatch\w+Task)\s*=\s*onRequest\(\{([^}]+)\}/g)];
+  for (const name of ['dispatchMontageTask', 'dispatchVeoTask', 'dispatchScienceProductionTask']) {
+    assert.ok(dispatchers.some((match) => match[1] === name), `${name} must remain registered`);
+  }
+  for (const [, name, options] of dispatchers) {
+    assert.match(options, /invoker: \[TASK_INVOKER_EMAIL\]/, `${name} must require the task identity`);
+  }
 });
 
 test("Cloud Run override sends only the durable montage job id", () => {
@@ -251,12 +270,6 @@ test("montage capacity ignores missing and terminal lease owners", () => {
   assert.equal(shouldRetainMontageLease(lease, { status: "cancelled" }, now), false);
   assert.equal(shouldRetainMontageLease(lease, null, now), false);
   assert.equal(shouldRetainMontageLease({ leaseUntilMs: now - 1 }, { status: "running" }, now), false);
-});
-
-test("Gemini Live only accepts the configured voice catalog", () => {
-  assert.equal(normalizeVoiceName("zephyr"), "Zephyr");
-  assert.equal(normalizeVoiceName("Vindemiatrix"), "Vindemiatrix");
-  assert.equal(normalizeVoiceName("not-a-voice"), "Aoede");
 });
 
 test("podcaster sessions keep their established document shape", () => {
@@ -462,6 +475,11 @@ test("stale Veo and montage jobs become terminal so monitoring does not alert fo
   assert.equal(exportPatch.error.code, "export_job_heartbeat_expired");
   assert.equal(exportPatch.heartbeatAt, timestamp);
   assert.equal(exportPatch.updatedAt, timestamp);
+
+  const workerStartupPatch = buildStaleJobPatch("podcaster_export_jobs", admin, { stage: "worker_starting" });
+  assert.equal(workerStartupPatch.retryable, false);
+  assert.equal(workerStartupPatch.error.code, "export_worker_start_timeout");
+  assert.match(workerStartupPatch.hint, /No la vuelvas a enviar hasta confirmar/i);
 
   assert.equal(buildStaleJobPatch("unknown_jobs", admin), null);
 });

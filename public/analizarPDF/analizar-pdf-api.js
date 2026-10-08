@@ -1,5 +1,6 @@
 import { authFetch, authFetchJson, hasAvailableApiBase } from "../js/api-client.js";
 
+const localJobs = new Map();
 const LOCAL_ANALYSIS_CONTEXT_HEADER_MAX_LENGTH = 6000;
 
 function encodeAnalizarPdfHeaderJson(value = null) {
@@ -197,7 +198,55 @@ export async function queueAnalizarPdfUpload(sessionId = "", file = null, source
   if (!String(file.name || "").toLowerCase().endsWith(expectedExt)) {
     throw new Error(`El archivo debe ser ${expectedExt}.`);
   }
+  if (normalizedSourceType === 'pdf' && fileContext?.processingLocation !== 'server') {
+    const jobId = `local-pdf-${crypto.randomUUID()}`, controller = new AbortController();
+    const job = { jobId, sessionId: cleanSessionId, revisionId: fileContext?.revisionId, fileId: fileContext?.fileId, status: 'queued', controller };
+    localJobs.set(jobId, job);
+    // Return immediately so the existing progress/cancel UI owns the running job.
+    Promise.resolve().then(async () => {
+      try {
+        job.status = 'processing';
+        const [{ extractPdf }, { createPdfRules }] = await Promise.all([import('../document-processing/pdf-extractor.js'), import('../document-processing/pdf-rules.js')]);
+        const categories = fileContext?.analysisCategories || {};
+        const rules = createPdfRules(fileContext?.localSession || {}, categories), started = performance.now();
+        const manifest = await extractPdf(file, { signal: controller.signal, spelling: categories.spelling !== false,
+          onProgress: progress => { job.progress = progress; }, onBatch: pages => rules.add(pages) });
+        if (!manifest.complete) throw Error(`Cobertura incompleta: ${manifest.completed.length}/${manifest.pageCount} páginas.`);
+        job.result = rules.finish(); job.result.stats.durationMs = Math.round(performance.now() - started);
+        job.resultSummary = { paginationIssueCount: job.result.paginationIssues.length, sectionIssueCount: job.result.sectionIssues.length, spellingIssueCount: job.result.spellingIssues.length };
+        job.status = 'completed';
+      } catch (error) {
+        if (controller.signal.aborted) { job.status = 'cancelled'; return; }
+        job.status = 'error'; job.error = String(error.message);
+        if (window.confirm(`No se pudo completar el análisis local: ${job.error}\n¿Quieres procesar este archivo en el servidor? Esto usa cómputo de Cloud Run.`)) {
+          job.status='processing';job.error='';job.progress={phase:'upload',uploaded:0,total:file.size};
+          try { const remote = await queueAnalizarPdfUpload(sessionId, file, sourceType, { ...fileContext, processingLocation: 'server',signal:controller.signal,onUploadProgress:progress=>{job.progress={phase:'upload',...progress};} }); job.remoteJobId = remote.jobId; job.status = 'queued'; }
+          catch (fallbackError) { job.status = controller.signal.aborted?'cancelled':'error'; job.error = fallbackError.message; }
+        }
+      }
+    });
+    return { jobId, status: 'queued', processingLocation: 'browser' };
+  }
   if (!hasAvailableApiBase()) throw new Error("API_UNAVAILABLE");
+  if(normalizedSourceType==='pdf'&&file.size>24*1024**2){
+    const created=await authFetchJson('/api/analizar-pdf/sources/create',{method:'POST',preferRemote:true,body:{sessionId:cleanSessionId,revisionId:fileContext?.revisionId,fileId:fileContext?.fileId,size:file.size}});
+    const signal=fileContext?.signal;
+    for(let offset=0;offset<file.size;){
+      signal?.throwIfAborted();const end=Math.min(file.size,offset+8*1024**2);
+      try {
+        const response=await fetch(created.uploadUrl,{method:'PUT',headers:{'Content-Type':'application/pdf','Content-Range':`bytes ${offset}-${end-1}/${file.size}`},body:file.slice(offset,end),signal:signal||AbortSignal.timeout(120000)});
+        if(!response.ok&&response.status!==308)throw Error(`No se pudo guardar el PDF: HTTP ${response.status}`);offset=end;
+      }catch(error){
+        if(signal?.aborted)throw error;
+        const status=await fetch(created.uploadUrl,{method:'PUT',headers:{'Content-Range':`bytes */${file.size}`},signal:signal||AbortSignal.timeout(30000)});
+        if(status.ok)offset=file.size;
+        else if(status.status===308){const range=status.headers.get('Range'),resumed=range?Number(range.match(/-(\d+)$/)?.[1])+1:0;if(!Number.isFinite(resumed)||resumed===offset)throw error;offset=resumed;}else throw error;
+      }
+      fileContext?.onUploadProgress?.({uploaded:offset,total:file.size});
+    }
+    await authFetchJson('/api/analizar-pdf/sources/finalize',{method:'POST',preferRemote:true,body:{uploadId:created.uploadId}});
+    return queueAnalizarPdfStoredSourceAnalysis(sessionId,sourceType,fileContext);
+  }
   const localAnalysisContextHeader = await buildLocalAnalysisContextHeader(fileContext);
   const response = await authFetch("/api/analizar-pdf/analyze", {
     method: "POST",
@@ -256,6 +305,11 @@ export async function queueAnalizarPdfStoredSourceAnalysis(sessionId = "", sourc
 export async function getAnalizarPdfAnalysisStatus(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) throw new Error("Falta jobId.");
+  if (localJobs.has(cleanJobId)) {
+    const { controller, remoteJobId, ...job } = localJobs.get(cleanJobId);
+    if (remoteJobId) return { ...(await getAnalizarPdfAnalysisStatus(remoteJobId)), jobId: cleanJobId };
+    return job;
+  }
   return authFetchJson(`/api/analizar-pdf/analyze-status?jobId=${encodeURIComponent(cleanJobId)}`, {
     method: "GET",
     preferRemote: true
@@ -265,6 +319,11 @@ export async function getAnalizarPdfAnalysisStatus(jobId = "") {
 export async function cancelAnalizarPdfAnalysis(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) throw new Error("Falta jobId.");
+  if (localJobs.has(cleanJobId)) {
+    const job = localJobs.get(cleanJobId); job.controller.abort(); job.status = 'cancelled';
+    if (job.remoteJobId) await cancelAnalizarPdfAnalysis(job.remoteJobId);
+    return { jobId: cleanJobId, status: 'cancelled' };
+  }
   return authFetchJson("/api/analizar-pdf/analyze-cancel", {
     method: "POST",
     body: { jobId: cleanJobId },

@@ -11,11 +11,9 @@ if (!process.argv.includes("--execute")) {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requireFromFunctions = createRequire(path.join(root, "functions/package.json"));
-const requireFromLiveProxy = createRequire(path.join(root, "cloud-run/live-proxy/package.json"));
 const { initializeApp, applicationDefault, deleteApp } = requireFromFunctions("firebase-admin/app");
 const { getFirestore } = requireFromFunctions("firebase-admin/firestore");
 const { getStorage } = requireFromFunctions("firebase-admin/storage");
-const { WebSocket } = requireFromLiveProxy("ws");
 
 const PROJECT_ID = "charly-brown";
 const BUCKET = "charly-brown.firebasestorage.app";
@@ -41,7 +39,6 @@ const bucket = getStorage(app).bucket();
 const cleanup = {
   storagePaths: new Set(),
   uploadIds: new Set(),
-  liveTickets: new Set(),
   aiJobIds: new Set(),
   exportJobIds: new Set()
 };
@@ -96,44 +93,6 @@ async function deleteTemporaryFirebaseUser(token) {
     body: JSON.stringify({ idToken: token }),
     signal: AbortSignal.timeout(30_000)
   }).catch(() => {});
-}
-
-async function waitForLiveReady({ websocketUrl, ticket }) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`${websocketUrl}?ticket=${encodeURIComponent(ticket)}`, {
-      headers: { Origin: "http://127.0.0.1:5010" }
-    });
-    const timeout = setTimeout(() => {
-      socket.terminate();
-      reject(new Error("live_ready_timeout"));
-    }, 25_000);
-    socket.on("message", (raw) => {
-      try {
-        const message = JSON.parse(String(raw));
-        if (message.type === "ready") {
-          clearTimeout(timeout);
-          socket.close(1000, "smoke_complete");
-          resolve(message);
-        } else if (message.type === "error") {
-          clearTimeout(timeout);
-          socket.close();
-          reject(new Error(`live_error:${message.code || message.message || "unknown"}`));
-        }
-      } catch (error) {
-        clearTimeout(timeout);
-        socket.close();
-        reject(error);
-      }
-    });
-    socket.on("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    socket.on("unexpected-response", (_request, response) => {
-      clearTimeout(timeout);
-      reject(new Error(`live_handshake_failed:${response.statusCode}`));
-    });
-  });
 }
 
 function collectStoragePaths(value, seen = new Set()) {
@@ -260,14 +219,15 @@ try {
     assert.ok(Array.isArray(gemini.data.candidates) && gemini.data.candidates.length > 0);
     logCheck("Gemini texto síncrono");
 
-    const live = await api("/api/gemini/live-token", {
-    method: "POST",
-    body: { voiceName: "Aoede", systemInstruction: "Responde brevemente en español." }
-  });
-    cleanup.liveTickets.add(live.data.ticket);
-    const liveReady = await waitForLiveReady(live.data);
-    assert.equal(liveReady.type, "ready");
-    logCheck("Gemini Live ticket + WebSocket");
+    const retiredLive = await fetch(`${PREVIEW_BASE}/api/gemini/live-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+      body: "{}",
+      signal: AbortSignal.timeout(30_000)
+    });
+    assert.equal(retiredLive.status, 410);
+    logCheck("Gemini Live retirado", "410");
+
   }
 
   if (runExtendedJobs) {
@@ -349,9 +309,6 @@ try {
   }
   for (const uploadId of cleanup.uploadIds) {
     await db.collection("podcaster_upload_sessions").doc(uploadId).delete().catch(() => {});
-  }
-  for (const ticket of cleanup.liveTickets) {
-    await db.collection("gemini_live_tickets").doc(ticket).delete().catch(() => {});
   }
   for (const jobId of cleanup.aiJobIds) {
     await db.collection("podcaster_ai_jobs").doc(jobId).delete().catch(() => {});

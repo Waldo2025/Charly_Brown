@@ -10,7 +10,7 @@ test('Experience modal presets: list badges, apply preset, save new preset, and 
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
 
-    await page.route('http://pigpen.test/**', async route => {
+    await page.route('http://localhost:41111/**', async route => {
       const path = new URL(route.request().url()).pathname;
       if (path === '/') return route.fulfill({
         contentType: 'text/html',
@@ -22,14 +22,19 @@ test('Experience modal presets: list badges, apply preset, save new preset, and 
       });
     });
 
-    await page.goto('http://pigpen.test');
+    await page.goto('http://localhost:41111');
 
     await page.evaluate(async () => {
       const {mountExperienceModal} = await import('/js/pigpen-experience-modal.mjs');
+      const {createPresetStore} = await import('/js/pigpen-experience-presets.mjs');
+      const records=new Map();let initialized=false;
+      window.presetStore=createPresetStore({adapter:{initialize:async(uid,defaults)=>{if(!initialized){defaults.forEach(p=>records.set(p.id,{...p,revision:1,seeded:true}));initialized=true;}},load:async()=>[...records.values()],save:async(uid,p,revision)=>{const result={...p,revision:revision+1,seeded:false};records.set(p.id,result);return result;},remove:async(uid,id)=>{records.delete(id);}}});
+      presetStore.setUser('teacher');await presetStore.load();
       window.config = {};
       window.savedConfig = null;
       window.savedStructure = null;
       window.modal = mountExperienceModal({
+        presetStore,
         getConfig: () => window.config,
         onSave: (c, s) => { window.savedConfig = c; window.savedStructure = s; }
       });
@@ -37,6 +42,7 @@ test('Experience modal presets: list badges, apply preset, save new preset, and 
     });
 
     await page.locator('#erExperienceModal.show').waitFor();
+    await page.waitForFunction(()=>!presetStore.state().busy);
 
     const badges = page.locator('.er-experience-presets-list .er-preset-badge');
     const initialBadgeCount = await badges.count();
@@ -66,6 +72,7 @@ test('Experience modal presets: list badges, apply preset, save new preset, and 
     const deleteBtn = customBadge.locator('[data-preset-delete]');
     await deleteBtn.click();
 
+    await customBadge.waitFor({state:'hidden'});
     assert.equal(await customBadge.count(), 0);
     assert.equal(await badges.count(), initialBadgeCount);
 

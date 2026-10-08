@@ -3,12 +3,41 @@ const assert = require("node:assert/strict");
 const {
   bibliographicMetadataGaps,
   extractPageContent,
+  extractPdfPublicationDate,
   extractBibliographicMetadata,
   formatApaCitation,
   retrieveSourcePage,
   verifyCandidateSources
 } = require("../src/marcie-source-verifier.js");
-const { extractAttributedReferences, generateJson, parseJsonResponse, rankTrendOpportunities, refreshMarcieTrends, researchDateWindow, verifyArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
+const { extractAttributedReferences, generateJson, parseJsonResponse, rankTrendOpportunities, refreshMarcieTrends, researchDateWindow, verifyArticleEvidenceServer, verifyAndRepairArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
+const { identifierFromUrl } = require("../src/marcie-scholarly-fallback.js");
+const { searchScientificCatalogs } = require("../src/marcie-catalog-search.js");
+
+test("la reparación automática conserva artículos sin respaldo sin retirar contenido", async () => {
+  const introduction = Array(120).fill("contenido verificado").join(" ");
+  const unsupported = Array(140).fill("afirmación no comprobada").join(" ");
+  const article = {
+    title: "Artículo", blocks: [
+      { id: "intro", type: "paragraph", text: introduction },
+      { id: "claim", type: "paragraph", text: unsupported }
+    ],
+    articleClaims: [{ id: "c1", blockId: "claim", text: unsupported, status: "unsupported" }],
+    sources: [], researchSources: [], verification: { status: "blocked", blockers: [unsupported] }
+  };
+  const calls = [];
+  const result = await verifyAndRepairArticleEvidenceServer({
+    article,
+    dependencies: { verifyArticleEvidence: async (input) => {
+      calls.push(input);
+      return calls.length === 1 ? article : { ...input.article, verification: { status: "verified", blockers: [], coverage: 100 } };
+    } }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(result.verification.status, "blocked");
+  assert.match(result.verification.blockers.join(" "), /afirmación no comprobada/);
+  assert.deepEqual(result.blocks.map((block) => block.id), ["intro", "claim"]);
+  assert.equal(result.automaticCorrections?.length || 0, 0);
+});
 
 const publicDns = async () => [{ address: "93.184.216.34", family: 4 }];
 const html = (title, text) => `<!doctype html><html><head><title>${title}</title><meta property="article:published_time" content="2026-08-10T12:00:00Z"></head><body><main><h1>${title}</h1><p>${text.repeat(8)}</p></main></body></html>`;
@@ -60,6 +89,104 @@ test("HTML extraction removes executable chrome and keeps the real title and art
   assert.doesNotMatch(page.text, /secreto|Menú/);
 });
 
+test("a direct PDF inherits publication metadata only from a page that links that PDF", async () => {
+  const stream = "BT /F1 12 Tf 20 750 Td " + Array.from({ length: 8 }, () => "(Learning research supports classroom practice and evidence.) Tj 0 -20 Td").join(" ") + " ET";
+  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf)); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+  const xref = Buffer.byteLength(pdf);
+  pdf += "xref\n0 6\n0000000000 65535 f \n" + offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("") + `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  const candidate = { id: "pdf-landing", title: "Learning research", url: "https://example.org/files/paper.pdf", landingUrl: "https://example.org/paper" };
+  const fetchImpl = async (url) => String(url).endsWith(".pdf")
+    ? new Response(Buffer.from(pdf), { headers: { "content-type": "application/pdf" } })
+    : new Response('<html><head><meta name="citation_publication_date" content="2022-05-01"><meta name="citation_author" content="Ana García"><title>Learning research</title></head><body><a href="/files/paper.pdf">Descargar PDF</a><p>Estudio sobre aprendizaje en el aula.</p></body></html>', { headers: { "content-type": "text/html" } });
+  const page = await retrieveSourcePage(candidate, { resolveHost: publicDns, fetchImpl });
+  assert.equal(page.metadata.bibliographicMetadata.landingUrl, candidate.landingUrl);
+  assert.equal(page.publishedAt, "2022-05-01T00:00:00.000Z");
+  assert.equal(page.metadata.pageAuthors[0], "Ana García");
+  assert.match(page.text, /Página que enlaza el PDF/);
+  const downloaded = await retrieveSourcePage(candidate, { resolveHost: publicDns, fetchImpl: async (url) => String(url).endsWith(".pdf")
+    ? new Response(Buffer.from(pdf), { headers: { "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="paper.pdf"' } })
+    : fetchImpl(url) });
+  assert.equal(downloaded.contentType, "application/pdf");
+  assert.equal(downloaded.publishedAt, page.publishedAt);
+  const unrelated = await retrieveSourcePage({ ...candidate, landingUrl: "https://example.org/unrelated" }, {
+    resolveHost: publicDns,
+    fetchImpl: async (url) => String(url).endsWith(".pdf")
+      ? new Response(Buffer.from(pdf), { headers: { "content-type": "application/pdf" } })
+      : new Response('<html><head><meta name="citation_publication_date" content="2022-05-01"></head><body><a href="/another.pdf">Otro PDF</a></body></html>', { headers: { "content-type": "text/html" } })
+  });
+  assert.equal(unrelated.publishedAt, "");
+});
+
+test("URL Context is skipped after successful fetch and used once for empty public pages", async () => {
+  const candidate = { id: "source-1", title: "Estudio", url: "https://example.org/study" };
+  let contextCalls = 0;
+  const urlContextReader = async () => {
+    contextCalls += 1;
+    return { retrieved: true, finalUrl: candidate.url, text: "Hallazgos documentados sobre el aprendizaje escolar. ".repeat(12) };
+  };
+  const good = await retrieveSourcePage(candidate, { resolveHost: publicDns, fetchImpl: async () => okPage(), urlContextReader });
+  assert.equal(good.retrievalMethod, "fetch");
+  assert.equal(contextCalls, 0);
+  const recovered = await verifyCandidateSources({
+    candidates: [candidate, { ...candidate, id: "source-duplicate" }],
+    retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => new Response("<main>Vacío</main>", { status: 200, headers: { "content-type": "text/html" } }), urlContextReader },
+    assessSources: async ({ pages }) => pages.map((page) => ({ id: page.id, status: "verified", supportSummary: "Hallazgo" }))
+  });
+  assert.equal(contextCalls, 1);
+  assert.equal(recovered.retrievedPages[0].retrievalMethod, "url_context");
+});
+
+test("Europe PMC recovers an exact DOI with abstract and APA metadata only after fetch fails", async () => {
+  const url = "https://onlinelibrary.wiley.com/doi/10.1234/teaching.2025.7";
+  const candidate = { id: "source-1", title: "Aprendizaje y estrés", url, sourceType: "journal" };
+  const record = {
+    doi: "10.1234/teaching.2025.7", pmid: "12345678", title: "Aprendizaje y estrés",
+    abstractText: "<p>Estudio longitudinal sobre estrés verbal docente y desarrollo del lenguaje infantil. ".repeat(6) + "</p>",
+    authorList: { author: [{ fullName: "Ana Pérez" }] }, firstPublicationDate: "2025-02-10",
+    journalInfo: { journal: { title: "Revista de Educación" }, volume: "12", issue: "2" }
+  };
+  const calls = [];
+  const fetchImpl = async (input) => {
+    calls.push(String(input));
+    return String(input).includes("europepmc")
+      ? new Response(JSON.stringify({ resultList: { result: [record] } }), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("unavailable", { status: 403 });
+  };
+  const result = await verifyCandidateSources({
+    candidates: [candidate], retrieveOptions: { fetchImpl, resolveHost: publicDns },
+    assessSources: async ({ pages }) => pages.map(page => ({ id: page.id, status: "verified", supportSummary: "El resumen respalda el hallazgo.", locator: "Resumen" }))
+  });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /query=DOI%3A10\.1234%2Fteaching\.2025\.7/);
+  assert.equal(result.retrievedPages[0].retrievalMethod, "europe_pmc");
+  assert.equal(result.verifiedSources.length, 1);
+  assert.match(result.verifiedSources[0].apaCitation, /Pérez/);
+  assert.deepEqual(identifierFromUrl(new URL("https://pubmed.ncbi.nlm.nih.gov/12345678/")), { field: "EXT_ID", value: "12345678" });
+});
+
+test("Europe PMC rejects a mismatched record and is skipped when fetch succeeds", async () => {
+  const candidate = { id: "source-1", url: "https://pubmed.ncbi.nlm.nih.gov/12345678/" };
+  let apiCalls = 0;
+  const mismatched = await retrieveSourcePage(candidate, {
+    resolveHost: publicDns,
+    fetchImpl: async (input) => {
+      if (String(input).includes("europepmc")) {
+        apiCalls += 1;
+        return new Response(JSON.stringify({ resultList: { result: [{ pmid: "87654321" }] } }), { status: 200 });
+      }
+      return new Response("unavailable", { status: 403 });
+    }
+  }).catch(error => error);
+  assert.equal(mismatched.code, "unreachable");
+  assert.equal(apiCalls, 1);
+  const page = await retrieveSourcePage(candidate, { resolveHost: publicDns, fetchImpl: async () => okPage() });
+  assert.equal(page.retrievalMethod, "fetch");
+  assert.equal(apiCalls, 1);
+});
+
 test("bibliographic metadata produces APA 7 without inventing missing fields", () => {
   const metadata = extractBibliographicMetadata(`<script type="application/ld+json">{"@type":"ScholarlyArticle","author":[{"name":"María Pérez"}],"publisher":{"name":"Revista Educación"},"identifier":"https://doi.org/10.1234/abc.5"}</script>`);
   assert.deepEqual(metadata.authors, ["María Pérez"]);
@@ -67,6 +194,12 @@ test("bibliographic metadata produces APA 7 without inventing missing fields", (
   assert.equal(metadata.doi, "10.1234/abc.5");
   assert.equal(formatApaCitation({ authors: metadata.authors, publishedAt: "2026-08-10", title: "Aprendizaje y memoria", publisher: metadata.publisher, doi: metadata.doi }), "Pérez, M. (2026). Aprendizaje y memoria. Revista Educación. https://doi.org/10.1234/abc.5");
   assert.equal(formatApaCitation({ authors: [], title: "Guía docente", publisher: "UNESCO", url: "https://unesco.example/guia" }), "UNESCO. (s. f.). Guía docente. https://unesco.example/guia");
+});
+
+test("PDF front matter supplies only an explicit publication year or date", () => {
+  assert.deepEqual(extractPdfPublicationDate("Study title\nPublished: 2021\nResults from 2019"), { publishedAt: "", year: "2021", dateSource: "pdf_text" });
+  assert.deepEqual(extractPdfPublicationDate("Study title\nPublication date: 2021-08-15\nResults"), { publishedAt: "2021-08-15T00:00:00.000Z", year: "2021", dateSource: "pdf_text" });
+  assert.deepEqual(extractPdfPublicationDate("Study title\nCreated 2024\nResults from 2019"), { publishedAt: "", year: "", dateSource: "unknown" });
 });
 
 test("sources without complete APA metadata are rejected so research can replace them", async () => {
@@ -83,6 +216,31 @@ test("sources without complete APA metadata are rejected so research can replace
   assert.equal(result.verifiedSources.length, 0);
   assert.equal(result.rejectedSources[0].reason, "incomplete_bibliographic_metadata");
   assert.deepEqual(result.rejectedSources[0].metadataGaps, ["year"]);
+});
+
+test("verified undated documents remain historical and use s. f. when dated alternatives run out", async () => {
+  const candidates = Array.from({ length: 4 }, (_, index) => ({ id: `undated-${index}`, title: `Documento ${index}`, url: `https://example.org/doc-${index}`, evidenceRole: "current" }));
+  const result = await verifyCandidateSources({
+    candidates, context: "Aprendizaje", allowHistorical: true,
+    dateWindow: { from: "2026-03-01", to: "2026-09-23" },
+    retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => new Response(`<!doctype html><title>Documento</title><meta name="citation_author" content="Ana García"><meta name="citation_journal_title" content="Educación"><main>${"Evidencia pertinente sobre aprendizaje. ".repeat(20)}</main>`, { status: 200, headers: { "content-type": "text/html" } }) },
+    assessSources: async ({ pages }) => pages.map((page) => ({ id: page.id, status: "verified", supportSummary: "El documento analiza el aprendizaje.", locator: "Resultados" }))
+  });
+  assert.equal(result.verifiedSources.length, 4);
+  assert.equal(result.rejectedSources.length, 0);
+  assert.ok(result.verifiedSources.every((source) => source.evidenceRole === "historical" && source.year === "" && source.apaCitation.includes("s. f.")));
+});
+
+test("a proposed year appearing only in the body is not treated as a publication date", async () => {
+  const result = await verifyCandidateSources({
+    candidates: [{ id: "study", title: "Estudio", url: "https://example.org/study", year: "2020", evidenceRole: "historical" }],
+    context: "Aprendizaje", allowHistorical: true,
+    retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => new Response(`<title>Estudio</title><meta name="citation_author" content="Ana García"><meta name="citation_journal_title" content="Educación"><main>${"El análisis compara datos escolares de 2020 sin indicar la fecha de publicación. ".repeat(20)}</main>`, { headers: { "content-type": "text/html" } }) },
+    assessSources: async ({ pages }) => pages.map((page) => ({ id: page.id, status: "verified", supportSummary: "Datos escolares pertinentes", locator: "Resultados" }))
+  });
+  assert.equal(result.verifiedSources.length, 1);
+  assert.equal(result.verifiedSources[0].year, "");
+  assert.match(result.verifiedSources[0].apaCitation, /s\. f\./);
 });
 
 test("direct quotations survive only when they are short and literally present in the verified page", async () => {
@@ -146,6 +304,66 @@ test("source retrieval rejects private hosts, missing pages and generic homepage
   await assert.rejects(() => retrieveSourcePage({ url: "https://example.com/" }, { resolveHost: publicDns, fetchImpl: async () => okPage() }), { code: "generic_homepage" });
 });
 
+test("browser fallback is skipped when fetch extracts enough source text", async () => {
+  let browserCalls = 0;
+  const page = await retrieveSourcePage({ id: "fast", title: "Fuente", url: "https://example.com/source" }, {
+    resolveHost: publicDns,
+    fetchImpl: async () => okPage("Fuente", "Contenido verificable sobre aprendizaje y memoria. "),
+    playwrightReader: async () => {
+      browserCalls += 1;
+      return { html: html("Fallback", "No debería usarse. ") };
+    }
+  });
+  assert.equal(page.retrievalMethod, "fetch");
+  assert.equal(browserCalls, 0);
+});
+
+test("browser fallback reads a dynamic source once when fetch returns empty content", async () => {
+  let browserCalls = 0;
+  const page = await retrieveSourcePage({ id: "dynamic", title: "Dinámica", url: "https://example.com/dynamic" }, {
+    resolveHost: publicDns,
+    fetchImpl: async () => new Response("<!doctype html><title>Dinámica</title><div id='app'></div>", { status: 200, headers: { "content-type": "text/html" } }),
+    playwrightReader: async ({ url }) => {
+      browserCalls += 1;
+      return {
+        finalUrl: url,
+        html: html("Dinámica", "Texto cargado por navegador con evidencia suficiente para validar la fuente. ")
+      };
+    }
+  });
+  assert.equal(page.retrievalMethod, "playwright");
+  assert.equal(page.retrievedTitle, "Dinámica");
+  assert.equal(browserCalls, 1);
+});
+
+test("browser fallback can read a public article whose direct request returns 403", async () => {
+  let browserCalls = 0;
+  const page = await retrieveSourcePage({ id: "restricted", title: "Artículo", url: "https://example.com/article" }, {
+    resolveHost: publicDns,
+    fetchImpl: async () => new Response("Forbidden", { status: 403 }),
+    playwrightReader: async ({ url }) => {
+      browserCalls += 1;
+      return { finalUrl: url, html: html("Artículo", "Contenido científico disponible en la página pública. ") };
+    }
+  });
+  assert.equal(page.retrievalMethod, "playwright");
+  assert.equal(browserCalls, 1);
+});
+
+test("browser fallback respects the per-run budget", async () => {
+  let browserCalls = 0;
+  await assert.rejects(() => retrieveSourcePage({ id: "empty", title: "Vacía", url: "https://example.com/empty" }, {
+    resolveHost: publicDns,
+    fetchImpl: async () => new Response("<!doctype html><title>Vacía</title><main></main>", { status: 200, headers: { "content-type": "text/html" } }),
+    maxBrowserFallbacks: 0,
+    playwrightReader: async () => {
+      browserCalls += 1;
+      return { html: html("Vacía", "Texto que no debería leerse. ") };
+    }
+  }), { code: "empty_content" });
+  assert.equal(browserCalls, 0);
+});
+
 test("source verification keeps only content matches and audits discarded URLs", async () => {
   const result = await verifyCandidateSources({
     candidates: [
@@ -200,6 +418,72 @@ test("high-risk article claims remain blocked without two sources and one tier-1
   });
   assert.equal(article.articleClaims[0].status, "partially_supported");
   assert.equal(article.verification.status, "blocked");
+});
+
+test("article recheck assesses source relevance against the topic, then checks claims separately", async () => {
+  const prompts = [];
+  const client = { models: { generateContent: async (request) => {
+    const prompt = request.contents[0].parts[0].text;
+    prompts.push(prompt);
+    if (prompt.includes("verificador documental estricto")) return modelJson({ assessments: [{ id: "s1", status: "verified", supportSummary: "Explica una estrategia de autorregulación", locator: "Resultados" }] });
+    return modelJson({ claims: [{ id: "c1", blockId: "b1", text: "Una estrategia mejora la autorregulación.", evidenceKind: "external_fact", risk: "low", status: "supported", sourceIds: ["s1"], supportSummary: "Resultados", locator: "Resultados" }], contradictions: [] });
+  } } };
+  const article = await verifyArticleEvidenceServer({
+    article: { title: "Autorregulación escolar", subtitle: "Estrategias educativas", blocks: [{ id: "b1", text: "Una estrategia mejora la autorregulación." }, { id: "b2", text: "Detalle exclusivo del segundo apartado." }], researchSources: [{ id: "s1", title: "Estudio sobre autorregulación", url: "https://one.example/paper", sourceType: "paper" }] },
+    topic: "Autorregulación escolar",
+    dependencies: { client, retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => okPage("Autorregulación", "Una estrategia mejora la autorregulación escolar. ") } }
+  });
+  assert.equal(article.verification.checkedUrls.length, 1);
+  assert.equal(article.verification.status, "verified");
+  assert.ok(prompts[0].includes("Autorregulación escolar. Estrategias educativas"));
+  assert.ok(!prompts[0].includes("Detalle exclusivo del segundo apartado"));
+  assert.ok(prompts[1].includes("Detalle exclusivo del segundo apartado"));
+});
+
+test("supplemental research queries scientific catalogs directly and keeps only relevant article records", async () => {
+  const requests = [];
+  const result = await searchScientificCatalogs({
+    queries: ["self talk anxiety"],
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      if (String(url).includes("europepmc")) return new Response(JSON.stringify({ resultList: { result: [
+        { title: "Compassionate self talk reduces anxiety", pmcid: "PMC123456", doi: "10.1234/example.1", firstPublicationDate: "2025-02-10", journalTitle: "Journal of Psychology" },
+        { title: "Unrelated chemistry experiment", pmcid: "PMC999999", doi: "10.1234/example.2" }
+      ] } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { items: [
+        { type: "journal-article", title: ["Self talk and anxiety in adolescents"], DOI: "10.1234/example.3", published: { "date-parts": [[2024, 5, 2]] } }
+      ] } }), { status: 200 });
+    }
+  });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(result.results.map((item) => item.status), ["searched", "searched"]);
+  assert.equal(result.sources.length, 2);
+  assert.ok(result.sources.some((source) => source.url === "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/"));
+  assert.ok(result.sources.every((source) => source.publishedAt));
+});
+
+test("article recheck uses URL context when a previously selected document rejects direct fetch", async () => {
+  let contextReads = 0;
+  const client = { models: { generateContent: async (request) => {
+    if (request.config?.tools?.some((tool) => tool.urlContext)) {
+      contextReads += 1;
+      return { candidates: [{ finishReason: "STOP", urlContextMetadata: { urlMetadata: [{ urlRetrievalStatus: "URL_RETRIEVAL_STATUS_SUCCESS", retrievedUrl: "https://papers.example/study" }] }, content: { parts: [{ text: JSON.stringify({
+        title: "Self talk and anxiety in schools", authors: ["Ana López"], publishedAt: "2025-03-01", publisher: "Journal of School Psychology",
+        text: "La investigación describe el diálogo interno y la ansiedad en la escuela. ".repeat(12)
+      }) }] } }] };
+    }
+    const prompt = request.contents[0].parts[0].text;
+    if (prompt.includes("verificador documental estricto")) return modelJson({ assessments: [{ id: "s1", status: "verified", supportSummary: "Examina ansiedad escolar", locator: "Resultados" }] });
+    return modelJson({ claims: [{ id: "c1", blockId: "b1", text: "El diálogo interno influye en la ansiedad escolar.", evidenceKind: "external_fact", risk: "low", status: "supported", sourceIds: ["s1"], locator: "Resultados" }], contradictions: [] });
+  } } };
+  const article = await verifyArticleEvidenceServer({
+    article: { title: "Diálogo interno y ansiedad escolar", blocks: [{ id: "b1", text: "El diálogo interno influye en la ansiedad escolar." }], researchSources: [{ id: "s1", title: "Self talk and anxiety in schools", url: "https://papers.example/study", sourceType: "paper" }], researchDossier: { targetSourceCount: 1 } },
+    topic: "Diálogo interno y ansiedad escolar",
+    dependencies: { client, retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => new Response("Prohibido", { status: 403 }) } }
+  });
+  assert.equal(contextReads, 1);
+  assert.equal(article.verification.checkedUrls.length, 1);
+  assert.equal(article.verification.status, "verified");
 });
 
 test("video attribution is preserved but does not replace documentary corroboration", async () => {

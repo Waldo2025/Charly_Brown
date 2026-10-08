@@ -7,11 +7,13 @@ const {
   ANALYSIS_VERSION,
   ANALYSIS_TIMEOUT_MS,
   YOUTUBE_ANALYSIS_CACHE_COLLECTION,
+  analyzeWithAgenticInteraction,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
   compactVideoAnalysisForCache,
   normalizeYoutubeUrl,
   normalizeYoutubeUrls,
+  youtubeMetadataFromHtml,
   youtubeAnalysisCacheKey
 } = require("../src/marcie-youtube-agent.js");
 
@@ -20,7 +22,7 @@ test("el análisis de video usa el presupuesto extendido de la función", () => 
 });
 
 test("invalida análisis previos que no separan los dos ejes editoriales", () => {
-  assert.equal(ANALYSIS_VERSION, 2);
+  assert.equal(ANALYSIS_VERSION, 4);
   assert.equal(YOUTUBE_ANALYSIS_CACHE_COLLECTION, "MarcieYoutubeAnalysisCache");
 });
 
@@ -69,18 +71,21 @@ test("deduplica y limita el expediente a cinco videos", () => {
   assert.equal(new Set(result.valid.map((item) => item.videoId)).size, 5);
 });
 
-test("usa Interactions con procesamiento agentivo para videos largos", async () => {
+test("usa primero generateContent de Vertex con la URL pública, como indica Google", async () => {
   let request;
-  const client = { interactions: { create: async (value) => {
-    request = value;
-    return { id: "interaction-1", status: "completed", output_text: JSON.stringify(parsedVideo()) };
-  } } };
+  const client = {
+    interactions: { create: async () => { throw new Error("Interactions no debe usarse"); } },
+    models: { generateContent: async (value) => {
+      request = value;
+      return { text: JSON.stringify(parsedVideo()) };
+    } }
+  };
   const source = normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`);
   const result = await analyzeSingleYoutubeVideo(source, { client });
   assert.equal(request.model, "gemini-3.8-flash");
-  assert.deepEqual(request.input[0], { type: "video", uri: source.url, mime_type: "video/mp4", processing: "agentic", resolution: "low" });
-  assert.equal(request.background, true);
-  assert.equal(request.response_mime_type, "application/json");
+  assert.deepEqual(request.contents[0].parts[0].fileData, { fileUri: source.url, mimeType: "video/mp4" });
+  assert.equal(request.config.responseMimeType, "application/json");
+  assert.equal(result.analysisMode, "vertex_video");
   assert.equal(result.bibliographySource.verificationStatus, "attributed_only");
   assert.match(result.centralIdea, /conversación interna/);
   assert.match(result.neuroeducationConnection, /autorregulación/);
@@ -88,7 +93,47 @@ test("usa Interactions con procesamiento agentivo para videos largos", async () 
   assert.equal(JSON.stringify(result).includes("Este contenido nunca debe persistirse"), false);
 });
 
-test("espera una interacción en segundo plano hasta completarse", async () => {
+test("completa título y canal con metadatos públicos si Gemini no los entrega", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ title: "Título público del video", author_name: "Canal público" })
+  });
+  try {
+    const result = await analyzeSingleYoutubeVideo(normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`), {
+      client: { models: { generateContent: async () => ({ text: JSON.stringify(parsedVideo({ title: "", channel: "" })) }) } }
+    });
+    assert.equal(result.title, "Título público del video");
+    assert.equal(result.channel, "Canal público");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("el HTML del video prevalece sobre metadatos incompletos de Gemini y aporta la fecha real", async () => {
+  const source = normalizeYoutubeUrl("https://www.youtube.com/watch?v=YOF7hfZGD6o");
+  const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "VideoObject", "@id": source.url, name: "La Neurociencia de las Palabras: Cómo Proverbios Explica tu Salud Mental", uploadDate: "2026-09-15T11:29:38-07:00" })}</script><script>"externalVideoId":"YOF7hfZGD6o","ownerChannelName":"La Biblia Descomplicada"</script>`;
+  assert.deepEqual(youtubeMetadataFromHtml(html, source), {
+    title: "La Neurociencia de las Palabras: Cómo Proverbios Explica tu Salud Mental",
+    channel: "La Biblia Descomplicada",
+    publishedAt: "2026-09-15"
+  });
+  assert.deepEqual(youtubeMetadataFromHtml(html, normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`)), {});
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: true, text: async () => html });
+  try {
+    const result = await analyzeSingleYoutubeVideo(source, {
+      client: { models: { generateContent: async () => ({ text: JSON.stringify(parsedVideo({ title: "Video de YouTube YOF7hfZGD6o", channel: "", publishedAt: "" })) }) } }
+    });
+    assert.equal(result.title, "La Neurociencia de las Palabras: Cómo Proverbios Explica tu Salud Mental");
+    assert.equal(result.channel, "La Biblia Descomplicada");
+    assert.equal(result.publishedAt, "2026-09-15");
+    assert.deepEqual(result.bibliographySource.authors, ["La Biblia Descomplicada"]);
+    assert.equal(result.bibliographySource.publishedAt, "2026-09-15");
+  } finally { global.fetch = originalFetch; }
+});
+
+test("conserva el lector de Interactions como utilidad aislada", async () => {
   let polls = 0;
   const client = {
     interactions: {
@@ -98,20 +143,49 @@ test("espera una interacción en segundo plano hasta completarse", async () => {
         : { id: "interaction-queued", status: "completed", output_text: JSON.stringify(parsedVideo()) })
     }
   };
-  const result = await analyzeSingleYoutubeVideo(normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`), { client, sleep: async () => {} });
+  const result = await analyzeWithAgenticInteraction(client, normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`), { sleep: async () => {} });
   assert.equal(polls, 2);
-  assert.equal(result.title, "Aprender mejor");
+  assert.equal(JSON.parse(result.output_text).title, "Aprender mejor");
 });
 
-test("conserva generateContent como compatibilidad cuando Interactions no está disponible", async () => {
-  let request;
+test("cambia de modelo tras un 429 de capacidad de Vertex", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error("Metadatos públicos no disponibles en esta prueba"); };
+  const requests = [];
   const client = { models: { generateContent: async (value) => {
-    request = value;
+    requests.push(value);
+    if (value.model === "gemini-3.8-flash") throw Object.assign(new Error("RESOURCE_EXHAUSTED"), { status: 429 });
     return { text: JSON.stringify(parsedVideo()) };
   } } };
   const source = normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`);
-  await analyzeSingleYoutubeVideo(source, { client });
-  assert.deepEqual(request.contents[0].parts[0].fileData, { fileUri: source.url, mimeType: "video/mp4" });
+  try {
+    const result = await analyzeSingleYoutubeVideo(source, { client, sleep: async () => {} });
+    assert.deepEqual(requests.map((request) => request.model), ["gemini-3.8-flash", "gemini-3.5-flash"]);
+    assert.equal(result.title, "Aprender mejor");
+  } finally { global.fetch = originalFetch; }
+});
+
+test("distingue una pista existente cuya descarga de subtítulos llega vacía", async () => {
+  const originalFetch = global.fetch;
+  const captionUrl = "https://www.youtube.com/api/timedtext?v=YOF7hfZGD6o&lang=es";
+  global.fetch = async (url) => ({
+    ok: true,
+    text: async () => String(url).includes("/api/timedtext")
+      ? ""
+      : `<script>{"captionTracks":[{"languageCode":"es","baseUrl":"${captionUrl.replaceAll("&", "\\u0026")}"}]}</script>`
+  });
+  try {
+    await assert.rejects(
+      analyzeSingleYoutubeVideo(normalizeYoutubeUrl("https://www.youtube.com/watch?v=YOF7hfZGD6o"), {
+        client: { models: { generateContent: async () => { throw Object.assign(new Error("capacity"), { status: 429 }); } } },
+        sleep: async () => {}
+      }),
+      (error) => error.code === "youtube_public_captions_unavailable"
+        && error.message.includes("youtube_caption_download_empty")
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test("continúa con videos válidos cuando existe un fallo parcial", async () => {

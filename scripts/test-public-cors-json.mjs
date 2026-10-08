@@ -10,7 +10,7 @@ const firstRule = corsConfig[0] || {};
 
 assert.ok(Array.isArray(corsConfig) && corsConfig.length > 0, "cors.json debe contener al menos una regla.");
 assert.ok(firstRule.origin.includes("https://charly-brown.web.app"), "cors.json debe permitir el origen web de producción.");
-assert.ok(firstRule.origin.includes("https://gemini-live-proxy-128488238449.us-central1.run.app"), "cors.json debe permitir el proxy Live de Google Cloud.");
+assert.ok(firstRule.origin.every(origin => !/gemini-live-proxy/i.test(origin)), "cors.json no debe reactivar el proxy Live retirado.");
 assert.ok(firstRule.origin.every((origin) => !/onrender\.com/i.test(origin)), "cors.json no debe conservar orígenes de Render.");
 assert.ok(firstRule.origin.includes("http://127.0.0.1:8787"), "cors.json debe permitir el backend local.");
 assert.ok(firstRule.responseHeader.includes("Content-Range"), "cors.json debe exponer Content-Range para streaming parcial.");

@@ -168,6 +168,12 @@ service firebase.storage {
       allow read, write: if isConversationParticipant(conversationId) && isSafePublicAsset(fileName);
     }
 
+    // Adjuntos de Charly Brown MCP Editor (Word, Excel, PDF, IDML, etc.)
+    match /charly_attachments/{uid}/{sessionId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(uid) && !hasBlockedPublicExtension(fileName);
+    }
+
     // Archivos grandes de análisis/síntesis por sesión de audioTranslate.
     match /analyses/{sessionId}/{fileName} {
       allow read, write: if isSignedIn() && isSafePublicAsset(fileName);

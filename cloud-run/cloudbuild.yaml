@@ -9,15 +9,6 @@ steps:
       - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
       - .
   - name: gcr.io/cloud-builders/docker
-    id: build-live-proxy
-    args:
-      - build
-      - --file
-      - cloud-run/live-proxy/Dockerfile
-      - --tag
-      - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/live-proxy:${_TAG}
-      - cloud-run/live-proxy
-  - name: gcr.io/cloud-builders/docker
     id: smoke-montage-worker
     waitFor:
       - build-montage-worker
@@ -29,21 +20,8 @@ steps:
       - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
       - -c
       - node backend/scripts/install-playwright-chromium.js --verify-only && ffmpeg -hide_banner -filters 2>&1 | grep -q drawtext
-  - name: gcr.io/cloud-builders/docker
-    id: smoke-live-proxy
-    waitFor:
-      - build-live-proxy
-    args:
-      - run
-      - --rm
-      - --entrypoint
-      - node
-      - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/live-proxy:${_TAG}
-      - -e
-      - require('./protocol.js'); console.log('live-proxy-smoke-ok')
 images:
   - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
-  - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/live-proxy:${_TAG}
 substitutions:
   _TAG: phase2
 options:

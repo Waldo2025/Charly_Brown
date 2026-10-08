@@ -120,7 +120,7 @@ test("POST /api/charly-brown/chat responde mediante el agente MCP", async (t) =>
 });
 
 test("el agente reduce herramientas y reintenta cuota transitoria con espera exponencial", async () => {
-  const tools = ["get_unit_workflow", "design_activity", "design_cutout", "research_topic", "render_cutout"]
+  const tools = ["get_unit_workflow", "design_activity", "design_cutout", "research_topic"]
     .map((name) => ({ name }));
   assert.deepEqual(
     selectAgentTools(tools, "Crea una actividad de Matemáticas").map((tool) => tool.name),
@@ -128,7 +128,7 @@ test("el agente reduce herramientas y reintenta cuota transitoria con espera exp
   );
   assert.deepEqual(
     selectAgentTools(tools, "Diseña un recortable tipo puzzle").map((tool) => tool.name),
-    ["get_unit_workflow", "design_cutout", "render_cutout"]
+    ["get_unit_workflow", "design_activity", "design_cutout"]
   );
 
   let attempts = 0;

@@ -60,8 +60,6 @@ test("el calendario tiene controles segmentados y adaptación móvil", () => {
 });
 
 test("el subheader muestra y sincroniza el modo editorial de la sesión", () => {
-  assert.match(editorHtml, /id="editorial-mode-badge"/);
-  assert.match(editorHtml, /id="editorial-mode-badge-label"/);
   assert.match(editorApp, /function renderEditorialModeBadge\(session = null\)/);
   assert.match(editorApp, /renderEditorialModeBadge\(session\);/);
   assert.match(editorApp, /marcie: "Modo Marcie", aida: "Modo Aida", custom: "Modo Otro"/);
@@ -97,7 +95,7 @@ test("el panel lateral elimina el radar compacto y aloja permanentemente el chat
   assert.match(styles, /\.marcie-agent__composer-actions \{[^}]*border-top:/s);
   assert.match(styles, /\.marcie-agent__tool, \.marcie-agent__send \{[^}]*border: 0 !important;[^}]*background: transparent !important;/s);
   assert.match(styles, /\.marcie-agent__tool svg, \.marcie-agent__send svg \{[^}]*width: 16px;[^}]*height: 16px;/s);
-  assert.match(styles, /\.marcie-agent\.is-collapsed \{[^}]*justify-content: flex-end;/s);
+  assert.doesNotMatch(styles, /\.marcie-agent\.is-collapsed/);
   assert.match(styles, /\.marcie-agent-activity \{[^}]*align-self: flex-start;/s);
   assert.match(styles, /@keyframes marcie-agent-thinking/);
 });

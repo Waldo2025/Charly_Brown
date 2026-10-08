@@ -122,7 +122,8 @@ test("generador, interfaz y títulos usan la política sin reescribir sesiones a
     readFile(new URL("../public/science-hud-themes.css", import.meta.url), "utf8")
   ]);
   assert.match(source, /buildQuestionTypeSchedule\(activity, expectedCount\)/);
-  assert.match(source, /generatedActivity\.generation\s*=\s*\{/);
+  assert.match(source, /activity\.generation = \{ complete: false, curriculumPolicyVersion: CURRICULUM_POLICY_VERSION \}/);
+  assert.match(source, /activity\.curriculumGenerationContract = buildCurriculumGenerationContract\(activity\)/);
   assert.match(source, /curriculumPolicyVersion:\s*CURRICULUM_POLICY_VERSION/);
   assert.doesNotMatch(source, /"(?:equation-build|exponent-placement|chemical-balance|graph-plot)":\s*biology/);
   assert.match(html, /<option value="guided">Fácil<\/option>/);

@@ -11,6 +11,7 @@ const {
 const MAX_UPLOAD_BYTES = Object.freeze({
   "scene-image": 10 * 1024 * 1024,
   "scene-video": 80 * 1024 * 1024,
+  "scene-audio": 24 * 1024 * 1024,
   "dialogue-video": 80 * 1024 * 1024,
   music: 24 * 1024 * 1024,
   "library-video": 80 * 1024 * 1024,
@@ -50,7 +51,8 @@ function extensionForMime(contentType = "") {
     "audio/mpeg": "mp3",
     "audio/mp4": "m4a",
     "audio/wav": "wav",
-    "audio/ogg": "ogg"
+    "audio/ogg": "ogg",
+    "audio/webm": "webm"
   };
   return known[value] || "bin";
 }
@@ -67,10 +69,13 @@ function validateUploadRequest(body = {}) {
   if (!Number.isSafeInteger(size) || size <= 0 || size > maximum) {
     throw Object.assign(new Error("invalid_upload_size"), { status: size > maximum ? 413 : 400 });
   }
-  const family = kind.includes("music") || kind === "music"
+  const family = kind.includes("music") || kind === "music" || kind === "scene-audio"
     ? "audio/"
     : (kind.includes("image") ? "image/" : "video/");
   if (!contentType.startsWith(family)) {
+    throw Object.assign(new Error("invalid_upload_content_type"), { status: 400 });
+  }
+  if (kind === "scene-audio" && !new Set(["audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg", "audio/webm"]).has(contentType)) {
     throw Object.assign(new Error("invalid_upload_content_type"), { status: 400 });
   }
   if (!kind.startsWith("library-") && !sessionId) {
@@ -105,7 +110,7 @@ function buildStoragePath({ uploadId, uid, kind, sessionId, rowId, fileName, con
     const family = kind === "library-music" ? "music" : "scenes";
     return `podcaster/library/${family}/pending/${sanitizeSegment(uid, "user")}/${uploadId}-${safeName}.${ext}`;
   }
-  const folder = kind === "music" ? "music" : "videos";
+  const folder = kind === "music" ? "music" : kind === "scene-audio" ? "audio" : "videos";
   const rowPrefix = kind === "music" ? "" : `${rowId}-`;
   return `podcaster/sessions/${sessionId}/owners/${sanitizeSegment(uid, "user")}/${folder}/${rowPrefix}${uploadId}-${safeName}.${ext}`;
 }
@@ -231,7 +236,7 @@ function registerUploadRoutes(app) {
       name: String(pending.fileName || "asset"),
       mimeType: String(metadata.contentType || pending.contentType || "application/octet-stream"),
       size: actualSize,
-      type: String(pending.kind || "").includes("image") ? "image" : (String(pending.kind || "").includes("music") ? "audio" : "video"),
+      type: String(pending.kind || "").includes("image") ? "image" : (["music", "scene-audio", "library-music"].includes(String(pending.kind || "")) ? "audio" : "video"),
       storagePath: String(pending.storagePath || ""),
       downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(String(pending.storagePath || ""))}?alt=media&token=${encodeURIComponent(String(pending.downloadToken || metadata?.metadata?.firebaseStorageDownloadTokens || ""))}`,
       updatedAt: new Date().toISOString()

@@ -135,6 +135,9 @@ function hasLocalSessionContent(session = null) {
   const cfg = source.podcastVideoConfig && typeof source.podcastVideoConfig === "object" ? source.podcastVideoConfig : {};
   if (cfg.timelineClipsByRowId && typeof cfg.timelineClipsByRowId === "object" && Object.keys(cfg.timelineClipsByRowId).length > 0) return true;
   if (Array.isArray(cfg.geminiDialogueTrack?.segments) && cfg.geminiDialogueTrack.segments.length > 0) return true;
+  if (Array.isArray(cfg.freeVoiceTrack?.clips) && cfg.freeVoiceTrack.clips.length > 0) return true;
+  if (cfg.freeVoiceTrack?.added === true || cfg.freeVideoTrack?.added === true) return true;
+  if (Array.isArray(cfg.freeVideoTrack?.clips) && cfg.freeVideoTrack.clips.length > 0) return true;
   return false;
 }
 
@@ -189,7 +192,9 @@ function mergeGeminiDialogueTrackForLoad(base = null, incoming = null) {
   return {
     ...currentBase,
     ...nextIncoming,
-    segments: incomingSegments.length ? incomingSegments : baseSegments,
+    segments: incomingSegments.length || nextIncoming.updatedAt || (nextIncoming.excludedRowIds || []).length
+      ? incomingSegments
+      : baseSegments,
     missingRowIds: mergeArrayByPresence(currentBase.missingRowIds, nextIncoming.missingRowIds),
     excludedRowIds: mergeArrayByPresence(currentBase.excludedRowIds, nextIncoming.excludedRowIds)
   };
@@ -218,7 +223,9 @@ function mergePodcastVideoConfigRecords(base = null, incoming = null) {
     timelineClipsByRowId: mergeRecordMapsByEntry(currentBase.timelineClipsByRowId, nextIncoming.timelineClipsByRowId),
     timelineOnScreenTextClipsByRowId: mergeRecordMapsByEntry(currentBase.timelineOnScreenTextClipsByRowId, nextIncoming.timelineOnScreenTextClipsByRowId),
     timelineOnScreenTextLayoutByRowId: mergeRecordMapsByEntry(currentBase.timelineOnScreenTextLayoutByRowId, nextIncoming.timelineOnScreenTextLayoutByRowId),
-    timelineOverlayCardsById: mergeRecordMapsByEntry(currentBase.timelineOverlayCardsById, nextIncoming.timelineOverlayCardsById),
+    timelineOverlayCardsById: Object.hasOwn(nextIncoming, "timelineOverlayCardsById")
+      ? (nextIncoming.timelineOverlayCardsById || {})
+      : (currentBase.timelineOverlayCardsById || {}),
     timelineSceneAudioMixByRowId: mergeRecordMapsByEntry(currentBase.timelineSceneAudioMixByRowId, nextIncoming.timelineSceneAudioMixByRowId),
     timelineTrackHeightsById: mergeRecordMaps(currentBase.timelineTrackHeightsById, nextIncoming.timelineTrackHeightsById),
     transitionsByEdge: mergeRecordMaps(currentBase.transitionsByEdge, nextIncoming.transitionsByEdge),
@@ -230,11 +237,78 @@ function mergePodcastVideoConfigRecords(base = null, incoming = null) {
   };
 }
 
+function sceneRowSignature(row = null) {
+  const source = row && typeof row === "object" ? row : {};
+  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const scene = normalize(source.sceneDescription || source.scenePrompt);
+  const visual = normalize(source.visualNotes || source.visual);
+  const transition = normalize(source.transition);
+  return scene && visual ? `${scene}\u0000${visual}\u0000${transition}` : "";
+}
+
+function areMirroredSceneRows(firstRows = [], secondRows = []) {
+  return firstRows.length >= 2 && firstRows.length === secondRows.length
+    && firstRows.every((row, index) => {
+      const signature = sceneRowSignature(row);
+      return signature && signature === sceneRowSignature(secondRows[index]);
+    });
+}
+
+function collapseMirroredSceneBlock(rows = []) {
+  const source = Array.isArray(rows) ? rows : [];
+  if (source.length < 4 || source.length % 2 !== 0) return source;
+  const half = source.length / 2;
+  return areMirroredSceneRows(source.slice(0, half), source.slice(half))
+    ? source.slice(0, half)
+    : source;
+}
+
+function collapseMirroredSessionRows(session = null) {
+  if (!session || typeof session !== "object") return session;
+  const scriptRows = Array.isArray(session.script?.rows) ? session.script.rows : [];
+  const rows = scriptRows.length ? scriptRows : (Array.isArray(session.rows) ? session.rows : []);
+  const collapsed = collapseMirroredSceneBlock(rows);
+  if (!collapsed.length) return session;
+  const validRowIds = new Set(collapsed.map((row) => String(row?.id || "").trim()).filter(Boolean));
+  const config = isPlainRecord(session.podcastVideoConfig) ? session.podcastVideoConfig : {};
+  const pruneRowMap = (map) => isPlainRecord(map)
+    ? Object.fromEntries(Object.entries(map).filter(([rowId]) => validRowIds.has(String(rowId).trim())))
+    : map;
+  const geminiTrack = isPlainRecord(config.geminiDialogueTrack) ? config.geminiDialogueTrack : null;
+  const nextConfig = {
+    ...config,
+    timelineClipsByRowId: pruneRowMap(config.timelineClipsByRowId),
+    timelineOnScreenTextClipsByRowId: pruneRowMap(config.timelineOnScreenTextClipsByRowId),
+    timelineOnScreenTextLayoutByRowId: pruneRowMap(config.timelineOnScreenTextLayoutByRowId),
+    ...(geminiTrack ? { geminiDialogueTrack: {
+      ...geminiTrack,
+      segments: Array.isArray(geminiTrack.segments)
+        ? geminiTrack.segments.filter((segment) => validRowIds.has(String(segment?.rowId || "").trim()))
+        : geminiTrack.segments,
+      missingRowIds: Array.isArray(geminiTrack.missingRowIds)
+        ? geminiTrack.missingRowIds.filter((rowId) => validRowIds.has(String(rowId).trim()))
+        : geminiTrack.missingRowIds,
+      excludedRowIds: Array.isArray(geminiTrack.excludedRowIds)
+        ? geminiTrack.excludedRowIds.filter((rowId) => validRowIds.has(String(rowId).trim()))
+        : geminiTrack.excludedRowIds
+    } } : {})
+  };
+  return {
+    ...session,
+    script: { ...(session.script || {}), rows: collapsed },
+    rows: collapsed,
+    podcastVideoConfig: nextConfig
+  };
+}
+
 function mergeRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
   const primary = Array.isArray(primaryRows) ? primaryRows : [];
   const fallback = Array.isArray(fallbackRows) ? fallbackRows : [];
   if (!primary.length) return fallback.slice();
   if (!fallback.length) return primary.slice();
+  if (areMirroredSceneRows(primary, fallback)) {
+    return primary.map((row, index) => ({ ...fallback[index], ...row }));
+  }
   const fallbackById = new Map(
     fallback
       .map((row) => [String(row?.id || "").trim(), row])
@@ -249,7 +323,7 @@ function mergeRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
       : row;
   });
   fallbackById.forEach((row) => merged.push(row));
-  return merged;
+  return collapseMirroredSceneBlock(merged);
 }
 
 function buildSessionFromPodcasterDoc(data = null, sessionId = "") {
@@ -272,7 +346,7 @@ function buildSessionFromPodcasterDoc(data = null, sessionId = "") {
     Array.isArray(topLevel?.script?.rows) ? topLevel.script.rows : [],
     Array.isArray(topLevel?.rows) ? topLevel.rows : []
   );
-  const rows = mergeRowsPreservingFallback(nestedRows, topRows);
+  const rows = collapseMirroredSceneBlock(mergeRowsPreservingFallback(nestedRows, topRows));
   if (rows.length) {
     session.script = {
       ...(isPlainRecord(topLevel.script) ? topLevel.script : {}),
@@ -318,7 +392,7 @@ function buildSessionFromPodcasterDoc(data = null, sessionId = "") {
     });
   }
 
-  return session;
+  return collapseMirroredSessionRows(session);
 }
 
 function mergeLocalSessionsByContent(primary = [], fallback = []) {
@@ -532,6 +606,8 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
   const deletedSessionIds = new Set();
   let scopedStorageKey = "";
   let scopedSessions = [];
+  let scopedSourcesWithSessions = 0;
+  let scopedEntriesRead = 0;
   for (const candidateUid of storageCandidates) {
     const storageKey = resolveSessionStorageKey(candidateUid, deps);
     if (!scopedStorageKey) scopedStorageKey = storageKey;
@@ -539,6 +615,8 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
     const nextScopedSessions = readJsonArrayStorage(nextStorage, storageKey)
       .filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     if (nextScopedSessions.length) {
+      scopedSourcesWithSessions += 1;
+      scopedEntriesRead += nextScopedSessions.length;
       scopedSessions = mergeLocalSessionsByContent(scopedSessions, nextScopedSessions);
     }
   }
@@ -555,8 +633,10 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
       .filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     return sessions.length ? mergeLocalSessionsByContent(acc, sessions) : acc;
   }, []);
-  const mergedLocal = mergeLocalSessionsByContent(scopedSessions, mergedLegacy);
-  if (mergedLocal.length && scopedStorageKey) {
+  const mergedLocal = mergeLocalSessionsByContent(scopedSessions, mergedLegacy)
+    .map(collapseMirroredSessionRows);
+  if (mergedLocal.length && scopedStorageKey
+    && (mergedLegacy.length > 0 || scopedSourcesWithSessions > 1 || mergedLocal.length !== scopedEntriesRead)) {
     nextStorage?.writeJson?.(scopedStorageKey, mergedLocal);
   }
   return mergedLocal;
@@ -607,13 +687,6 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
   [...(ownedSnap?.docs || []), ...(sharedSnap?.docs || [])].forEach((docSnap) => {
     const data = docSnap.data() || {};
     const sessionData = data.session && typeof data.session === "object" ? data.session : null;
-    const sessionKeys = sessionData ? Object.keys(sessionData) : [];
-    const isShallowSession = Boolean(
-      sessionData
-      && sessionKeys.length
-      && sessionKeys.every((key) => key === "id" || key === "title" || key === "script")
-      && Array.isArray(sessionData?.script?.rows)
-    );
     if (deletedSessionIds.has(String(docSnap.id || "").trim())) return;
     const rootAcademicMetadata = data.academicMetadata && typeof data.academicMetadata === "object"
       ? data.academicMetadata
@@ -632,9 +705,12 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
       unitLabel: rootAcademicMetadata.unitLabel || nestedAcademicMetadata.unitLabel || data.academicMetadataUnitLabel || sessionData?.academicMetadataUnitLabel || ""
     };
     merged.set(docSnap.id, {
-      ...(sessionData || {}),
       id: docSnap.id,
       title: data.title || sessionData?.title || "Sin título",
+      podcastStudioUiState: sessionData?.podcastStudioUiState || null,
+      workspaceType: sessionData?.workspaceType || data.workspaceType || null,
+      videoContentType: sessionData?.script?.videoContentType || sessionData?.videoContentType || null,
+      script: { rows: [], videoContentType: sessionData?.script?.videoContentType || sessionData?.videoContentType || null },
       nivel: academicMetadata.nivel,
       grado: academicMetadata.grado,
       trimestre: academicMetadata.trimestre,
@@ -644,7 +720,7 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
       updatedAt: data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()),
       archived: typeof data.archived === "boolean" ? data.archived : sessionData?.archived === true,
       publicar: typeof data.publicar === "boolean" ? data.publicar : sessionData?.publicar === true,
-      isStub: !sessionData || isShallowSession,
+      isStub: true,
       cloudMeta: {
         ownerId: String(data.ownerId || "").trim() || null,
         savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
@@ -768,7 +844,7 @@ async function loadSingleSessionFromCloud(sessionId = "", uid = "", deps = {}) {
         preferRemote: false
       });
       const session = response?.session && typeof response.session === "object" ? response.session : null;
-      if (session) return session;
+      if (session) return collapseMirroredSessionRows(session);
     } catch (error) {
       console.warn("[podcaster][session-store] API session get failed; falling back to Firestore", {
         sessionId: key,
@@ -849,7 +925,7 @@ export function reconcileDialogueVideoState(currentSession = {}, incomingSession
   return { dialogueVideoMap, dialogueVideoDeletedAtMap: deletedAtMap };
 }
 
-function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}) {
+function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}, storageAdapter = null) {
   const mergeSessionRowsWithFallback = deps.mergeSessionRowsWithFallback || ((primaryRows = [], fallbackRows = []) => primaryRows.length ? primaryRows : fallbackRows);
   const mergeAcademicMetadataPreferCloud = (cloudSession = null, localSession = null) => {
     const cloudAcademic = cloudSession?.academicMetadata && typeof cloudSession.academicMetadata === "object" ? cloudSession.academicMetadata : {};
@@ -913,17 +989,18 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const id = String(cloudSession?.id || "").trim();
     const localSession = id ? localById.get(id) : null;
     if (id) localById.delete(id);
-    if (!localSession) return cloudSession;
-    const localRows = Array.isArray(localSession?.script?.rows) ? localSession.script.rows : [];
-    const cloudRows = Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : [];
+    if (!localSession) return collapseMirroredSessionRows(cloudSession);
+    const localRows = collapseMirroredSceneBlock(Array.isArray(localSession?.script?.rows) ? localSession.script.rows : []);
+    const cloudRows = collapseMirroredSceneBlock(Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : []);
     const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
     const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
+    const localDirty = loadSessionSyncMeta(deps.resolveCurrentUid?.(), id, deps, storageAdapter)?.dirty === true;
     const preferLocalSessionFlags = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt >= cloudUpdatedAt);
     const localHasContent = hasLocalSessionContent(localSession);
     const cloudHasContent = hasLocalSessionContent(cloudSession);
     if (localHasContent && !cloudHasContent) {
       const academicSnapshot = mergeAcademicMetadataPreferCloud(cloudSession, localSession);
-      return {
+      return collapseMirroredSessionRows({
         ...cloudSession,
         ...localSession,
         id,
@@ -934,7 +1011,7 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
         publicar: preferLocalSessionFlags ? localSession?.publicar === true : cloudSession?.publicar === true,
         ...academicSnapshot,
         isStub: false
-      };
+      });
     }
     const isShallow = cloudSession.isStub === true || !cloudSession.dialogueVideoMap || Object.keys(cloudSession.dialogueVideoMap).length === 0;
     const hasConcreteCloudRows = cloudSession.isStub !== true && cloudRows.length > 0;
@@ -942,11 +1019,13 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
       mergeSessionRowsWithFallback(cloudRows, localRows),
       localRows
     );
-    const finalRows = hasConcreteCloudRows
-      ? mergeRowsByUpdatedAt(cloudRows, localRows)
-      : resolvedRows;
-    const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
-    const preferLocalDialogueAudioMap = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
+    const finalRows = collapseMirroredSceneBlock(hasConcreteCloudRows
+      ? (localDirty ? mergeRowsByUpdatedAt(cloudRows, localRows) : cloudRows)
+      : resolvedRows);
+    const preferLocalVideoConfig = (cloudSession.isStub === true || localDirty)
+      && Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
+    const preferLocalDialogueAudioMap = (cloudSession.isStub === true || localDirty)
+      && Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     // Compatibility: podcastVideoConfig: preferLocalVideoConfig ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {}) : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {})
     const resolvedPodcastVideoConfig = preferLocalVideoConfig
       ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
@@ -954,7 +1033,7 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const reconciledVideoState = reconcileDialogueVideoState(localSession, cloudSession);
 
     const academicSnapshot = mergeAcademicMetadataPreferCloud(cloudSession, localSession);
-    return {
+    return collapseMirroredSessionRows({
       ...localSession,
       ...cloudSession,
       archived: preferLocalSessionFlags ? localSession?.archived === true : cloudSession?.archived === true,
@@ -992,9 +1071,9 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
       ),
       rows: finalRows,
       isStub: cloudSession.isStub === true
-    };
+    });
   });
-  localById.forEach((session) => merged.push(session));
+  localById.forEach((session) => merged.push(collapseMirroredSessionRows(session)));
   return merged.sort((a, b) => String(b?.updatedAt || "").localeCompare(String(a?.updatedAt || "")));
 }
 
@@ -1003,15 +1082,23 @@ function replaceLocalSessionFromCloud(uid = "", cloudSession = null, deps = {}, 
   const key = String(cloudSession?.id || "").trim();
   if (!key || !cloudSession) return null;
   const current = loadSessionsFromLocalCache(uid, deps, nextStorage);
+  const previousLocal = current.find((session) => String(session?.id || "").trim() === key) || null;
+  // Adoptamos la sesión de la nube, pero las selecciones de media locales (por
+  // ejemplo visualEffectsMap/dialogueVideoMap con su stopMotion) se fusionan por
+  // updatedAt con tombstones. Reemplazarlas a ciegas borraba el stop motion que
+  // el usuario recién subió cuando llegaba un refresh de la nube.
+  const mergedSession = previousLocal
+    ? podcasterMediaState.reconcileSessionMedia(previousLocal, cloudSession)
+    : cloudSession;
   const next = [
-    cloudSession,
+    mergedSession,
     ...current.filter((session) => String(session?.id || "").trim() !== key)
   ];
   persistSessionsToLocalCache(uid, next, deps, nextStorage);
   persistSessionSyncMeta(uid, key, {
     dirty: false,
     cloudFingerprint: computeSessionFingerprint(cloudSession, deps),
-    localFingerprint: computeSessionFingerprint(cloudSession, deps),
+    localFingerprint: computeSessionFingerprint(mergedSession, deps),
     lastKnownCloudUpdatedAt: String(cloudSession?.updatedAt || "").trim()
   }, deps, nextStorage);
   return next;
@@ -1025,6 +1112,17 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
     throw new Error("La sesión no tiene un ID válido.");
   }
   const sessionRef = deps.doc(deps.firestoreDb, "podcaster_sessions", sanitized.id);
+  const priorForSavings = await deps.getDoc(sessionRef);
+  const priorData = priorForSavings.exists() ? priorForSavings.data() || {} : null;
+  const { claimSavings } = await import("../js/savings-client.js");
+  const isVideo = (value) => String(value?.podcastStudioUiState?.composerGenerationMode || "").toLowerCase() === "video"
+    || ["video", "creative", "videopodcast"].includes(String(value?.script?.videoContentType || value?.videoContentType || "").toLowerCase());
+  const newSessionClaim = !priorData
+    ? await claimSavings("podcasterSessions", sanitized.id).catch(() => null)
+    : null;
+  const videoClaim = isVideo(sanitized) && !isVideo(priorData?.session || priorData)
+    ? await claimSavings("videoSessions", sanitized.id).catch(() => null)
+    : null;
   const sessionUpdatedAt = String(sanitized.updatedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
   let committedSession = sanitized;
@@ -1050,6 +1148,8 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
       publicar: committedSession.publicar === true,
       sessionUpdatedAt,
       session: committedSession,
+      ...(newSessionClaim?.permit ? { savingsPermit: newSessionClaim.permit } : {}),
+      ...(videoClaim?.permit ? { savingsVideoPermit: videoClaim.permit } : {}),
       sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
       sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
       lastEditedByUid: uid,
@@ -1058,16 +1158,32 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
       updatedAt: deps.serverTimestamp()
     };
   };
+  let saveCommitted = false;
   if (typeof deps.runTransaction === "function") {
-    await deps.runTransaction(deps.firestoreDb, async (transaction) => {
-      const existingSnap = await transaction.get(sessionRef);
-      const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
-      if (existing && typeof transaction.update === "function") transaction.update(sessionRef, writeSession(existing));
-      else transaction.set(sessionRef, writeSession(existing), { merge: true });
-    });
-  } else {
-    const existingSnap = await deps.getDoc(sessionRef);
-    const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
+    try {
+      await deps.runTransaction(deps.firestoreDb, async (transaction) => {
+        const existingSnap = await transaction.get(sessionRef);
+        const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
+        transaction.set(sessionRef, writeSession(existing), { merge: true });
+      });
+      saveCommitted = true;
+    } catch (txError) {
+      const code = String(txError?.code || "").toLowerCase();
+      const message = String(txError?.message || "").toLowerCase();
+      const isRetryableError = code.includes("failed-precondition")
+        || code.includes("aborted")
+        || code.includes("unavailable")
+        || message.includes("failed-precondition")
+        || message.includes("precondition");
+      if (!isRetryableError) {
+        throw txError;
+      }
+      console.warn("[podcaster-session-store] Transacción falló por precondición/concurrencia; usando setDoc merge directo:", txError);
+    }
+  }
+  if (!saveCommitted) {
+    const existingSnap = await deps.getDoc(sessionRef).catch(() => null);
+    const existing = existingSnap?.exists?.() ? (existingSnap.data() || {}) : null;
     await deps.setDoc(sessionRef, writeSession(existing), { merge: true });
   }
   return {
@@ -1224,6 +1340,23 @@ async function bootstrapSessions(uid = "", deps = {}, storageAdapter = null) {
     cloudSessions = [];
   }
 
+  // A list response contains only metadata. When it matches the cached list,
+  // avoid fingerprinting and rewriting every full script and media map.
+  if (cloudSessions.length > 0 && cloudSessions.length === localSessions.length
+    && cloudSessions.every((session) => session?.isStub === true)) {
+    const localById = new Map(localSessions.map((session) => [String(session?.id || "").trim(), session]));
+    const sameMetadata = cloudSessions.every((cloud) => {
+      const local = localById.get(String(cloud?.id || "").trim());
+      if (!local) return false;
+      return String(local.updatedAt || "") === String(cloud.updatedAt || "")
+        && String(local.title || "") === String(cloud.title || "")
+        && (local.archived === true) === (cloud.archived === true)
+        && (local.publicar === true) === (cloud.publicar === true)
+        && JSON.stringify(local.academicMetadata || {}) === JSON.stringify(cloud.academicMetadata || {});
+    });
+    if (sameMetadata) return { sessions: localSessions, useLocal: true };
+  }
+
   const localFingerprint = JSON.stringify(
     (Array.isArray(localSessions) ? localSessions : [])
       .map((session) => sanitizeSessionForFingerprint(session, deps))
@@ -1251,7 +1384,7 @@ async function bootstrapSessions(uid = "", deps = {}, storageAdapter = null) {
     };
   }
 
-  const resolvedSessions = mergeCloudVsLocalSessions(cloudSessions, localSessions, deps);
+  const resolvedSessions = mergeCloudVsLocalSessions(cloudSessions, localSessions, deps, nextStorage);
   if (cloudSessions.length) {
     persistSessionsToLocalCache(uid, resolvedSessions, deps, nextStorage);
   } else {
@@ -1287,7 +1420,7 @@ function createPodcasterSessionStore(deps = {}) {
       return listAdminVideoSessions(ownerId, deps);
     },
     mergeCloudVsLocalSessions(cloudSessions = [], localSessions = []) {
-      return mergeCloudVsLocalSessions(cloudSessions, localSessions, deps);
+      return mergeCloudVsLocalSessions(cloudSessions, localSessions, deps, storageAdapter);
     },
     computeSessionFingerprint(session = null) {
       return computeSessionFingerprint(session, deps);

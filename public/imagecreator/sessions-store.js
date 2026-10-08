@@ -6,6 +6,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
@@ -258,15 +259,65 @@ export function createImageCreatorSessionStore() {
       if (!session?.id) throw new Error("session_id_required");
       const messages = await compactImageCreatorMessagesForFirestore(session?.session?.messages || []);
       const lastUserMessage = [...messages].reverse().find((message) => message?.role === "user") || null;
-      await updateDoc(doc(db, IMAGE_CREATOR_SESSION_COLLECTION, session.id), {
-        title: session?.title || deriveSessionTitleFromPrompt(lastUserMessage?.prompt || "", "Nueva sesión"),
+      const rawPrompt = String(lastUserMessage?.prompt || "").trim();
+      const rawTitle = String(session?.title || deriveSessionTitleFromPrompt(rawPrompt, "Nueva sesión")).trim();
+
+      const sanitizedPayload = {
+        title: rawTitle.slice(0, 200) || "Nueva sesión",
         archived: session?.archived === true,
-        lastPrompt: String(lastUserMessage?.prompt || "").trim(),
+        lastPrompt: rawPrompt.slice(0, 4800),
         session: {
-          messages
+          messages: messages.slice(-25)
         },
         updatedAt: serverTimestamp()
-      });
+      };
+
+      if (session?.videoScriptData && typeof session.videoScriptData === "object") {
+        sanitizedPayload.videoScriptData = {
+          scenes: Array.isArray(session.videoScriptData.scenes) ? session.videoScriptData.scenes.slice(0, 50) : [],
+          sceneImages: Array.isArray(session.videoScriptData.sceneImages)
+            ? session.videoScriptData.sceneImages.map((img) => ({
+                id: String(img?.id || "").slice(0, 50),
+                sceneIndex: Number(img?.sceneIndex ?? 0),
+                downloadUrl: String(img?.downloadUrl || "").slice(0, 2000),
+                storagePath: String(img?.storagePath || "").slice(0, 1000),
+                prompt: String(img?.prompt || "").slice(0, 1000),
+                textoPantalla: String(img?.textoPantalla || "").slice(0, 200),
+                approved: img?.approved === true,
+                mimeType: String(img?.mimeType || "image/png").slice(0, 50)
+              }))
+            : [],
+          scriptCharacter: session.videoScriptData.scriptCharacter ? {
+            name: String(session.videoScriptData.scriptCharacter.name || "").slice(0, 100),
+            description: String(session.videoScriptData.scriptCharacter.description || "").slice(0, 500),
+            downloadUrl: String(session.videoScriptData.scriptCharacter.downloadUrl || "").slice(0, 2000),
+            storagePath: String(session.videoScriptData.scriptCharacter.storagePath || "").slice(0, 1000),
+            approved: session.videoScriptData.scriptCharacter.approved === true
+          } : null,
+          characterConsistent: session.videoScriptData.characterConsistent === true
+        };
+      }
+
+      try {
+        await updateDoc(doc(db, IMAGE_CREATOR_SESSION_COLLECTION, session.id), sanitizedPayload);
+      } catch (err) {
+        console.warn("[sessions-store] Error actualizando sesión en Firestore:", err);
+        if (session.ownerId && /not-found|permission-denied/i.test(err?.code || err?.message || "")) {
+          try {
+            await setDoc(doc(db, IMAGE_CREATOR_SESSION_COLLECTION, session.id), {
+              ownerId: session.ownerId,
+              ownerEmail: String(session.ownerEmail || "").trim(),
+              createdAt: serverTimestamp(),
+              ...sanitizedPayload
+            }, { merge: true });
+          } catch (fallbackErr) {
+            console.warn("[sessions-store] Fallback setDoc error:", fallbackErr);
+            throw fallbackErr;
+          }
+        } else {
+          throw err;
+        }
+      }
     },
     findById(sessions, sessionId) {
       return findSessionById(sessions, sessionId);

@@ -1,4 +1,4 @@
-import { experience } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
+import { experience } from "./escape-room-experience.mjs?v=20260924-coordinate-grid-v12";
 
 function escapeHtml(value = "") {
   return String(value ?? "")

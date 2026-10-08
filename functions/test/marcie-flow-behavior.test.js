@@ -9,7 +9,18 @@ const { renderArticleToWordPressHtml } = require("../src/marcie-wordpress-core.j
 const { extractBibliographicMetadata, retrieveSourcePage } = require("../src/marcie-source-verifier.js");
 const root = path.resolve(__dirname, "../..");
 const read = p => fs.readFileSync(path.join(root,p),"utf8");
-const strip = text => text.replace(/^import[\s\S]*?;\s*$/gm,"").replace(/\bexport /g,"");
+const strip = text => text.replace(/^export\s*\{[\s\S]*?\};?\s*$/gm,"").replace(/^import[\s\S]*?;\s*$/gm,"").replace(/\bexport /g,"");
+async function loadModalTestDependencies(page) {
+  await page.route("https://marcie.test/", (route) => route.fulfill({ body: "<main></main>", contentType: "text/html" }));
+  await page.goto("https://marcie.test/");
+  await page.evaluate(([vocabulary, proposals]) => {
+    (0, eval)(vocabulary);
+    (0, eval)(proposals);
+  }, [
+    strip(read("public/MarcieBlogEditor/js/services/marcie-vocabulary.js")),
+    strip(read("public/MarcieBlogEditor/js/services/marcie-title-proposals.js"))
+  ]);
+}
 
 test("source taxonomy separates documents from editorial resources and migrates saved choices", () => {
   const source = read("public/MarcieBlogEditor/js/components/modals.js");
@@ -20,15 +31,15 @@ test("source taxonomy separates documents from editorial resources and migrates 
     "#fuentes Bibliografía final en formato APA", "#fuentes Libros de autores reconocidos"
   ]);
   assert.deepEqual(Array.from(values), ["#concepto Desarrollar un caso de estudio documentado", "#fuentes Libros de autores reconocidos"]);
-  const sources = source.slice(source.indexOf('<legend><span>Fuentes</span>'), source.indexOf('<legend><span>Recursos editoriales</span>'));
-  assert.doesNotMatch(sources, /data-session-spec-value="(?:Casos reales documentados|Bibliografía final en formato APA)"/);
-  assert.match(sources, /Dónde buscar/);
-  assert.match(sources, /Tipos de fuente y criterios/);
-  assert.match(source, /Bibliografía APA 7 · Siempre incluida/);
+  const sources = source.slice(source.indexOf("<!-- Card 3: Fuentes y Plataformas -->"), source.indexOf('data-session-spec-select="concepto"'));
+  assert.doesNotMatch(sources, /<option value="(?:Casos reales documentados|Bibliografía final en formato APA)"/);
+  assert.match(sources, /data-session-platform-select/);
+  assert.match(sources, /data-session-spec-select="fuentes"/);
+  assert.match(source, /APA 7/);
 });
 
 test("research checks all seven platforms and can supplement empty results", async () => {
-  const { researchArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
+  const { researchArticleEvidenceServer } = require("./research-fixture.cjs");
   const prompts=[];
   const client={models:{generateContent:async request=>{
     const prompt=request.contents[0].parts[0].text;prompts.push(prompt);
@@ -41,18 +52,19 @@ test("research checks all seven platforms and can supplement empty results", asy
   assert.equal(dossier.sources.length,0);
 });
 test("research searches only selected platforms and rejects an empty selection", async () => {
-  const { researchArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
+  const { researchArticleEvidenceServer } = require("./research-fixture.cjs");
   const prompts = [];
   const client = { models: { generateContent: async request => {
     prompts.push(request.contents[0].parts[0].text);
     return { candidates: [{ content: { parts: [{ text: JSON.stringify({ sources: [] }) }] } }] };
   } } };
   const dossier = await researchArticleEvidenceServer({ topic: "Aprendizaje", searchPlatforms: ["scielo"], dependencies: { client } });
-  assert.equal(prompts.length, 3);
+  assert.equal(prompts.length, 4);
   assert.ok(prompts[0].includes("site:scielo.org"));
-  assert.deepEqual(dossier.platformResults.map(result => result.id), ["scielo", "scielo", "scielo"]);
+  assert.match(prompts[1], /Reformula con sinónimos/);
+  assert.deepEqual(dossier.platformResults.map(result => result.id), ["scielo", "scielo", "scielo", "scielo"]);
   await assert.rejects(researchArticleEvidenceServer({ searchPlatforms: [], dependencies: { client } }), /Selecciona al menos/);
-  assert.equal(prompts.length, 3);
+  assert.equal(prompts.length, 4);
   const policy = require("../src/marcie-research-policy.js");
   assert.notEqual(policy.fingerprint({ searchPlatforms: ["scielo"] }), policy.fingerprint({ searchPlatforms: ["ebsco"] }));
 });
@@ -62,18 +74,69 @@ test("failed/empty dossiers are retried; valid matching dossiers are reused", as
   const context=vm.createContext({
     MarcieResearchPolicy:require("../src/marcie-research-policy.js"),
     listMarciePromptProfiles:()=>[],
+    buildEditorialVocabularyInstruction:()=>"",normalizeEditorialVocabulary:()=>[],
+    restoreSessionResearchFromCache(){},getResearchDossierFromCache:()=>null,
+    saveResearchDossierToCache(){},saveSessionResearchToCache(){},isTransientFetchError:()=>false,
     researchArticleEvidence:async()=>{searches++;if(searches===1)throw Error("offline");return {sources:Array.from({length:6},(_,i)=>({id:"s"+i,verificationStatus:"verified",title:"Paper",url:"https://example.org/paper"+i})),analysisStatus:"complete",analysis:{sourceIds:Array.from({length:6},(_,i)=>"s"+i)},verificationStatus:"verified"};},
-    draftArticleWithGemini:async({researchDossier})=>({blocks:[{text:"Article"}],sources:researchDossier.sources}),
+    draftArticleWithGemini:async({researchDossier,provisionalDraft})=>({blocks:[{text:"Article"}],sources:researchDossier.sources,provisionalDraft}),
     console
   });
   vm.runInContext(strip(read("public/MarcieBlogEditor/js/services/marcie-mode-service.js")),context);
   const session={id:"s",topic:"Learning",audience:"educators",researchByAudience:{educators:{sources:[]}}};
-  await assert.rejects(context.draftArticleForMode({session,topic:session.topic,audience:"educators"}),/fuentes verificadas/);
+  const provisional=await context.draftArticleForMode({session,topic:session.topic,audience:"educators"});
+  assert.equal(provisional.provisionalDraft,true);assert.equal(provisional.sources.length,0);
   const result=await context.draftArticleForMode({session,topic:session.topic,audience:"educators"});
   assert.equal(result.sources.length,6);assert.equal(searches,2);
   await context.draftArticleForMode({session,topic:session.topic,audience:"educators"});assert.equal(searches,2);
   session.topic="Different";
   await context.draftArticleForMode({session,topic:session.topic,audience:"educators"});assert.equal(searches,3);
+});
+
+test("draft specifications do not invalidate a verified proposal dossier", async () => {
+  const policy = require("../src/marcie-research-policy.js");
+  let searches = 0;
+  const context = vm.createContext({
+    MarcieResearchPolicy: policy, listMarciePromptProfiles: () => [],
+    buildEditorialVocabularyInstruction: () => "", normalizeEditorialVocabulary: () => [],
+    restoreSessionResearchFromCache() {}, getResearchDossierFromCache: () => null,
+    saveResearchDossierToCache() {}, saveSessionResearchToCache() {}, isTransientFetchError: () => false,
+    researchArticleEvidence: async () => { searches++; throw new Error("No debe volver a investigar"); },
+    draftArticleWithGemini: async ({ researchDossier }) => ({ blocks: [{ text: "Artículo" }], sources: researchDossier.sources }),
+    console
+  });
+  vm.runInContext(strip(read("public/MarcieBlogEditor/js/services/marcie-mode-service.js")), context);
+  const sources = Array.from({ length: 6 }, (_, index) => ({ id: `s${index}`, url: `https://example.org/${index}`, verificationStatus: "verified" }));
+  const proposal = { audience: "parents", title: "Título de la propuesta", brief: "Enfoque para familias" };
+  const session = {
+    id: "s", topic: "Aprendizaje", audience: "parents", editorialMode: "marcie",
+    selectedAudiences: ["parents"], sessionConfiguration: { specifications: ["#tono claro"] },
+    specifications: ["#tono claro"], proposals: [proposal], researchByAudience: {}
+  };
+  const dossier = { sources, analysisStatus: "complete", analysis: { sourceIds: sources.map((source) => source.id) }, verificationStatus: "verified" };
+  dossier.researchFingerprint = context.proposalResearchFingerprint(session, "parents", proposal);
+  session.researchByAudience.parents = dossier;
+  session.specifications = ["#tono claro", "#ejemplo[parents] Situación familiar concreta"];
+  const article = await context.draftArticleForMode({ session, title: proposal.title, topic: session.topic, audience: "parents", brief: `${proposal.brief}\nEspecificaciones de este público: situación familiar concreta`, isAutomated: true });
+  assert.equal(article.sources.length, 6);
+  const resumed = await context.generateProposalsForMode({ session, topic: session.topic, reuseProposals: true });
+  assert.equal(resumed.proposals.length, 1);
+  assert.equal(searches, 0);
+});
+
+test("cancelar la redacción aborta la solicitud JSON pendiente", async () => {
+  const controller = new AbortController();
+  let receivedSignal = null;
+  const context = vm.createContext({
+    generateWithGemini: ({ signal }) => {
+      receivedSignal = signal;
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("Cancelado"), { name: "AbortError" })), { once: true }));
+    }
+  });
+  vm.runInContext(strip(read("public/MarcieBlogEditor/js/services/marcie-draft-chunks.js")), context);
+  const pending = context.generateArticleInChunks({ model: "gemini", title: "Tema", topic: "Tema", audience: "parents", brief: "", dossier: { sources: [] }, signal: controller.signal });
+  assert.equal(receivedSignal, controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
 });
 function storeContext(remoteRevision=0) {
   const writes=[], storage=new Map();
@@ -99,13 +162,41 @@ test("queued writes snapshot each edit, preserve separate audiences and persist 
   assert.equal(writes[1].researchRegion,"ES");assert.equal(writes[1].archived,true);assert.equal(writes[1].storageRevision,2);
 });
 
+test("a successful save clears its local backup when only the storage revision changes", async () => {
+  const { context, storage } = storeContext();
+  const session = { id: "same-content", ownerId: "owner", title: "Article", audience: "educators", article: { audience: "educators", title: "Article", blocks: [] } };
+  const saving = context.saveMarcieSession(session);
+  session.storageRevision = 1;
+  await saving;
+  assert.equal(storage.has("marcie_blog_editor_pending_save_v1_owner_same-content"), false);
+});
+
+test("a stale backup is recognized only when its content matches Firestore", () => {
+  const { context } = storeContext();
+  const pending = { id: "session", storageRevision: 1, title: "Artículo", article: { title: "Artículo", blocks: [{ text: "Versión guardada" }] } };
+  const remote = { storageRevision: 2, title: "Artículo", article: { title: "Artículo", blocks: [{ text: "Versión guardada" }] } };
+  assert.equal(context.samePendingSnapshotAsRemote(pending, remote), true);
+  assert.equal(context.samePendingSnapshotAsRemote({ ...pending, article: { title: "Artículo", blocks: [{ text: "Edición local" }] } }, remote), false);
+});
+
+test("a pending backup is restored only by its originating browser tab", () => {
+  const first = storeContext();
+  const second = storeContext();
+  first.context.markMarcieSessionDirty({ id: "tab-owned", ownerId: "owner", title: "Prueba" });
+  const pending = JSON.parse(first.storage.get("marcie_blog_editor_pending_save_v1_owner_tab-owned"));
+  assert.equal(first.context.pendingBackupBelongsToThisTab(pending), true);
+  assert.equal(second.context.pendingBackupBelongsToThisTab(pending), false);
+  assert.equal(first.context.pendingBackupBelongsToThisTab({ session: pending.session }), false,
+    "legacy backups require a visible tab and must not be auto-saved by every tab");
+});
+
 test("session persistence removes inline images and duplicated research payloads", () => {
   const source=read("public/MarcieBlogEditor/js/services/marcie-session-store.js");
   const code=source.slice(source.indexOf("function omitUndefinedFirestoreValues"),source.indexOf("async function persistMarcieSession")).replace(/\bexport /g,"");
   const context=vm.createContext({});
   vm.runInContext(code,context);
   const sources=Array.from({length:12},(_,index)=>({id:`s${index}`,title:`Fuente ${index}`,url:`https://example.org/${index}`,apaCitation:"Referencia completa ".repeat(20)}));
-  const rejected=Array.from({length:80},(_,index)=>({id:`r${index}`,title:`Descartada ${index}`,url:`https://discarded.example/${index}`,reason:"content_mismatch",raw:"x".repeat(2000)}));
+  const rejected=Array.from({length:80},(_,index)=>({id:`r${index}`,title:`Descartada ${index}`,url:`https://discarded.example/${index}`,reason:"content_mismatch",metadataGaps:index===0?["author"]:[],raw:"x".repeat(2000)}));
   const dossier={sources,rejectedSources:rejected,platformResults:Array.from({length:21},(_,index)=>({id:`p${index}`,round:1,status:"searched",query:"q".repeat(5000),rejected})),telemetry:{retrievedUrls:sources.map(item=>item.url)}};
   const article={title:"Artículo",blocks:[{text:"Contenido"}],featuredImage:{url:`data:image/png;base64,${"A".repeat(400000)}`},sources,usedSources:sources,researchSources:sources,researchDossier:dossier,sourceAudit:rejected};
   const session={audience:"parents",article,articlesByAudience:{parents:article},researchByAudience:{parents:dossier},trends:[dossier],log:[]};
@@ -118,6 +209,26 @@ test("session persistence removes inline images and duplicated research payloads
   assert.equal(compact.article.researchDossier,undefined);
   assert.equal(compact.researchByAudience.parents.platformResults[0].query,undefined);
   assert.equal(compact.researchByAudience.parents.rejectedSources.length,40);
+  assert.deepEqual(Array.from(compact.researchByAudience.parents.rejectedSources[0].metadataGaps),["author"]);
+});
+
+test("research cache preserves a verified PDF publication year and pending date search", () => {
+  const storage = new Map();
+  const context = vm.createContext({ localStorage: {
+    setItem: (key, value) => storage.set(key, value), getItem: (key) => storage.get(key) || null,
+    removeItem: (key) => storage.delete(key)
+  } });
+  vm.runInContext(strip(read("public/MarcieBlogEditor/js/services/marcie-research-cache.js")), context);
+  context.saveResearchDossierToCache("Aprendizaje", "parents", {
+    sources: [{ id: "pdf", title: "Estudio", url: "https://example.org/study.pdf", year: "2021", evidenceRole: "historical", verificationStatus: "verified" }],
+    rejectedSources: [{ id: "other", url: "https://example.org/other", reason: "incomplete_bibliographic_metadata", metadataGaps: ["author"] }],
+    verificationStatus: "blocked", dateSearchComplete: false, datedSourceCount: 1
+  });
+  const restored = context.getResearchDossierFromCache("Aprendizaje", "parents");
+  assert.equal(restored.sources[0].year, "2021");
+  assert.equal(restored.dateSearchComplete, false);
+  assert.equal(restored.datedSourceCount, 1);
+  assert.equal(restored.rejectedSources[0].metadataGaps[0], "author");
 });
 test("remote revision conflict prevents overwrites and retains a user-scoped backup",async()=>{
   const {context,writes,storage}=storeContext(9);
@@ -128,13 +239,15 @@ test("remote revision conflict prevents overwrites and retains a user-scoped bac
 });
 test("PDF retrieval extracts actual document text using bounded downloaded bytes",async()=>{
   const text="Learning research supports classroom practice and evidence based decisions. ".repeat(5);
-  const stream="BT /F1 12 Tf 20 750 Td "+Array.from({length:6},()=>"(Learning research supports classroom practice and evidence.) Tj 0 -20 Td").join(" ")+" ET";
+  const stream="BT /F1 12 Tf 20 750 Td (Published: 2021) Tj 0 -20 Td "+Array.from({length:6},()=>"(Learning research supports classroom practice and evidence.) Tj 0 -20 Td").join(" ")+" ET";
   const objects=["<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>","<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>","<< /Length "+stream.length+" >>\nstream\n"+stream+"\nendstream","<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
   let pdf="%PDF-1.4\n";const offsets=[0];
   objects.forEach((object,index)=>{offsets.push(Buffer.byteLength(pdf));pdf+=(index+1)+" 0 obj\n"+object+"\nendobj\n";});
   const xref=Buffer.byteLength(pdf);pdf+="xref\n0 6\n0000000000 65535 f \n"+offsets.slice(1).map(offset=>String(offset).padStart(10,"0")+" 00000 n \n").join("")+"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF";
   const page=await retrieveSourcePage({id:"pdf",title:"Paper",url:"https://example.org/paper.pdf"},{resolveHost:async()=>[{address:"93.184.216.34",family:4}],fetchImpl:async()=>new Response(Buffer.from(pdf),{headers:{"content-type":"application/pdf"}})});
   assert.match(page.text,/Learning research supports classroom/);assert.equal(page.contentType,"application/pdf");
+  assert.equal(page.metadata.pageYear,"2021");
+  assert.equal(page.dateSource,"pdf_text");
 });
 
 test("browser and server bibliography/research policies use identical implementations", () => {
@@ -186,10 +299,26 @@ test("reconfiguration success commits the same ID and invalidates approval", asy
   const fn=editor.slice(editor.indexOf("async function reconfigureSession"),editor.indexOf("function setupEventListeners"));
   let committed;
   const session={id:"same",topic:"Original",article:{title:"Original"},articlesByAudience:{parents:{title:"Original"}},publicationsByAudience:{parents:{remoteId:123,status:"publish"}}};
-  const context=vm.createContext({sessionOperations:new Set(),showNewSessionModal:async()=>({title:"Nuevo",topic:"Nuevo",selectedAudiences:["parents"],specifications:[]}),getActiveMarciePromptProfileId:()=>"",listMarciePromptProfiles:()=>[],listEditorialProfilesOnce:async()=>[],chooseEditorialAction:async()=>"replace",showAutomatedSessionProgress(){},runAutomatedSessionWorkflow:async working=>{working.article={title:"Nuevo",blocks:[{text:"New"}],approval:{approvedAt:"date"}};working.articlesByAudience={parents:working.article};working.approvedAudiences=["parents"];},saveMarcieSession:async()=>{},commitMarcieSessionReplacement:async working=>{committed=JSON.parse(JSON.stringify(working));},appState:{sessions:[session]},renderSessionList(){},renderActiveSession(){},showToast(){}});
+  const context=vm.createContext({sessionOperations:new Set(),showSessionCreationChoiceModal:async()=>"manual",showNewSessionModal:async()=>({title:"Nuevo",topic:"Nuevo",selectedAudiences:["parents"],specifications:[]}),getActiveMarciePromptProfileId:()=>"",listMarciePromptProfiles:()=>[],listEditorialProfilesOnce:async()=>[],chooseEditorialAction:async()=>"replace",showAutomatedSessionProgress(){},runAutomatedSessionWorkflow:async working=>{working.article={title:"Nuevo",blocks:[{text:"New"}],approval:{approvedAt:"date"}};working.articlesByAudience={parents:working.article};working.approvedAudiences=["parents"];},saveMarcieSession:async()=>{},commitMarcieSessionReplacement:async working=>{committed=JSON.parse(JSON.stringify(working));},appState:{sessions:[session]},renderSessionList(){},renderActiveSession(){},showToast(){}});
   vm.runInContext(fn,context);
   await context.reconfigureSession(session);
   assert.equal(committed.id,"same");assert.equal(session.article.title,"Nuevo");assert.deepEqual(committed.approvedAudiences,[]);assert.equal(committed.article.approval,undefined);assert.equal(committed.publicationsByAudience.parents.remoteId,123);
+});
+test("reconfigurar con MCP conserva la sesión activa y abre la guía sin crear otra", async () => {
+  const editor = read("public/MarcieBlogEditor/js/editor-app.js");
+  const fn = editor.slice(editor.indexOf("async function reconfigureSession"), editor.indexOf("function setupEventListeners"));
+  const opened = [];
+  const session = { id: "sesion-existente", topic: "Tema" };
+  const context = vm.createContext({
+    sessionOperations: new Set(),
+    showSessionCreationChoiceModal: async options => { assert.equal(options.reconfigure, true); return "agent"; },
+    marcieAgentPanel: { startGuidedSession: async options => opened.push(options.sessionId) },
+    showToast: () => { throw new Error("No se esperaba un error"); }
+  });
+  vm.runInContext(fn, context);
+  await context.reconfigureSession(session);
+  assert.deepEqual(opened, [session.id]);
+  assert.equal(context.sessionOperations.size, 0);
 });
 test("publisher metadata keeps journal volume issue pages and all authors", () => {
   const meta=extractBibliographicMetadata('<meta name="citation_journal_title" content="Revista"><meta name="citation_volume" content="4"><meta name="citation_issue" content="2"><meta name="citation_firstpage" content="12"><meta name="citation_lastpage" content="19">'+Array.from({length:23},(_,i)=>'<meta name="citation_author" content="Autor '+i+'">').join(""));
@@ -242,13 +371,14 @@ test("audience generation shows its progress in article-view and clears it after
   const context=vm.createContext({sessionOperations:new Set(),chooseEditorialAction:async()=>"generate",getEditorialAudienceLabel:()=>"Padres y tutores",
     window:{__marcieShowArticleGenerationSpinner:(session,progress)=>spinner.push({state:"show",session:session.id,...progress}),__marcieHideArticleGenerationSpinner:()=>spinner.push({state:"hide"})},
     draftArticleForMode:async()=>{assert.equal(spinner[0].state,"show");return{title:"Nuevo",audience:"parents",blocks:[{text:"Contenido"}]};},
+    retryTransientFetch:operation=>operation(),hasCompleteArticle:article=>Array.isArray(article?.blocks)&&article.blocks.length>0,
     saveMarcieSession:async()=>{},renderSessionList(){},renderActiveSession(){},setSyncStatus(){},showToast(){},invalidateMaterialApproval(){}});
   vm.runInContext(fn,context);
-  const session={id:"a",topic:"Tema",audience:"educators",article:{title:"Old"},articlesByAudience:{},researchByAudience:{},approvedAudiences:[]};
+  const session={id:"a",topic:"Tema",audience:"educators",article:{title:"Old"},articlesByAudience:{},researchByAudience:{},approvedAudiences:[],humanizationEnabled:false};
   await context.selectAudienceSafely(session,"parents");
   assert.deepEqual(spinner.map(entry=>entry.state),["show","hide"]);
   assert.equal(spinner[0].audienceLabel,"Padres y tutores");
-  assert.equal(spinner[0].heading,"Creando artículo para otro público");
+  assert.equal(spinner[0].heading,"Creando artículo para Padres y tutores");
   assert.equal(session.article.title,"Nuevo");
 });
 
@@ -261,7 +391,8 @@ test("session header opens reconfiguration for the active session and prevents d
     assert.ok(button, "the session header must expose a dedicated button");
     await page.setContent(button);
     const editor = read("public/MarcieBlogEditor/js/editor-app.js");
-    const binding = editor.slice(editor.indexOf('  document.getElementById("btn-reconfigure-session-header")?.addEventListener'), editor.indexOf('  document.getElementById("btn-ai-assistant-header")?.addEventListener'));
+    const binding = editor.slice(editor.indexOf("  const handleReconfigureClick ="), editor.indexOf("  // Botón spinner del toolbar", editor.indexOf("  const handleReconfigureClick =")));
+    assert.match(binding, /btn-reconfigure-session-header/);
     const result = await page.evaluate(async binding => {
       const session = { id: "existing-session", topic: "Configuración existente" };
       const calls = [];
@@ -286,7 +417,7 @@ test("reconfiguration wires topic refinement to the selected editorial mode", as
   const editor = read("public/MarcieBlogEditor/js/editor-app.js");
   const fn = editor.slice(editor.indexOf("async function reconfigureSession"), editor.indexOf("function setupEventListeners"));
   let received;
-  const context = vm.createContext({ sessionOperations: new Set(),
+  const context = vm.createContext({ sessionOperations: new Set(), showSessionCreationChoiceModal: async () => "manual",
     showNewSessionModal: async options => { assert.equal(await options.onRefineTopic("Tema", ["#fuentes Libros"], "aida", { structure: "hybrid" }), "Tema afinado"); return null; },
     refineTopicForMode: async options => { received = options; return "Tema afinado"; },
     getActiveMarciePromptProfileId: () => "", listMarciePromptProfiles: () => [], listEditorialProfilesOnce: async () => [],
@@ -301,21 +432,56 @@ test("modal refines typed text and shows every configured research platform", as
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent("<main></main>");
+    await loadModalTestDependencies(page);
     await page.evaluate(source => (0, eval)(source), read("public/MarcieBlogEditor/js/contracts/marcie-research-policy.js"));
     await page.evaluate(source => {
       (0, eval)(source);
-      showNewSessionModal({ initialConfiguration: { mode: "automated" }, onRefineTopic: async topic => topic + " mejorado" });
+      showNewSessionModal({ initialConfiguration: { mode: "automated", selectedAudiences: ["educators"] }, onRefineTopic: async topic => topic + " mejorado" });
     }, strip(read("public/MarcieBlogEditor/js/components/modals.js")));
     await page.locator("#new-session-title-input").fill("Aprendizaje activo");
     await page.locator("#new-session-refine-topic").click();
-    await page.waitForFunction(() => document.getElementById("new-session-title-input").value === "Aprendizaje activo mejorado");
+    await page.waitForFunction(() => document.getElementById("new-session-refine-status").textContent.startsWith("Listo:"));
+    assert.equal(await page.locator("#new-session-title-input").inputValue(), "Aprendizaje activo");
+    assert.match(await page.locator("#title-proposals-grid").textContent(), /Aprendizaje activo mejorado/);
     assert.equal(await page.locator("#new-session-title-error").evaluate(el => el.classList.contains("hidden")), true);
-    const labels = await page.locator("[data-research-platform-options] label").allTextContents();
-    assert.deepEqual(labels, require("../src/marcie-research-policy.js").platforms.map(platform => platform.name).concat("Otros sitios fiables"));
-    assert.equal(await page.locator('[name="research-platform"]:checked').count(), 8);
-    await page.locator('[name="research-platform"][value="ebsco"]').uncheck();
-    assert.equal(await page.locator('[name="research-platform"]:checked').count(), 7);
+    const labels = await page.locator("[data-session-platform-select] option").allTextContents();
+    assert.deepEqual(labels.slice(1), require("../src/marcie-research-policy.js").platforms.map(platform => platform.name).concat("Otros sitios fiables"));
+    assert.equal(await page.locator("[data-remove-platform]").count(), 8);
+    await page.locator('[data-remove-platform="ebsco"]').click();
+    assert.equal(await page.locator("[data-remove-platform]").count(), 7);
+  } finally { await browser.close(); }
+});
+
+test("seleccionar un título específico para padres permite continuar la configuración", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await loadModalTestDependencies(page);
+    const result = await page.evaluate(async source => {
+      (0, eval)(source);
+      const pending = showNewSessionModal({
+        defaultValue: "Aprendizaje activo",
+        initialConfiguration: {
+          mode: "automated",
+          selectedAudiences: ["educators", "parents"],
+          titleProposals: {
+            byAudience: {
+              educators: { topic: "Aprendizaje activo", hooks: [{ title: "Aula que aprende" }], contrahooks: [] },
+              parents: { topic: "Aprendizaje activo", hooks: [{ title: "Acompañar sin batallas" }], contrahooks: [] }
+            }
+          }
+        }
+      });
+      document.querySelector('[data-spec-target-audience="parents"]').click();
+      document.querySelector('[data-select-title="Acompañar sin batallas"]').click();
+      const nextAudienceFocused = document.querySelector('[data-spec-target-audience="educators"]').className.includes("ring-2");
+      document.getElementById("new-session-create").click();
+      document.getElementById("btn-spec-preview-confirm").click();
+      return { nextAudienceFocused, request: await pending };
+    }, strip(read("public/MarcieBlogEditor/js/components/modals.js")));
+    assert.equal(result.nextAudienceFocused, true);
+    assert.equal(result.request.mode, "automated");
+    assert.ok(result.request.specifications.includes("#titulo[parents] Acompañar sin batallas"));
   } finally { await browser.close(); }
 });
 
@@ -323,7 +489,7 @@ test("region dropdown supports global selection and preserves legacy regions", a
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent("<main></main>");
+    await loadModalTestDependencies(page);
     const result = await page.evaluate(async source => {
       (0, eval)(source);
       const pending = showNewSessionModal({ defaultValue: "Aprendizaje", initialConfiguration: { researchRegion: "Región andina" } });
@@ -344,16 +510,17 @@ test("configuration modal restores audiences, specifications, region and period"
   const browser=await chromium.launch({headless:true});
   try {
     const page=await browser.newPage();
-    await page.setContent("<main></main>");
+    await loadModalTestDependencies(page);
     const values=await page.evaluate(async source=>{
       (0,eval)(source);
       const pending=showNewSessionModal({defaultValue:"Aprendizaje",initialConfiguration:{mode:"automated",editorialMode:"custom",selectedAudiences:["parents"],specifications:["#tono Cercano"],researchRegion:"ES",researchPeriod:"12m",editorialProfileSnapshot:{tone:"Cercano",minimumSources:9}}});
-      const result={region:document.getElementById("new-session-region").value,period:document.getElementById("new-session-period").value,audiences:[...document.querySelectorAll('[name="session-audience"]:checked')].map(input=>input.value),tone:document.getElementById("custom-tone").value,minimum:document.getElementById("custom-minimum-sources").value};
+      const result={region:document.getElementById("new-session-region").value,period:document.getElementById("new-session-period").value,tone:document.getElementById("custom-tone").value,minimum:document.getElementById("custom-minimum-sources").value};
       document.getElementById("new-session-create").click();
+      document.getElementById("btn-spec-preview-confirm").click();
       result.request=await pending;
       return result;
     },strip(read("public/MarcieBlogEditor/js/components/modals.js")));
-    assert.equal(values.region,"ES");assert.equal(values.period,"12m");assert.deepEqual(values.audiences,["parents"]);assert.equal(values.minimum,"9");assert.equal(values.request.specifications[0],"#tono Cercano");assert.equal(values.request.researchPeriod,"12m");
+    assert.equal(values.region,"ES");assert.equal(values.period,"12m");assert.deepEqual(values.request.selectedAudiences,["parents"]);assert.equal(values.minimum,"9");assert.equal(values.request.specifications[0],"#tono Cercano");assert.equal(values.request.researchPeriod,"12m");
   } finally { await browser.close(); }
 });
 test("audience failure leaves original article and audience intact", async () => {
@@ -369,7 +536,7 @@ test("reconfiguration failure never commits a provisional replacement", async ()
   const editor=read("public/MarcieBlogEditor/js/editor-app.js");
   const fn=editor.slice(editor.indexOf("async function reconfigureSession"),editor.indexOf("function setupEventListeners"));
   let writes=0;
-  const context=vm.createContext({sessionOperations:new Set(),showNewSessionModal:async()=>({title:"New",selectedAudiences:["parents"]}),getActiveMarciePromptProfileId:()=>"",listMarciePromptProfiles:()=>[],listEditorialProfilesOnce:async()=>[],chooseEditorialAction:async()=>"replace",showAutomatedSessionProgress(){},runAutomatedSessionWorkflow:async working=>{assert.equal(working._provisional,true);throw Error("offline")},saveMarcieSession:async()=>writes++,showToast(){}});
+  const context=vm.createContext({sessionOperations:new Set(),showSessionCreationChoiceModal:async()=>"manual",showNewSessionModal:async()=>({title:"New",selectedAudiences:["parents"]}),getActiveMarciePromptProfileId:()=>"",listMarciePromptProfiles:()=>[],listEditorialProfilesOnce:async()=>[],chooseEditorialAction:async()=>"replace",showAutomatedSessionProgress(){},runAutomatedSessionWorkflow:async working=>{assert.equal(working._provisional,true);throw Error("offline")},saveMarcieSession:async()=>writes++,showToast(){}});
   vm.runInContext(fn,context);
   const session={id:"a",topic:"Old",article:{title:"Old"},articlesByAudience:{parents:{title:"Old"}}};
   await context.reconfigureSession(session);

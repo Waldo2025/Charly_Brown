@@ -2,9 +2,10 @@
 
 const OMNI_VIDEO_MODEL = "gemini-omni-flash-preview";
 const DEFAULT_VEO_VIDEO_MODEL = "veo-3.1-generate-preview";
+const DEFAULT_SCENE_VIDEO_MODEL = "veo-3.1-fast-generate-preview";
 const VEO_VIDEO_MODELS = Object.freeze([
   DEFAULT_VEO_VIDEO_MODEL,
-  "veo-3.1-fast-generate-preview",
+  DEFAULT_SCENE_VIDEO_MODEL,
   "veo-3.1-lite-generate-preview"
 ]);
 const VIDEO_MODELS = Object.freeze([OMNI_VIDEO_MODEL, ...VEO_VIDEO_MODELS]);
@@ -15,6 +16,9 @@ const IN_SCENE_TEXT_MAX_WORDS = 40;
 const IN_SCENE_TEXT_MAX_LINES = 4;
 
 const LEGACY_VIDEO_MODEL_MAP = Object.freeze({
+  "veo-3.1-generate-001": DEFAULT_VEO_VIDEO_MODEL,
+  "veo-3.1-fast-generate-001": DEFAULT_SCENE_VIDEO_MODEL,
+  "veo-3.1-lite-generate-001": "veo-3.1-lite-generate-preview",
   "veo-2.0-generate-001": DEFAULT_VEO_VIDEO_MODEL,
   "veo-3.0-generate-001": DEFAULT_VEO_VIDEO_MODEL,
   "veo-3.0-fast-generate-001": "veo-3.1-fast-generate-preview"
@@ -91,7 +95,8 @@ function normalizeVideoModel(value = "", generator = "auto", quality = "final", 
   const normalizedGenerator = normalizeGenerator(generator, requested);
   const isAutomaticModel = !requested || requested === "auto";
   if (isAutomaticModel) {
-    return normalizedGenerator === "veo" ? DEFAULT_VEO_VIDEO_MODEL : OMNI_VIDEO_MODEL;
+    if (normalizedGenerator === "omni") return OMNI_VIDEO_MODEL;
+    return options?.highQuality === true ? DEFAULT_VEO_VIDEO_MODEL : DEFAULT_SCENE_VIDEO_MODEL;
   }
 
   const mapped = LEGACY_VIDEO_MODEL_MAP[requested] || requested;
@@ -139,7 +144,7 @@ function resolveVideoGenerator(options = {}) {
     ? (explicitModel === OMNI_VIDEO_MODEL ? "omni" : "veo")
     : "";
   const resolved = requested === "auto"
-    ? (needsVeo ? "veo" : (explicitModelGenerator || "omni"))
+    ? (needsVeo ? "veo" : (explicitModelGenerator || "veo"))
     : requested;
 
   if (options?.correctInSceneText === true && !cleanString(options?.previousInteractionId)) {

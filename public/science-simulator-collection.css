@@ -1,0 +1,19 @@
+.science-collection { padding: 24px; }
+.science-collection-header, .science-collection-main { max-width: 1480px; margin: 0 auto; }
+.science-collection-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 12px 0 24px; }
+.science-collection-header small { color: var(--sa-cyan); font-weight: 800; letter-spacing: .14em; }
+.science-collection-header h1 { margin: 10px 0; font-family: var(--sa-display); font-size: clamp(1.5rem, 3vw, 2.4rem); }
+.science-collection-header p, .science-collection-note, #collectionStatus { color: var(--sa-muted); line-height: 1.5; }
+.science-collection-header a { color: var(--sa-cyan); text-underline-offset: 4px; }
+.science-collection-selector { display: flex; align-items: end; flex-wrap: wrap; gap: 24px; margin-bottom: 20px; }
+.science-collection-selector .sa-field { flex: 1 1 420px; max-width: 720px; }
+.science-collection-selector select { width: 100%; min-height: 48px; color: var(--sa-text); background: var(--sa-panel); border: 1px solid var(--sa-line); border-radius: 10px; padding: 12px; font: inherit; }
+.science-collection-main .sa-game-frame { width: 100%; height: auto; max-height: none; min-height: 650px; margin: 0; overflow: visible; background: var(--sa-panel-3); }
+.science-collection-main .sa-game-mount { position: relative; width: 100%; min-height: 650px; height: auto; }
+.science-collection-note { font-size: .85rem; }
+@media (max-width: 640px) {
+  .science-collection { padding: 14px; }
+  .science-collection-header { display: block; }
+  .science-collection-header a { display: inline-block; margin-top: 8px; }
+  .science-collection-selector { gap: 4px; }
+}

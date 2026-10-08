@@ -4,6 +4,8 @@
  */
 
 import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, resolveApiBase } from "../js/api-client-podcaster.js";
+import { freeVoiceExportSegments } from "./podcaster-free-voice-track.js?v=2026-10-05.gemini-inspector-1";
+import { freeVideoExportEntries, freeVideoExportAudioSegments } from "./podcaster-free-video-track.js";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -20,6 +22,11 @@ import {
   resolveMontageRenderEntryAtTime
 } from "./podcaster-montage-render-surface.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
+import { drawImageWarpFrame, hasImageWarpMotion, normalizeImageWarp } from "./podcaster-image-warp.js?v=2026-10-07.smooth-warp-defaults-1";
+import { syncMontageExportChoiceControls } from "./montage-export-choice-controls.js";
+import { createMontageExportPreviewAssetResolver } from "./podcaster-montage-preview-asset.js";
+import { dataUrlToFile, uploadPodcasterAsset } from "./podcaster-resumable-upload.js";
+import { createBrowserMontageCapture, nextBrowserMontageFrameIndex } from "./podcaster-browser-export-capture.js";
 import {
   reconcileGeminiAudioSegmentTiming,
   resolveGeminiAudioTimelineDurationMs,
@@ -29,12 +36,12 @@ import {
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
-const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
+const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 45 * 60 * 1000;
 const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
 const MONTAGE_EXPORT_BUSY_HANDOFF_RECOVERY_MAX_RETRIES = 1;
 const MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES = 2;
 const MONTAGE_EXPORT_RECENT_POLL_GRACE_MS = 45 * 1000;
-const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
+const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 4;
 const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT = 90;
 const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL = 320;
 const MONTAGE_FRONTEND_EXPORT_FPS = 24;
@@ -48,8 +55,9 @@ const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
 const MONTAGE_EXPORT_ACTIVE_JOB_KEY = "cb_podcast_montage_export_active_job_v1";
 const MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY = "cb_podcast_montage_export_history_v1";
 const MONTAGE_EXPORT_DOWNLOAD_HISTORY_MAX_ENTRIES = 20;
-let montageExportDownloadHistory = [];
-let montageExportDownloadHistorySessionId = "";
+let montageExportVisibleHistory = [];
+let activeFrontendExportAbortController = null;
+let activeFrontendExportCompletion = null;
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
   assetPath: "podcaster/logo.png",
@@ -74,7 +82,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     : "balanced";
   const resolution = ["source", "1080p", "720p", "480p"].includes(String(source.resolution || "").trim())
     ? String(source.resolution).trim()
-    : "source";
+    : "1080p";
   const filename = String(source.filename || "").trim().slice(0, 120);
   const filenameSessionId = String(source.filenameSessionId || "").trim().slice(0, 160);
   const includeReviewExcel = source.includeReviewExcel !== false;
@@ -84,6 +92,7 @@ export function normalizeMontageExportSettings(raw = {}) {
   const maxBitrate = Math.max(0.1, Math.min(50, Number(source.maxBitrate || 5) || 5));
   const minBitrate = Math.max(0, Math.min(51, Number(source.minBitrate || 20) || 20));
   const renderMode = normalizeMontageRenderMode(source.renderMode || "browser");
+  const executionTarget = source.executionTarget === "cloud_run" ? "cloud_run" : "local_browser";
 
   return {
     exportMode,
@@ -94,6 +103,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     maxBitrate,
     minBitrate,
     renderMode,
+    executionTarget,
     filename,
     filenameSessionId,
     includeReviewExcel,
@@ -247,7 +257,10 @@ async function downloadMontageReviewExcel(preparedPayload = null, baseFilename =
 
 export function loadMontageExportSettings() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
+    const stored = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
+    const parsed = stored && typeof stored === "object" && Number(stored.schemaVersion || 0) < MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION
+      ? { ...stored, executionTarget: "local_browser", resolution: "1080p", schemaVersion: MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION }
+      : stored;
     const normalized = normalizeMontageExportSettings(parsed || {});
     if (isLegacyAutoMontageFilename(normalized.filename)) normalized.filename = "";
     return normalized;
@@ -361,6 +374,7 @@ let montageExportPreviewState = {
 
 const MONTAGE_EXPORT_PREVIEW_SOURCE_PROBE_TTL_MS = 8_000;
 const montageExportPreviewSourceProbeCache = new Map();
+const montageExportPreviewAssets = createMontageExportPreviewAssetResolver({ authFetchJson });
 
 function readMontageExportPreviewSourceProbe(url = "", mediaType = "") {
   const cacheKey = `${String(mediaType || "").startsWith("image/") ? "image" : "video"}::${String(url || "").trim()}`;
@@ -901,6 +915,49 @@ async function loadMontageExportJobStatusFallback(jobId = "", error = null) {
   }
 }
 
+const MONTAGE_ENGINE_STARTUP_STAGES = new Set(["queued", "waiting_capacity", "dispatch_cloud_run", "dispatch_retry"]);
+const MONTAGE_ENGINE_STARTUP_RAMP_MS = 150000;
+const MONTAGE_ENGINE_STARTUP_RAMP_MAX = 0.07;
+let montageEngineStartupRampTimer = null;
+let montageEngineStartupRampStartedAtMs = 0;
+
+function stopMontageEngineStartupRamp() {
+  if (montageEngineStartupRampTimer) {
+    window.clearInterval(montageEngineStartupRampTimer);
+    montageEngineStartupRampTimer = null;
+  }
+  montageEngineStartupRampStartedAtMs = 0;
+}
+
+function computeMontageEngineStartupProgress() {
+  const elapsedMs = Math.max(0, Date.now() - montageEngineStartupRampStartedAtMs);
+  return Math.min(MONTAGE_ENGINE_STARTUP_RAMP_MAX, (elapsedMs / MONTAGE_ENGINE_STARTUP_RAMP_MS) * MONTAGE_ENGINE_STARTUP_RAMP_MAX);
+}
+
+// El backend solo envía progress>0 cuando arranca la primera escena; durante la
+// espera de capacidad y el cold start de Cloud Run la barra quedaría congelada.
+function syncMontageEngineStartupRamp(stage = "", progress = 0) {
+  const cleanStage = String(stage || "").trim();
+  if (!MONTAGE_ENGINE_STARTUP_STAGES.has(cleanStage) || progress > 0) {
+    if (montageEngineStartupRampTimer) stopMontageEngineStartupRamp();
+    return progress;
+  }
+  if (!montageEngineStartupRampStartedAtMs) {
+    montageEngineStartupRampStartedAtMs = Math.max(1, Number(window.montageExportJobState?.startedAtMs || 0) || Date.now());
+  }
+  if (!montageEngineStartupRampTimer) {
+    montageEngineStartupRampTimer = window.setInterval(() => {
+      const activeStage = String(window.montageExportJobState?.lastStage || "").trim();
+      if (!MONTAGE_ENGINE_STARTUP_STAGES.has(activeStage) || Number(window.montageExportJobState?.lastProgress || 0) > 0) {
+        stopMontageEngineStartupRamp();
+        return;
+      }
+      setMontageExportProgress(computeMontageEngineStartupProgress());
+    }, 2000);
+  }
+  return Math.max(progress, computeMontageEngineStartupProgress());
+}
+
 async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
   if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return true;
   window.montageExportJobState.pollFailureCount = 0;
@@ -909,7 +966,13 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
   window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
   const stage = String(data?.stage || "").trim();
   const sceneSubstage = String(data?.sceneSubstage || "").trim();
-  const hint = String(data?.hint || "").trim();
+  const remoteHint = String(data?.hint || "").trim();
+  const localElapsedMs = Math.max(0, Date.now() - (Number(window.montageExportJobState?.startedAtMs || 0) || Date.now()));
+  const hint = stage === "worker_starting" && localElapsedMs >= 5 * 60 * 1000
+    ? (localElapsedMs >= 30 * 60 * 1000
+      ? "Cloud Run no confirma el inicio después de 30 minutos. No envíes otra exportación hasta verificar que esta ejecución terminó."
+      : "Cloud Run aún no confirma el inicio del worker. Seguimos consultando el mismo trabajo; no se enviará otro automáticamente.")
+    : remoteHint;
   const progress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
   const currentRowId = String(data?.currentRowId || "").trim();
   const currentSceneIndex = Math.max(0, Number(data?.currentSceneIndex || 0) || 0);
@@ -932,14 +995,14 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       currentRowId: currentRowId || undefined,
       failedSceneIndex: failedSceneIndex || undefined,
       failedSubstage: failedSubstage || undefined,
-      hint: hint || undefined
+      hint: remoteHint || undefined
     });
-    setMontageExportProgress(progress);
+    setMontageExportProgress(syncMontageEngineStartupRamp(stage, progress));
     const stageLabel = stage === "render_scene_segments" && sceneSubstage
       ? describeMontageExportSceneSubstage(sceneSubstage, currentSceneIndex, totalScenes) || describeMontageExportStage(stage, window.montageExportState.exportMode)
       : describeMontageExportStage(stage, window.montageExportState.exportMode);
     setMontageExportStatus(stageLabel, hint, {
-      tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
+      tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : (stage === "worker_starting" && localElapsedMs >= 30 * 60 * 1000 ? "error" : stage === "worker_starting" && localElapsedMs >= 5 * 60 * 1000 ? "warning" : "neutral")
     });
   }
   if (stage === "render_scene_segments" && currentSceneIndex > 0) {
@@ -1054,8 +1117,10 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       : "";
     setMontageExportProgress(null);
     setMontageExportStatus(
-      "No pudimos exportar tu video.",
-      cleanErrorCode === "montage_export_worker_restarted"
+      cleanErrorCode === "export_worker_start_timeout" ? "Cloud Run no confirmó el inicio del worker." : "No pudimos exportar tu video.",
+      cleanErrorCode === "export_worker_start_timeout"
+        ? String(hint || "No envíes otra exportación hasta verificar que la ejecución anterior terminó.").trim()
+        : cleanErrorCode === "montage_export_worker_restarted"
         ? "El backend se reinició durante el render de la escena. Inicia una nueva exportación."
         : cleanErrorCode === "montage_export_worker_stalled"
           ? "El worker dejó de reportar progreso. Inicia una nueva exportación."
@@ -1561,9 +1626,11 @@ export function setMontageExportOpen(isOpen = false) {
   if (window.els.montageExportModal) {
     window.els.montageExportModal.hidden = !Boolean(isOpen);
   }
+  if (!isOpen) closeMontageExportDownloadMenu();
 }
 
 export function clearMontageExportPolling() {
+  stopMontageEngineStartupRamp();
   if (window.montageExportJobState.pollTimer) {
     window.clearTimeout(window.montageExportJobState.pollTimer);
     window.montageExportJobState.pollTimer = null;
@@ -1729,20 +1796,17 @@ function loadMontageExportDownloadHistory(sessionId = "") {
   const storageKey = buildMontageExportDownloadHistoryKey(cleanSessionId);
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    montageExportDownloadHistory = normalizeMontageExportDownloadHistory(Array.isArray(parsed) ? parsed : [], { sessionId: cleanSessionId });
-    montageExportDownloadHistorySessionId = cleanSessionId;
-    if (!montageExportDownloadHistory.length && cleanSessionId) {
+    let history = normalizeMontageExportDownloadHistory(Array.isArray(parsed) ? parsed : [], { sessionId: cleanSessionId });
+    if (!history.length && cleanSessionId) {
       const legacyParsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY) || "[]");
       const migrated = normalizeMontageExportDownloadHistory(Array.isArray(legacyParsed) ? legacyParsed : [], { sessionId: cleanSessionId });
       if (migrated.length) {
-        montageExportDownloadHistory = migrated;
+        history = migrated;
         localStorage.setItem(storageKey, JSON.stringify(migrated));
       }
     }
-    return montageExportDownloadHistory;
+    return history;
   } catch (_error) {
-    montageExportDownloadHistory = [];
-    montageExportDownloadHistorySessionId = cleanSessionId;
     return [];
   }
 }
@@ -1750,25 +1814,11 @@ function loadMontageExportDownloadHistory(sessionId = "") {
 function persistMontageExportDownloadHistory(history = null, sessionId = "") {
   const cleanSessionId = String(sessionId || getActiveMontageExportSessionId() || "").trim();
   const normalized = normalizeMontageExportDownloadHistory(Array.isArray(history) ? history : [], { sessionId: cleanSessionId });
-  montageExportDownloadHistory = normalized;
-  montageExportDownloadHistorySessionId = cleanSessionId;
   try {
     localStorage.setItem(buildMontageExportDownloadHistoryKey(cleanSessionId), JSON.stringify(normalized));
   } catch (_error) {
     // noop
   }
-}
-
-function getMontageExportDownloadHistory() {
-  const sessionId = getActiveMontageExportSessionId();
-  if (
-    Array.isArray(montageExportDownloadHistory)
-    && montageExportDownloadHistory.length
-    && montageExportDownloadHistorySessionId === sessionId
-  ) {
-    return montageExportDownloadHistory;
-  }
-  return loadMontageExportDownloadHistory(sessionId);
 }
 
 function upsertMontageExportDownloadHistory(reference = null) {
@@ -1778,7 +1828,7 @@ function upsertMontageExportDownloadHistory(reference = null) {
     sessionId
   });
   if (!normalized?.downloadUrl && !normalized?.storagePath) return null;
-  const history = getMontageExportDownloadHistory();
+  const history = loadMontageExportDownloadHistory(sessionId);
   const current = normalizeMontageExportDownloadHistory([
     {
       ...normalized,
@@ -1796,25 +1846,20 @@ function upsertMontageExportDownloadHistory(reference = null) {
   return normalized;
 }
 
-function getMontageExportDownloadOptionLabel(entry = null, index = 0) {
+function getMontageExportDownloadOptionLabel(entry = null) {
   const name = String(entry?.filename || "montage.mp4").trim() || "montage.mp4";
-  const cleanedName = name.toLowerCase().endsWith(".mp4") ? name : `${name}.mp4`;
-  if (index === 0) {
-    return `${cleanedName} (Más reciente)`;
-  }
-  return cleanedName;
+  return name.toLowerCase().endsWith(".mp4") ? name : `${name}.mp4`;
 }
 
 function getSelectedMontageExportDownloadEntry(selectionValue = "") {
-  const select = window.els.montageExportDownloadBtn;
-  if (!select) return null;
-  const option = String(selectionValue || "").trim()
-    ? Array.from(select.options).find((candidate) => String(candidate.value || "").trim() === String(selectionValue).trim())
-    : (select.selectedOptions?.[0] || null);
-  if (!option || !String(option.value || "").trim()) return null;
+  const index = String(selectionValue).trim() === ""
+    ? 0
+    : Number.parseInt(String(selectionValue), 10);
+  const entry = Number.isInteger(index) && index >= 0 ? montageExportVisibleHistory[index] : null;
+  if (!entry?.downloadUrl) return null;
   return {
-    url: String(option.dataset?.downloadUrl || "").trim(),
-    filename: String(option.dataset?.filename || option.textContent || "").trim() || "montage.mp4"
+    url: String(entry.downloadUrl).trim(),
+    filename: String(entry.filename || "montage.mp4").trim() || "montage.mp4"
   };
 }
 
@@ -1822,64 +1867,96 @@ function renderMontageExportDownloadHistory({
   selectedUrl = "",
   selectedFilename = ""
 } = {}) {
-  const select = window.els.montageExportDownloadBtn;
-  if (!select) return;
-  const history = getMontageExportDownloadHistory();
-  if (!history.length && !selectedUrl) {
-    select.hidden = true;
-    select.innerHTML = "";
+  const group = window.els.montageExportDownloadGroup;
+  const menu = window.els.montageExportDownloadMenu;
+  const trigger = window.els.montageExportDownloadBtn;
+  if (!group || !menu || !trigger) return;
+  const sessionId = getActiveMontageExportSessionId();
+  const history = loadMontageExportDownloadHistory(sessionId);
+  const persisted = getPersistedMontageExportReference();
+  const candidates = [...history];
+  if (persisted?.downloadUrl && !candidates.some((entry) => entry.downloadUrl === persisted.downloadUrl)) {
+    candidates.push(persisted);
+  }
+  const currentUrl = String(selectedUrl || "").trim();
+  if (currentUrl && !candidates.some((entry) => entry.downloadUrl === currentUrl)) {
+    candidates.push({
+      downloadUrl: currentUrl,
+      filename: String(selectedFilename || "montage.mp4").trim() || "montage.mp4",
+      createdAtMs: persisted?.downloadUrl === currentUrl ? persisted.createdAtMs : Date.now(),
+      sessionId
+    });
+  }
+  montageExportVisibleHistory = normalizeMontageExportDownloadHistory(candidates, { sessionId })
+    .filter((entry) => Boolean(entry.downloadUrl)
+      && !String(entry.mimeType || "").startsWith("audio/")
+      && !/\.(?:mp3|m4a|wav|ogg)$/i.test(String(entry.filename || "")));
+  group.hidden = montageExportVisibleHistory.length === 0;
+  if (group.hidden) {
+    closeMontageExportDownloadMenu();
+    menu.replaceChildren();
     return;
   }
-  select.hidden = false;
-  select.disabled = false;
-  select.innerHTML = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Selecciona una exportación MP4";
-  select.appendChild(placeholder);
-  const normalizedSelectedUrl = String(selectedUrl).trim();
-  const normalizedSelectedFilename = String(selectedFilename || "").trim() || "montage.mp4";
-  const hasSelectedInHistory = normalizedSelectedUrl
-    ? history.some((entry) => entry.downloadUrl === normalizedSelectedUrl)
-    : false;
-  if (normalizedSelectedUrl && !hasSelectedInHistory) {
-    const option = document.createElement("option");
-    option.value = `current-${Date.now()}`;
-    option.textContent = `${normalizedSelectedFilename.toLowerCase().endsWith(".mp4") ? normalizedSelectedFilename : `${normalizedSelectedFilename}.mp4`} (Más reciente)`;
-    option.dataset.downloadUrl = normalizedSelectedUrl;
-    option.dataset.filename = normalizedSelectedFilename;
-    option.selected = true;
-    select.appendChild(option);
-  }
-  let selected = normalizedSelectedUrl && !hasSelectedInHistory;
-  history.forEach((entry, index) => {
-    const option = document.createElement("option");
-    option.value = String(entry.id || entry.downloadUrl || `${index}`);
-    option.textContent = getMontageExportDownloadOptionLabel(entry, index);
-    option.dataset.downloadUrl = String(entry.downloadUrl || "").trim();
-    option.dataset.filename = String(entry.filename || "montage.mp4").trim();
-    if (
-      !selected
-      && (
-        (selectedUrl && option.dataset.downloadUrl === String(selectedUrl).trim())
-        || (!selectedUrl && index === 0)
-      )
-      && option.dataset.downloadUrl
-    ) {
-      option.selected = true;
-      selected = true;
+  const title = document.createElement("div");
+  title.className = "montage-export-download-menu-title";
+  title.textContent = "Videos exportados";
+  menu.replaceChildren(title);
+  montageExportVisibleHistory.forEach((entry, index) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "montage-export-download-item";
+    item.dataset.montageExportIndex = String(index);
+    item.title = `Descargar ${getMontageExportDownloadOptionLabel(entry)}`;
+    const icon = document.createElement("i");
+    icon.className = "fas fa-file-video";
+    icon.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.className = "montage-export-download-item-name";
+    name.textContent = getMontageExportDownloadOptionLabel(entry);
+    item.append(icon, name);
+    if (index === 0) {
+      const latest = document.createElement("span");
+      latest.className = "montage-export-download-item-latest";
+      latest.textContent = "Más reciente";
+      item.appendChild(latest);
     }
-    if (
-      !selected
-      && selectedFilename
-      && option.dataset.filename === String(selectedFilename).trim()
-    ) {
-      option.selected = true;
-      selected = true;
-    }
-    select.appendChild(option);
+    const downloadIcon = document.createElement("i");
+    downloadIcon.className = "fas fa-download";
+    downloadIcon.setAttribute("aria-hidden", "true");
+    item.appendChild(downloadIcon);
+    menu.appendChild(item);
   });
-  if (!selected && history.length > 0) select.selectedIndex = 1;
+}
+
+export function closeMontageExportDownloadMenu() {
+  const menu = window.els.montageExportDownloadMenu;
+  const trigger = window.els.montageExportDownloadBtn;
+  if (menu) menu.hidden = true;
+  if (trigger) trigger.setAttribute("aria-expanded", "false");
+}
+
+export function toggleMontageExportDownloadMenu() {
+  const menu = window.els.montageExportDownloadMenu;
+  const trigger = window.els.montageExportDownloadBtn;
+  if (!menu || !trigger || !montageExportVisibleHistory.length) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  trigger.setAttribute("aria-expanded", String(open));
+  if (open) menu.querySelector("button")?.focus();
+}
+
+export function openLatestMontageExportVideo() {
+  renderMontageExportDownloadHistory();
+  const latest = getSelectedMontageExportDownloadEntry();
+  if (!latest?.url) return false;
+  const anchor = document.createElement("a");
+  anchor.href = latest.url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  return true;
 }
 
 function getPersistedMontageExportReference(session = null) {
@@ -1914,9 +1991,11 @@ function persistMontageExportReferenceToSession(reference = null) {
 function hydrateMontageExportDownloadButtonFromSession() {
   if (window.montageExportJobState?.jobId || window.montageExportBusy === true) return;
   const reference = getPersistedMontageExportReference();
-  const history = getMontageExportDownloadHistory();
+  const history = loadMontageExportDownloadHistory();
   const latestHistoryItem = history[0] || null;
-  const referenceCandidate = reference?.downloadUrl ? reference : latestHistoryItem;
+  const referenceCandidate = [reference, latestHistoryItem]
+    .filter((entry) => Boolean(entry?.downloadUrl))
+    .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0))[0] || null;
   if (!referenceCandidate?.downloadUrl) {
     if (!window.montageExportJobState?.readyDownloadUrl) {
       setMontageExportDownloadButton({ visible: false });
@@ -2207,6 +2286,13 @@ function formatMontageExportCancelError(error) {
 }
 
 export async function cancelMontageExportFromModal() {
+  if (activeFrontendExportAbortController) {
+    activeFrontendExportAbortController.abort();
+    setMontageExportStatus("Cancelando exportación local…", "Se detendrá la captura y se descartará el archivo parcial.", { tone: "warning" });
+    await activeFrontendExportCompletion;
+    await closeMontageExportModal({ cancelActiveJob: false });
+    return;
+  }
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
   if (activeJobId) {
     setMontageExportStatus(
@@ -2313,9 +2399,11 @@ export function describeMontageExportStage(stage = "", mode = window.montageExpo
   const review = mode === "review";
   const map = {
     queued: "Esperando un turno para exportar…",
+    stale: "La exportación se detuvo por falta de respuesta.",
     waiting_capacity: "Esperando un turno disponible…",
     dispatch_cloud_run: "Reservando recursos para tu video…",
-    worker_starting: "Iniciando el motor de exportación…",
+    worker_starting: "Esperando confirmación del worker de Cloud Run…",
+    worker_booting: "Worker iniciado; preparando los datos…",
     dispatch_retry: "Preparando un nuevo intento…",
     validate_payload: review ? "Validando exportación de revisión…" : "Validando exportación…",
     download_assets: "Preparando los archivos de las escenas…",
@@ -2759,6 +2847,12 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     src = String(window.resolveStorageVideoUrl?.(rawUrl || directDownloadUrl, storagePath) || "").trim();
   }
   if (!src) return null;
+  try {
+    src = await montageExportPreviewAssets.resolveUrl(src, { storagePath });
+  } catch (_) {
+    return null;
+  }
+  if (!src) return null;
   const mediaKind = String(video?.mediaKind || video?.type || "").trim().toLowerCase();
   const mimeType = String(video?.mimeType || "").trim().toLowerCase();
   const isImage = mediaKind === "image" || mimeType.startsWith("image/");
@@ -3048,8 +3142,17 @@ export function syncMontageExportUi() {
     state.filename = "";
   }
   if (window.els.montageExportMode) window.els.montageExportMode.value = state.exportMode;
+  if (window.els.montageExportExecutionTarget) window.els.montageExportExecutionTarget.value = state.executionTarget;
   if (window.els.montageExportRenderMode) window.els.montageExportRenderMode.value = state.renderMode;
-  if (window.els.montageExportFormat) window.els.montageExportFormat.value = state.format;
+  if (window.els.montageExportExecutionHint) {
+    window.els.montageExportExecutionHint.textContent = state.executionTarget === "local_browser"
+      ? "Se procesa en esta pestaña y se descarga aquí. El formato depende del soporte del navegador; no se carga al servidor."
+      : "Render en Cloud Run, apto para exportaciones largas, revisión y audio nativo de video.";
+  }
+  if (window.els.montageExportFormat) {
+    window.els.montageExportFormat.value = state.format;
+    window.els.montageExportFormat.disabled = state.executionTarget === "local_browser";
+  }
   if (window.els.montageExportResolution) window.els.montageExportResolution.value = state.resolution;
   if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.value = state.bitrateMode;
   if (window.els.montageExportMaxBitrate) window.els.montageExportMaxBitrate.value = state.maxBitrate;
@@ -3126,6 +3229,7 @@ export function syncMontageExportUi() {
       const key = String(btn?.dataset?.quality || "").trim();
       btn.classList.toggle("is-active", key === state.qualityPreset);
     });
+    syncMontageExportChoiceControls(window.els.montageExportModal);
   }
   persistMontageExportSettings();
 }
@@ -3408,17 +3512,69 @@ function waitFrontendMontageExportMs(ms = 0) {
 }
 
 function getVisibleFrontendMontageMediaElements() {
+  const container = getMontageExportPreviewContainer();
   return [
     window.els?.montageExportPreviewVideo,
     window.els?.montageExportPreviewVideoAlt,
     window.els?.montageExportPreviewImage,
     window.els?.montageExportPreviewImageAlt
-  ].filter((el) => el && el.hidden !== true && String(el.getAttribute?.("src") || el.currentSrc || "").trim());
+  ].filter((el) => el
+    && el.hidden !== true
+    && isFrontendMontageElementVisuallyVisible(el, container)
+    && String(el.getAttribute?.("src") || el.currentSrc || "").trim())
+    .sort((left, right) => {
+      const leftZ = Number.parseInt(window.getComputedStyle?.(left)?.zIndex || "0", 10) || 0;
+      const rightZ = Number.parseInt(window.getComputedStyle?.(right)?.zIndex || "0", 10) || 0;
+      if (leftZ !== rightZ) return leftZ - rightZ;
+      if (left === right) return 0;
+      const relation = left.compareDocumentPosition?.(right) || 0;
+      return relation & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : relation & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
+    });
+}
+
+function isFrontendMontageElementVisuallyVisible(el = null, stopAt = null) {
+  if (!el) return false;
+  let node = el;
+  while (node && node.nodeType === 1) {
+    if (node.hidden === true) return false;
+    const style = window.getComputedStyle?.(node);
+    if (style?.display === "none" || style?.visibility === "hidden" || Number(style?.opacity ?? 1) <= 0.01) return false;
+    if (node === stopAt) break;
+    node = node.parentElement;
+  }
+  const rect = el.getBoundingClientRect?.();
+  return Boolean(rect && rect.width > 1 && rect.height > 1);
 }
 
 function getVisibleFrontendMontageVideoElements() {
   return getVisibleFrontendMontageMediaElements()
     .filter((el) => String(el?.tagName || "").toUpperCase() === "VIDEO");
+}
+
+function getFrontendMontageScratchCanvas(key = "", width = 0, height = 0) {
+  const state = window.montageExportJobState || (window.montageExportJobState = {});
+  const cacheKey = `frontend${key}Canvas`;
+  let canvas = state[cacheKey];
+  if (!(canvas instanceof HTMLCanvasElement)) canvas = state[cacheKey] = document.createElement("canvas");
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+  }
+  return canvas;
+}
+
+function drawFrontendMontageImageWarp(ctx = null, sourceCanvas = null, activeEntry = null, currentMs = 0, width = 0, height = 0) {
+  if (!ctx || !sourceCanvas || !activeEntry || width <= 0 || height <= 0) return false;
+  const session = window.exportPreviewController?.state?.session || window.getActiveSession?.();
+  const effects = activeEntry.visualEffects || resolveExportVisualEffects(session, activeEntry.rowId);
+  const effect = normalizeImageWarp(effects?.imageWarp);
+  if (!hasImageWarpMotion(effect)) return false;
+  const warpedCanvas = getFrontendMontageScratchCanvas("WarpedMedia", width, height);
+  const localMs = Math.max(0, currentMs - Number(activeEntry.timelineStartMs ?? activeEntry.startMs ?? 0));
+  const durationSec = Math.max(0.5, Number(activeEntry.durationMs || 0) / 1000 || 8);
+  if (!drawImageWarpFrame(warpedCanvas, sourceCanvas, effect, localMs / 1000, durationSec)) return false;
+  ctx.drawImage(warpedCanvas, 0, 0, width, height);
+  return true;
 }
 
 function resolveFrontendMontageActiveEntryAtMs(payload = {}, currentMs = 0) {
@@ -3491,8 +3647,12 @@ function resolveFrontendMontageEntryForVideo(payload = {}, currentMs = 0, mediaE
     || ""
   ).trim();
   if (videoSrc) {
+    const fallbackSrc = String(fallbackEntry?.videoSrc || fallbackEntry?.src || fallbackEntry?.downloadUrl || fallbackEntry?.url || fallbackEntry?.video?.downloadUrl || fallbackEntry?.video?.url || "").trim();
+    if (fallbackEntry && fallbackSrc && (fallbackSrc === videoSrc || videoSrc.includes(encodeURIComponent(fallbackSrc)) || videoSrc.includes(fallbackSrc))) {
+      return fallbackEntry;
+    }
     const matched = entries.find((entry) => {
-      const entrySrc = String(entry?.videoSrc || entry?.src || entry?.downloadUrl || entry?.url || "").trim();
+      const entrySrc = String(entry?.videoSrc || entry?.src || entry?.downloadUrl || entry?.url || entry?.video?.downloadUrl || entry?.video?.url || "").trim();
       return entrySrc && (entrySrc === videoSrc || videoSrc.includes(encodeURIComponent(entrySrc)) || videoSrc.includes(entrySrc));
     });
     if (matched) return matched;
@@ -3503,7 +3663,7 @@ function resolveFrontendMontageEntryForVideo(payload = {}, currentMs = 0, mediaE
 function waitFrontendMontageMediaReadyState(mediaEl = null, minReadyState = 2, timeoutMs = 900) {
   if (!mediaEl) return Promise.resolve(false);
   const targetReadyState = Math.max(0, Number(minReadyState || 0) || 0);
-  if (Number(mediaEl.readyState || 0) >= targetReadyState) return Promise.resolve(true);
+  if (Number(mediaEl.readyState || 0) >= targetReadyState && mediaEl.seeking !== true) return Promise.resolve(true);
   return new Promise((resolve) => {
     let done = false;
     const cleanup = (ok) => {
@@ -3519,7 +3679,7 @@ function waitFrontendMontageMediaReadyState(mediaEl = null, minReadyState = 2, t
       resolve(ok === true);
     };
     const checkReady = () => {
-      if (Number(mediaEl.readyState || 0) >= targetReadyState) cleanup(true);
+      if (Number(mediaEl.readyState || 0) >= targetReadyState && mediaEl.seeking !== true) cleanup(true);
     };
     const onSeeked = checkReady;
     const onLoadedMetadata = checkReady;
@@ -3566,7 +3726,7 @@ async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeo
   const cleanTargetSec = Math.max(0, Number(targetSec || 0) || 0);
   const currentSec = Math.max(0, Number(mediaEl.currentTime || 0) || 0);
   try { mediaEl.pause?.(); } catch (_) { }
-  if (mediaEl.readyState >= 2 && Math.abs(currentSec - cleanTargetSec) <= (1 / MONTAGE_FRONTEND_EXPORT_FPS)) {
+  if (mediaEl.readyState >= 2 && mediaEl.seeking !== true && Math.abs(currentSec - cleanTargetSec) <= (1 / MONTAGE_FRONTEND_EXPORT_FPS)) {
     await playFrontendMontageVideoForExport(mediaEl, sourceState);
     return true;
   }
@@ -3585,9 +3745,8 @@ async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeo
     }, "warn");
     return false;
   }
-  await playFrontendMontageVideoForExport(mediaEl, sourceState);
   const ok = await waitFrontendMontageMediaReadyState(mediaEl, 2, timeoutMs);
-  if (!ok && mediaEl.readyState < 2) {
+  if (!ok) {
     logMontageExportDevtools("frontend_export_video_seek_timeout", {
       targetSec: Math.round(cleanTargetSec * 1000) / 1000,
       currentSec: Math.round((Number(mediaEl.currentTime || 0) || 0) * 1000) / 1000,
@@ -3596,10 +3755,11 @@ async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeo
       src: String(mediaEl.currentSrc || mediaEl.getAttribute?.("src") || "").trim().slice(0, 160) || undefined
     }, "warn");
   }
-  return ok || mediaEl.readyState >= 2;
+  if (ok) await playFrontendMontageVideoForExport(mediaEl, sourceState);
+  return ok;
 }
 
-async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 0 } = {}) {
+async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 0, playMedia = true } = {}) {
   const videos = getVisibleFrontendMontageVideoElements();
   if (!videos.length) return { synced: 0, activeEntry: null };
   const { key: sceneKey, activeEntry, sceneIndex, rowId } = resolveFrontendMontageSceneKey(payload, currentMs);
@@ -3618,8 +3778,13 @@ async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 
   let synced = 0;
   for (const videoEl of videos) {
     const entry = resolveFrontendMontageEntryForVideo(payload, currentMs, videoEl, activeEntry);
+    // En un corte pueden seguir visibles el slot saliente y el entrante. Solo
+    // esperamos el medio de la escena activa; un seek del slot saliente no debe
+    // congelar el canvas mientras el nuevo clip ya está listo.
+    if (activeEntry?.rowId && entry?.rowId && String(entry.rowId) !== String(activeEntry.rowId)) continue;
     const targetSec = resolveFrontendMontageEntryLocalTimeSec(entry, currentMs, videoEl);
     const sourceState = resolveFrontendMontageSourceState(entry, currentMs);
+    if (!playMedia) sourceState.isHoldActive = true;
     const currentSec = Math.max(0, Number(videoEl.currentTime || 0) || 0);
     const needsHardSync = sceneChanged
       || videoEl.readyState < 2
@@ -3694,7 +3859,7 @@ function restoreFrontendMontageDomSubtitleCapture(payload = {}, state = {}) {
 }
 
 function drawFrontendMontageElement(ctx = null, el = null, container = null, width = 0, height = 0) {
-  if (!ctx || !el || !container || el.hidden === true) return false;
+  if (!ctx || !el || !container || !isFrontendMontageElementVisuallyVisible(el, container)) return false;
   const rect = el.getBoundingClientRect?.();
   const containerRect = container.getBoundingClientRect?.();
   if (!rect || !containerRect || rect.width <= 0 || rect.height <= 0) return false;
@@ -3703,9 +3868,40 @@ function drawFrontendMontageElement(ctx = null, el = null, container = null, wid
   const dw = (rect.width / Math.max(1, containerRect.width)) * width;
   const dh = (rect.height / Math.max(1, containerRect.height)) * height;
   try {
-    ctx.drawImage(el, dx, dy, dw, dh);
+    const style = window.getComputedStyle(el);
+    const sourceWidth = Number(el.videoWidth || el.naturalWidth || el.width || 0) || 0;
+    const sourceHeight = Number(el.videoHeight || el.naturalHeight || el.height || 0) || 0;
+    const objectFit = String(style?.objectFit || "fill").toLowerCase();
+    const isMedia = sourceWidth > 0 && sourceHeight > 0 && typeof el.getContext !== "function";
+    ctx.save();
+    ctx.globalAlpha *= Math.max(0, Math.min(1, Number(style?.opacity ?? 1) || 0));
+    if (style?.filter && style.filter !== "none") ctx.filter = style.filter;
+    if (isMedia && (objectFit === "cover" || objectFit === "contain")) {
+      const sourceAspect = sourceWidth / sourceHeight;
+      const targetAspect = dw / Math.max(1, dh);
+      if ((objectFit === "cover" && sourceAspect > targetAspect) || (objectFit === "contain" && sourceAspect < targetAspect)) {
+        const cropWidth = sourceHeight * targetAspect;
+        const sx = (sourceWidth - cropWidth) * 0.5;
+        if (objectFit === "cover") ctx.drawImage(el, sx, 0, cropWidth, sourceHeight, dx, dy, dw, dh);
+        else {
+          const fitHeight = dw / sourceAspect;
+          ctx.drawImage(el, dx, dy + (dh - fitHeight) / 2, dw, fitHeight);
+        }
+      } else if (objectFit === "cover") {
+        const cropHeight = sourceWidth / targetAspect;
+        const sy = (sourceHeight - cropHeight) * 0.5;
+        ctx.drawImage(el, 0, sy, sourceWidth, cropHeight, dx, dy, dw, dh);
+      } else {
+        const fitWidth = dh * sourceAspect;
+        ctx.drawImage(el, dx + (dw - fitWidth) / 2, dy, fitWidth, dh);
+      }
+    } else {
+      ctx.drawImage(el, dx, dy, dw, dh);
+    }
+    ctx.restore();
     return true;
   } catch (_) {
+    try { ctx.restore(); } catch (_) { }
     return false;
   }
 }
@@ -3751,14 +3947,20 @@ async function drawFrontendMontageDomOverlay(ctx = null, overlay = null, contain
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   const html = new XMLSerializer().serializeToString(clone);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sourceWidth}" height="${sourceHeight}" viewBox="0 0 ${sourceWidth} ${sourceHeight}"><foreignObject x="0" y="0" width="${sourceWidth}" height="${sourceHeight}">${html}</foreignObject></svg>`;
-  const img = new Image();
-  img.decoding = "async";
-  const ok = await new Promise((resolve) => {
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  });
-  if (!ok) return false;
+  const state = window.montageExportJobState;
+  const cache = state ? (state.frontendDomOverlayImageCache ||= new WeakMap()) : null;
+  let img = cache?.get(overlay)?.svg === svg ? cache.get(overlay).image : null;
+  if (!img) {
+    img = new Image();
+    img.decoding = "async";
+    const ok = await new Promise((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    });
+    if (!ok) return false;
+    cache?.set(overlay, { svg, image: img });
+  }
   try {
     ctx.drawImage(img, 0, 0, width, height);
     if (window.montageExportJobState?.frontendExportCapturing === true) {
@@ -3931,6 +4133,102 @@ async function drawFrontendMontageRenderedTextFrames(ctx = null, payload = {}, c
   return drawnCount > 0;
 }
 
+function resolveFrontendStylizedMotion(segment = {}, localTimeSec = 0, totalDurationSec = 0) {
+  const raw = segment?.animation && typeof segment.animation === "object" ? segment.animation : {};
+  const preset = String(raw.preset || "none").trim();
+  const exit = String(raw.exit || "none").trim();
+  const duration = Math.max(0.2, Math.min(3, Number(raw.durationSec || 0.8) || 0.8));
+  const intensity = Math.max(0.25, Math.min(1.5, Number(raw.intensity || 1) || 1));
+  const total = Math.max(0.5, Number(totalDurationSec || segment?.durationMs / 1000 || 8) || 8);
+  const enter = Math.min(duration, total / 3);
+  const exitStart = Math.max(enter, total - enter);
+  const t = Math.max(0, Math.min(total, Number(localTimeSec || 0) || 0));
+  let x = 0;
+  let y = 0;
+  let scale = 1;
+  let alpha = 1;
+  const easeOut = (value) => 1 - Math.pow(1 - Math.max(0, Math.min(1, value)), 3);
+  if (preset === "fade-rise" || preset === "soft-float") {
+    const progress = enter > 0 ? easeOut(t / enter) : 1;
+    y = 60 * intensity * (1 - progress);
+    alpha = progress;
+  } else if (preset === "slide-reveal") {
+    const progress = enter > 0 ? easeOut(t / enter) : 1;
+    x = -90 * intensity * (1 - progress);
+    alpha = progress;
+  } else if (preset === "spring-pop") {
+    const progress = enter > 0 ? Math.max(0, Math.min(1, t / enter)) : 1;
+    scale = 0.72 + 0.28 * easeOut(progress);
+    alpha = progress;
+  }
+  if (preset === "soft-float" && t > enter && t < exitStart) {
+    const progress = (t - enter) / Math.max(0.2, exitStart - enter);
+    y -= 10 * intensity * (0.5 - Math.cos(progress * Math.PI * 2) / 2);
+  }
+  if (exit === "fade" && t > exitStart) alpha *= Math.max(0, (total - t) / Math.max(0.001, total - exitStart));
+  if (exit === "slide" && t > exitStart) {
+    const progress = Math.max(0, Math.min(1, (t - exitStart) / Math.max(0.001, total - exitStart)));
+    x += 70 * intensity * progress;
+    alpha *= 1 - progress;
+  }
+  return { x, y, scale, alpha };
+}
+
+async function drawFrontendMontageStylizedText(ctx = null, payload = {}, currentMs = 0, width = 0, height = 0) {
+  const timeline = payload?.stylizedTextTimeline;
+  const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (!ctx || !segments.length || width <= 0 || height <= 0) return false;
+  const imageCache = window.montageExportJobState?.frontendRenderedTextImageCache || new Map();
+  if (window.montageExportJobState && !window.montageExportJobState.frontendRenderedTextImageCache) {
+    window.montageExportJobState.frontendRenderedTextImageCache = imageCache;
+  }
+  let drawn = false;
+  for (const segment of segments) {
+    const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+    const durationMs = Math.max(1, Number(segment?.durationMs || 0) || 0);
+    const endMs = startMs + durationMs;
+    if (currentMs < startMs || currentMs >= endMs) continue;
+    const image = await loadFrontendMontageRenderedFrameImage(segment, imageCache);
+    if (!image) {
+      if (window.montageExportJobState?.frontendExportCapturing === true) {
+        logMontageExportDevtools("frontend_export_stylized_text_image_missing", {
+          rowId: String(segment?.rowId || "").trim() || undefined,
+          hasDataUrl: String(segment?.dataUrl || "").startsWith("data:image/"),
+          hasStoragePath: Boolean(segment?.storagePath)
+        }, "warn");
+      }
+      continue;
+    }
+    const sourceWidth = Math.max(2, Number(segment?.sourceWidth || 1280) || 1280);
+    const sourceHeight = Math.max(2, Number(segment?.sourceHeight || 720) || 720);
+    const fitX = width / sourceWidth;
+    const fitY = height / sourceHeight;
+    const localTimeSec = (currentMs - startMs) / 1000;
+    const motion = resolveFrontendStylizedMotion(segment, localTimeSec, durationMs / 1000);
+    ctx.save();
+    ctx.globalAlpha *= motion.alpha;
+    ctx.translate(width / 2 + motion.x * fitX, height / 2 + motion.y * fitY);
+    ctx.scale(motion.scale, motion.scale);
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    drawn = true;
+  }
+  return drawn;
+}
+
+async function preloadFrontendMontageOverlayImages(payload = {}) {
+  const state = window.montageExportJobState || (window.montageExportJobState = {});
+  const imageCache = state.frontendRenderedTextImageCache || (state.frontendRenderedTextImageCache = new Map());
+  const sources = [];
+  (Array.isArray(payload?.stylizedTextTimeline?.segments) ? payload.stylizedTextTimeline.segments : []).forEach((segment) => {
+    sources.push(segment);
+  });
+  getFrontendMontageRenderedTextSegments(payload).forEach((segment) => {
+    (Array.isArray(segment?.renderedFrames) ? segment.renderedFrames : []).forEach((frame) => sources.push(frame));
+  });
+  await Promise.all(sources.map((source) => loadFrontendMontageRenderedFrameImage(source, imageCache)));
+}
+
 async function resolveFrontendMontageAudioSource(segment = {}) {
   const direct = String(segment?.dataUrl || segment?.localDataUrl || segment?.downloadUrl || segment?.url || "").trim();
   if (direct) {
@@ -3988,12 +4286,45 @@ async function decodeFrontendMontageAudioBuffer(audioCtx = null, src = "", cache
   return decoded;
 }
 
+function isFrontendMontageBackgroundAudioSegment(segment = {}) {
+  return ["uploaded", "background-track", "background", "music"].includes(String(segment?.kind || "").trim().toLowerCase());
+}
+
+function resolveFrontendMontageAudioGainAtMs({ segment = {}, currentMs = 0, masterVolumePct = 100, backgroundAutomation = [], duckWindows = [] } = {}) {
+  const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+  const durationMs = Math.max(1, Number(segment?.durationMs || 0) || 1);
+  const localMs = Math.max(0, Number(currentMs || 0) - startMs);
+  let gain = Math.max(0, Math.min(2, Number(segment?.volumePct ?? 100) / 100 || 0));
+  gain *= Math.max(0, Math.min(1, Number(masterVolumePct ?? 100) / 100 || 0));
+  if (isFrontendMontageBackgroundAudioSegment(segment)) {
+    const sceneWindow = (Array.isArray(backgroundAutomation) ? backgroundAutomation : []).find((item) => (
+      Number(currentMs) >= Number(item?.startMs || 0) && Number(currentMs) < Number(item?.endMs || 0)
+    ));
+    if (sceneWindow) gain *= Math.max(0, Math.min(2, Number(sceneWindow.volumePct ?? 100) / 100 || 0));
+    const ducked = (Array.isArray(duckWindows) ? duckWindows : []).some((item) => (
+      item?.duckTrigger !== false
+      && Number(currentMs) >= Number(item?.startMs || 0)
+      && Number(currentMs) < Number(item?.endMs || 0)
+    ));
+    if (ducked) {
+      const duckPct = Number(segment?.duckingWhenGeminiPct ?? segment?.duckingPct ?? 60);
+      gain *= Math.max(0, Math.min(1, duckPct / 100));
+    }
+  }
+  const fadeInMs = Math.max(0, Math.min(durationMs, Number(segment?.fadeInMs || 0) || 0));
+  const fadeOutMs = Math.max(0, Math.min(durationMs, Number(segment?.fadeOutMs || 0) || 0));
+  if (fadeInMs > 0 && localMs < fadeInMs) gain *= Math.max(0, localMs / fadeInMs);
+  if (fadeOutMs > 0 && localMs > durationMs - fadeOutMs) gain *= Math.max(0, (durationMs - localMs) / fadeOutMs);
+  return Math.max(0, Math.min(2, Number.isFinite(gain) ? gain : 0));
+}
+
 async function scheduleFrontendMontageAudioTracks({
   payload = {},
   audioCtx = null,
   destination = null,
   startAt = 0,
-  durationMs = 0
+  durationMs = 0,
+  deferStart = false
 } = {}) {
   if (!audioCtx || !destination) return { expected: 0, scheduled: 0 };
   const audioTimeline = payload?.audioTimeline && typeof payload.audioTimeline === "object" ? payload.audioTimeline : null;
@@ -4013,6 +4344,17 @@ async function scheduleFrontendMontageAudioTracks({
     : [];
   const segments = timelineSegments.length ? timelineSegments : perSceneSegments;
   const expected = segments.length;
+  const masterVolumePct = Math.max(0, Math.min(100, Number(audioTimeline?.masterVolumePct ?? 100) || 0));
+  const backgroundAutomation = Array.isArray(audioTimeline?.sceneBackgroundAutomation) ? audioTimeline.sceneBackgroundAutomation : [];
+  const duckWindows = segments
+    .filter((segment) => !isFrontendMontageBackgroundAudioSegment(segment))
+    .filter((segment) => segment?.duckTrigger !== false)
+    .filter((segment) => ["gemini", "free-voice", "voice"].includes(String(segment?.kind || "").trim().toLowerCase()))
+    .map((segment) => {
+      const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      return { startMs, endMs: startMs + Math.max(0, Number(segment?.durationMs || 0) || 0), duckTrigger: true };
+    })
+    .filter((segment) => segment.endMs > segment.startMs);
   const cache = new Map();
   let scheduled = 0;
   const plans = [];
@@ -4031,14 +4373,58 @@ async function scheduleFrontendMontageAudioTracks({
       ));
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.playbackRate.value = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
+      const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
+      source.playbackRate.value = playbackRate;
       const gain = audioCtx.createGain();
-      gain.gain.value = Math.max(0, Math.min(2, Number(segment?.volumePct ?? 100) / 100 || 0));
       source.connect(gain);
       gain.connect(destination);
+      const startOffsetSec = startMs / 1000;
+      const outputDurationSec = Math.max(0.05, durationSec / playbackRate);
+      const segmentEndMs = startMs + outputDurationSec * 1000;
+      const events = new Set([0, outputDurationSec]);
+      const addBoundary = (absoluteMs) => {
+        const relativeSec = (Number(absoluteMs || 0) - startMs) / 1000;
+        [-0.02, 0, 0.02].forEach((offset) => {
+          const at = relativeSec + offset;
+          if (at >= 0 && at <= outputDurationSec) events.add(at);
+        });
+      };
+      const fadeInMs = Math.max(0, Math.min(outputDurationSec * 1000, Number(segment?.fadeInMs || 0) || 0));
+      const fadeOutMs = Math.max(0, Math.min(outputDurationSec * 1000, Number(segment?.fadeOutMs || 0) || 0));
+      if (fadeInMs > 0) events.add(fadeInMs / 1000);
+      if (fadeOutMs > 0) events.add(Math.max(0, outputDurationSec - fadeOutMs / 1000));
+      if (isFrontendMontageBackgroundAudioSegment(segment)) {
+        backgroundAutomation.forEach((windowConfig) => {
+          const windowStart = Number(windowConfig?.startMs || 0);
+          const windowEnd = Number(windowConfig?.endMs || 0);
+          if (windowStart < segmentEndMs && windowEnd > startMs) {
+            addBoundary(Math.max(startMs, windowStart));
+            addBoundary(Math.min(segmentEndMs, windowEnd));
+          }
+        });
+        duckWindows.forEach((windowConfig) => {
+          if (windowConfig.startMs < segmentEndMs && windowConfig.endMs > startMs) {
+            addBoundary(Math.max(startMs, windowConfig.startMs));
+            addBoundary(Math.min(segmentEndMs, windowConfig.endMs));
+          }
+        });
+      }
+      const orderedEvents = Array.from(events).sort((a, b) => a - b);
+      const gainEvents = orderedEvents.map((relativeSec) => {
+        const value = resolveFrontendMontageAudioGainAtMs({
+          segment,
+          currentMs: startMs + relativeSec * 1000,
+          masterVolumePct,
+          backgroundAutomation,
+          duckWindows
+        });
+        return { relativeSec, value };
+      });
       plans.push({
         source,
-        startOffsetSec: startMs / 1000,
+        gain,
+        gainEvents,
+        startOffsetSec,
         trimInSec,
         durationSec
       });
@@ -4051,22 +4437,31 @@ async function scheduleFrontendMontageAudioTracks({
       }, "warn");
     }
   }
-  const effectiveStartAt = Math.max(Number(startAt || 0) || 0, audioCtx.currentTime + 0.25);
-  plans.forEach((plan) => {
-    plan.source.start(effectiveStartAt + plan.startOffsetSec, plan.trimInSec, plan.durationSec);
-  });
-  return { expected, scheduled, startAt: effectiveStartAt };
+  const start = (when = audioCtx.currentTime) => {
+    const effectiveStartAt = Math.max(Number(when || 0) || 0, audioCtx.currentTime);
+    plans.forEach((plan) => {
+      const segmentStartAt = effectiveStartAt + plan.startOffsetSec;
+      plan.gainEvents.forEach(({ relativeSec, value }, index) => {
+        const at = segmentStartAt + relativeSec;
+        if (index === 0) plan.gain.gain.setValueAtTime(value, at);
+        else plan.gain.gain.linearRampToValueAtTime(value, at);
+      });
+      plan.source.start(segmentStartAt, plan.trimInSec, plan.durationSec);
+    });
+    return effectiveStartAt;
+  };
+  return { expected, scheduled, start, startAt: deferStart ? null : start(startAt) };
 }
 
-async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 0, width = 0, height = 0, syncMedia = true } = {}) {
+async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 0, width = 0, height = 0, syncMedia = true, playMedia = true } = {}) {
   const container = getMontageExportPreviewContainer();
   if (!ctx || !container) throw new Error("frontend_export_preview_missing");
   const controller = window.exportPreviewController || null;
   if (controller && typeof controller.tick === "function") {
-    await controller.tick(currentMs, { lightweight: false, suppressAutoScroll: true });
+    await controller.tick(currentMs, { lightweight: true, suppressAutoScroll: true });
   }
   if (syncMedia !== false) {
-    await waitFrontendMontageVisibleMediaReady({ payload, currentMs });
+    await waitFrontendMontageVisibleMediaReady({ payload, currentMs, playMedia });
   }
   if (shouldUseMontageExportPreviewJassub(payload)) {
     await renderMontageExportPreviewJassub(true);
@@ -4074,6 +4469,7 @@ async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
   ctx.fillStyle = window.getComputedStyle(container).backgroundColor || "#05070b";
   ctx.fillRect(0, 0, width, height);
+  const activeEntry = resolveFrontendMontageActiveEntryAtMs(payload, currentMs);
   const mediaElements = getVisibleFrontendMontageMediaElements();
   if (!mediaElements.length && (currentMs === 0 || currentMs % 5000 < 42)) {
     logMontageExportDevtools("frontend_export_no_visible_media", {
@@ -4082,8 +4478,11 @@ async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 
       previewUrl: String(window.montageExportPreviewState?.dataUrl || "").trim().slice(0, 160) || undefined
     }, "warn");
   }
+  const mediaCanvas = getFrontendMontageScratchCanvas("MediaLayer", width, height);
+  const mediaContext = mediaCanvas.getContext("2d");
+  mediaContext.clearRect(0, 0, width, height);
   mediaElements.forEach((el) => {
-    const drawn = drawFrontendMontageElement(ctx, el, container, width, height);
+    const drawn = drawFrontendMontageElement(mediaContext, el, container, width, height);
     if (!drawn && (currentMs === 0 || currentMs % 5000 < 42)) {
       logMontageExportDevtools("frontend_export_media_draw_skipped", {
         currentMs,
@@ -4093,27 +4492,57 @@ async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 
       }, "warn");
     }
   });
+  const mediaWarped = drawFrontendMontageImageWarp(ctx, mediaCanvas, activeEntry, currentMs, width, height);
+  if (!mediaWarped) ctx.drawImage(mediaCanvas, 0, 0, width, height);
+  const layerCanvas = getFrontendMontageScratchCanvas("SceneLayers", width, height);
+  layerCanvas.getContext("2d")?.clearRect(0, 0, width, height);
+  const sceneStartMs = Math.max(0, Number(activeEntry?.timelineStartMs ?? activeEntry?.startMs ?? 0) || 0);
+  const sceneDurationMs = Math.max(1, Number(activeEntry?.durationMs || 0) || 1);
+  try {
+    const hasLayers = await window.PodcasterSceneImageLayers?.renderToCanvas?.(
+      layerCanvas,
+      String(activeEntry?.rowId || "").trim(),
+      window.exportPreviewController?.state?.session || window.getActiveSession?.(),
+      Math.max(0, currentMs - sceneStartMs) / 1000,
+      sceneDurationMs / 1000
+    );
+    if (hasLayers) ctx.drawImage(layerCanvas, 0, 0, width, height);
+  } catch (error) {
+    logMontageExportDevtools("frontend_export_scene_layers_draw_failed", {
+      rowId: String(activeEntry?.rowId || "").trim() || undefined,
+      message: String(error?.message || error || "").trim() || undefined
+    }, "warn");
+  }
   const stylizedOverlay = window.els?.montageExportStylizedTextOverlay || null;
-  if (stylizedOverlay && stylizedOverlay.hidden !== true) {
-    await drawFrontendMontageDomOverlay(ctx, stylizedOverlay, container, width, height);
-  }
+  const stylizedTimelineHasSegments = Array.isArray(payload?.stylizedTextTimeline?.segments)
+    && payload.stylizedTextTimeline.segments.length > 0;
   const renderedTextDrawn = await drawFrontendMontageRenderedTextFrames(ctx, payload, currentMs, width, height);
-  const domOverlay = window.els?.montageExportPreviewOverlay || null;
-  if (!renderedTextDrawn && domOverlay && domOverlay.hidden !== true && (container?.dataset?.subtitleRenderer !== "jassub" || window.montageExportJobState?.frontendExportCapturing === true)) {
-    await drawFrontendMontageDomOverlay(ctx, domOverlay, container, width, height);
-  }
   const subtitleCanvas = getMontageExportPreviewSubtitleCanvas();
   if (subtitleCanvas && subtitleCanvas.hidden !== true) {
     drawFrontendMontageElement(ctx, subtitleCanvas, container, width, height);
+  }
+  if (stylizedTimelineHasSegments) {
+    await drawFrontendMontageStylizedText(ctx, payload, currentMs, width, height);
+  } else if (stylizedOverlay && stylizedOverlay.hidden !== true) {
+    await drawFrontendMontageDomOverlay(ctx, stylizedOverlay, container, width, height);
+  }
+  const domOverlay = window.els?.montageExportPreviewOverlay || null;
+  if (!renderedTextDrawn && domOverlay && domOverlay.hidden !== true && (container?.dataset?.subtitleRenderer !== "jassub" || window.montageExportJobState?.frontendExportCapturing === true)) {
+    await drawFrontendMontageDomOverlay(ctx, domOverlay, container, width, height);
   }
   const brand = container.querySelector?.(".podcast-stage-brand-mark");
   if (payload?.brandOverlay?.enabled !== false && brand) {
     drawFrontendMontageElement(ctx, brand, container, width, height);
   }
+  // Cards use z-index 120 in the preview, above captions, stylized text, and branding.
+  const cardLayer = container.querySelector?.(".podcast-overlay-card-layer");
+  if (cardLayer && cardLayer.hidden !== true) {
+    await drawFrontendMontageDomOverlay(ctx, cardLayer, container, width, height);
+  }
 }
 
-async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}) {
-  const mimeType = selectFrontendMontageExportMimeType();
+async function recordFrontendMontageCanvas({ payload = {}, session = null, signal = null } = {}) {
+  let mimeType = selectFrontendMontageExportMimeType();
   logMontageExportDevtools("frontend_export_capabilities", {
     hasMediaRecorder: typeof MediaRecorder !== "undefined",
     hasCaptureStream: typeof document.createElement("canvas").captureStream === "function",
@@ -4146,10 +4575,14 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) throw new Error("frontend_export_canvas_context_missing");
-  const visualStream = canvas.captureStream(fps);
-  const visualTrack = visualStream.getVideoTracks()[0] || null;
+  const captureCtx = canvas.getContext("2d", { alpha: false });
+  const renderCanvas = document.createElement("canvas");
+  renderCanvas.width = width;
+  renderCanvas.height = height;
+  const ctx = renderCanvas.getContext("2d", { alpha: false });
+  if (!ctx || !captureCtx) throw new Error("frontend_export_canvas_context_missing");
+  const capture = createBrowserMontageCapture(canvas, fps);
+  const visualStream = capture.stream;
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
   const audioCtx = AudioContextCtor ? new AudioContextCtor() : null;
   let audioDestination = null;
@@ -4167,10 +4600,31 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
     width,
     height,
     fps,
+    manualCapture: capture.manual,
     durationMs
   });
   const chunks = [];
-  const recorder = new MediaRecorder(combinedStream, { mimeType });
+  let recorder;
+  const requestedVideoBitrate = Math.max(250_000, Math.min(50_000_000,
+    Math.round((Number(payload?.bitrateSettings?.maxBitrateMbps || window.montageExportState?.maxBitrate || 5) || 5) * 1_000_000)));
+  const recorderOptions = { mimeType, videoBitsPerSecond: requestedVideoBitrate, audioBitsPerSecond: 192_000 };
+  try {
+    recorder = new MediaRecorder(combinedStream, recorderOptions);
+  } catch (error) {
+    const fallbackMimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      .find((candidate) => {
+        try { return MediaRecorder.isTypeSupported(candidate); } catch (_) { return false; }
+      });
+    if (!fallbackMimeType || mimeType === fallbackMimeType) throw error;
+    mimeType = fallbackMimeType;
+    recorder = new MediaRecorder(combinedStream, { ...recorderOptions, mimeType });
+  }
+  if (window.montageExportJobState) {
+    window.montageExportJobState.frontendRecorder = recorder;
+    window.montageExportJobState.frontendVisualStream = visualStream;
+    window.montageExportJobState.frontendAudioStream = audioDestination?.stream || null;
+    window.montageExportJobState.frontendAudioContext = audioCtx;
+  }
   recorder.addEventListener("dataavailable", (event) => {
     if (event.data && event.data.size > 0) chunks.push(event.data);
   });
@@ -4178,60 +4632,99 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
     recorder.addEventListener("stop", resolve, { once: true });
     recorder.addEventListener("error", () => reject(recorder.error || new Error("frontend_export_recorder_failed")), { once: true });
   });
+  const recorderStarted = new Promise((resolve, reject) => {
+    recorder.addEventListener("start", resolve, { once: true });
+    recorder.addEventListener("error", (event) => reject(event.error || new Error("frontend_export_recorder_failed")), { once: true });
+  });
   controller.sync(session || window.getActiveSession?.());
+  const activeSession = session || window.getActiveSession?.();
+  if (typeof controller.prepareSessionMedia === "function") {
+    setMontageExportStatus("Preparando escenas…", "Cargando y decodificando los medios antes de grabar para que los cambios no esperen descargas durante el video.", { tone: "neutral" });
+    await controller.prepareSessionMedia({
+      session: activeSession,
+      includeDialogue: false,
+      onProgress: ({ completed = 0, total = 0, state = "loading" } = {}) => {
+        const fraction = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+        setMontageExportProgress(0.02 + fraction * 0.05);
+        setMontageExportStatus(
+          state === "ready" ? "Escenas preparadas" : "Preparando escenas…",
+          total > 0 ? `Medios listos: ${completed} de ${total}.` : "Preparando imágenes y videos de la sesión.",
+          { tone: "neutral" }
+        );
+      }
+    });
+  }
   await controller.seek(0, { lightweight: false, awaitStageVideo: true });
   pauseFrontendMontagePreviewVideos();
   if (window.montageExportJobState) {
     delete window.montageExportJobState.frontendVideoSceneKey;
     window.montageExportJobState.frontendRenderedTextImageCache = new Map();
   }
-  await drawFrontendMontageFrame({ ctx, payload, currentMs: 0, width, height });
-  let startAudioAt = audioCtx ? audioCtx.currentTime + 0.25 : 0;
+  await preloadFrontendMontageOverlayImages(payload);
+  await drawFrontendMontageFrame({ ctx, payload, currentMs: 0, width, height, playMedia: false });
+  captureCtx.drawImage(renderCanvas, 0, 0);
+  let startAudioAt = 0;
   if (audioCtx && audioDestination) {
     audioSchedule = await scheduleFrontendMontageAudioTracks({
       payload,
       audioCtx,
       destination: audioDestination,
-      startAt: startAudioAt,
-      durationMs
+      durationMs,
+      deferStart: true
     });
     if (audioSchedule.expected > 0 && audioSchedule.scheduled <= 0) {
       throw new Error("frontend_export_audio_unavailable");
     }
     await audioCtx.resume?.();
-    startAudioAt = Math.max(startAudioAt, Number(audioSchedule.startAt || 0) || 0);
   }
   logMontageExportDevtools("frontend_export_audio_ready", {
     expected: audioSchedule.expected,
     scheduled: audioSchedule.scheduled,
     hasAudioContext: Boolean(audioCtx),
-    startAudioAt
+    deferredStart: true
   });
   recorder.start(1000);
+  await recorderStarted;
+  const startedAt = performance.now();
+  if (audioCtx) {
+    startAudioAt = audioSchedule.start(audioCtx.currentTime);
+    audioSchedule.startAt = startAudioAt;
+  }
+  controller.setExternalVideoPlayback?.(true);
+  capture.requestFrame();
   logMontageExportDevtools("frontend_export_recorder_started", {
     mimeType,
     recorderState: recorder.state,
     chunkIntervalMs: 1000
   });
-  if (audioCtx) {
-    await waitFrontendMontageExportMs(Math.max(0, (startAudioAt - audioCtx.currentTime) * 1000));
-  }
-  const startedAt = performance.now();
   const frameCount = Math.max(1, Math.ceil(durationMs / frameIntervalMs));
   let frameIndex = 0;
+  let renderedFrames = 0;
+  let skippedDeadlines = 0;
+  const elapsedNow = () => Math.max(0, audioCtx
+    ? (audioCtx.currentTime - startAudioAt) * 1000
+    : performance.now() - startedAt);
   while (true) {
-    const elapsedMs = Math.max(0, performance.now() - startedAt);
+    if (signal?.aborted) throw new DOMException("Exportación local cancelada.", "AbortError");
+    const elapsedMs = elapsedNow();
+    // El reloj de captura debe seguir el tiempo real: MediaRecorder asigna
+    // marcas de tiempo reales a cada requestFrame; avanzar un cuadro lógico
+    // aunque el dibujo tarde más alarga la escena y desincroniza el corte.
     const currentMs = Math.min(durationMs, Math.round(elapsedMs));
     const { key: sceneKey } = resolveFrontendMontageSceneKey(payload, currentMs);
     const syncMedia = frameIndex === 0 || window.montageExportJobState?.frontendVideoSceneKey !== sceneKey;
     await drawFrontendMontageFrame({ ctx, payload, currentMs, width, height, syncMedia });
-    if (typeof visualTrack?.requestFrame === "function") visualTrack.requestFrame();
+    // Publish the complete composition in one operation, including in browsers
+    // that only support automatic capture. No partial layers enter the stream.
+    captureCtx.drawImage(renderCanvas, 0, 0);
+    capture.requestFrame();
+    renderedFrames += 1;
     const progress = 0.08 + (0.86 * Math.min(1, currentMs / Math.max(1, durationMs)));
     setMontageExportProgress(progress);
     if (frameIndex % fps === 0 || currentMs >= durationMs) {
       setMontageExportStatus(
-        "Export local desactivado.",
-        `El MP4 se genera en backend/FFmpeg; frame local ${Math.min(frameIndex + 1, frameCount)} de ${frameCount} no se usa en el flujo principal.`,
+        "Exportando en este dispositivo…",
+        `Escena ${resolveFrontendMontageSceneKey(payload, currentMs).sceneIndex || 1} · ${Math.round(progress * 100)}% · Mantén esta pestaña abierta.`,
         { tone: "neutral" }
       );
       logMontageExportDevtools("frontend_export_frame", {
@@ -4241,17 +4734,26 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
         durationMs,
         mimeType,
         fps,
-        realtimeElapsedMs: Math.round(elapsedMs)
+        realtimeElapsedMs: Math.round(elapsedMs),
+        frameRenderLagMs: Math.max(0, Math.round(elapsedMs - frameIndex * frameIntervalMs))
       }, "debug");
     }
     if (currentMs >= durationMs) break;
-    frameIndex += 1;
-    const nextTargetAt = startedAt + (frameIndex * frameIntervalMs);
-    const sleepMs = nextTargetAt - performance.now();
+    const nextFrameIndex = nextBrowserMontageFrameIndex(frameIndex, elapsedNow(), fps);
+    skippedDeadlines += Math.max(0, nextFrameIndex - frameIndex - 1);
+    frameIndex = nextFrameIndex;
+    const sleepMs = Math.min(durationMs, frameIndex * frameIntervalMs) - elapsedNow();
     if (sleepMs > 1) await waitFrontendMontageExportMs(sleepMs);
   }
+  // Let the last requested canvas paint reach the capture track before stop.
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
   recorder.stop();
   await stopped;
+  controller.setExternalVideoPlayback?.(false);
+  logMontageExportDevtools("frontend_export_capture_complete", {
+    renderedFrames, skippedDeadlines, fps, durationMs,
+    realtimeElapsedMs: Math.round(elapsedNow()), manualCapture: capture.manual
+  });
   try { visualStream.getTracks().forEach((track) => track.stop()); } catch (_) { }
   try { audioDestination?.stream?.getTracks?.().forEach((track) => track.stop()); } catch (_) { }
   try { await audioCtx?.close?.(); } catch (_) { }
@@ -4273,15 +4775,113 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   };
 }
 
-async function runFrontendMontageExport({ payload = {}, session = null } = {}) {
-  logMontageExportDevtools("frontend_full_video_export_disabled", {
-    reason: "backend_ffmpeg_required",
-    durationMs: resolveFrontendMontageExportDurationMs(payload),
-    format: String(payload?.format || window.montageExportState?.format || "").trim() || undefined,
-    exportMode: String(payload?.exportMode || "").trim() || undefined,
-    hasSession: Boolean(session)
-  }, "warn");
-  throw new Error("frontend_full_video_export_disabled");
+export function validateFrontendMontageExport(payload = {}) {
+  if (!selectFrontendMontageExportMimeType()) return "Este navegador no ofrece MediaRecorder compatible. Elige Cloud Run.";
+  if (typeof document.createElement("canvas").captureStream !== "function") return "Este navegador no puede capturar el canvas para exportar localmente. Elige Cloud Run.";
+  if (payload?.onlyAudio === true) return "La exportación solo de audio requiere Cloud Run. Cambia el tipo de exportación para continuar.";
+  if (String(payload?.exportMode || "").trim() === "review") return "El modo Revisión requiere Cloud Run. Cambia el tipo de exportación para continuar.";
+  if ((Array.isArray(payload?.entries) ? payload.entries : []).some((entry) => entry?.useNativeVideoAudio === true)) {
+    return "Una o más escenas usan audio nativo de video, que requiere Cloud Run. Cambia el tipo de exportación para continuar.";
+  }
+  if (resolveFrontendMontageExportDurationMs(payload) > MONTAGE_FRONTEND_EXPORT_MAX_DURATION_MS) {
+    return "La exportación local admite hasta 3 minutos. Elige Cloud Run para este proyecto.";
+  }
+  if (!window.exportPreviewController || typeof window.exportPreviewController.sync !== "function") {
+    return "No está disponible el reproductor de preview necesario para exportar localmente. Elige Cloud Run.";
+  }
+  if (!getMontageExportPreviewContainer()) return "No está disponible la vista previa necesaria para exportar localmente. Elige Cloud Run.";
+  return "";
+}
+
+export async function runFrontendMontageExport({ payload = {}, session = null } = {}) {
+  const validationMessage = validateFrontendMontageExport(payload);
+  if (validationMessage) throw new Error(validationMessage);
+  if (activeFrontendExportAbortController) throw new Error("frontend_export_already_running");
+  const abortController = new AbortController();
+  let resolveCompletion = () => {};
+  activeFrontendExportCompletion = new Promise((resolve) => { resolveCompletion = resolve; });
+  activeFrontendExportAbortController = abortController;
+  const activeExportTab = document.querySelector('.montage-export-tab[aria-selected="true"]')?.dataset?.exportTab || "output";
+  const previewExportTab = document.querySelector('.montage-export-tab[data-export-tab="preview"]');
+  setMontageExportBusy(true, { label: "Exportando en este dispositivo…" });
+  setMontageExportPreviewPaused(true);
+  window.setTimelinePreviewsSuspended?.(true);
+  if (activeExportTab !== "preview") previewExportTab?.click();
+  await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+  const filenameBase = stripFileExtension(window.montageExportState?.filename || defaultMontageExportFilename(session)) || "video";
+  setMontageExportStatus(
+    "Exportación local iniciada.",
+    "El navegador elegirá MP4 si es compatible; si no, guardará WebM. El archivo no se enviará al servidor.",
+    { tone: "neutral" }
+  );
+  try {
+    const result = await recordFrontendMontageCanvas({ payload, session, signal: abortController.signal });
+    if (abortController.signal.aborted) throw new DOMException("Exportación local cancelada.", "AbortError");
+    const extension = result.mimeType.startsWith("video/mp4") ? "mp4" : "webm";
+    const objectUrl = URL.createObjectURL(result.blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${sanitizeMontageFilenamePart(filenameBase) || "video"}.${extension}`;
+    anchor.hidden = true;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    setMontageExportProgress(1);
+    setMontageExportStatus(
+      "Tu video se descargó.",
+      `${extension.toUpperCase()} · ${Math.round(result.durationMs / 1000)} s · ${result.width}×${result.height}.`,
+      { tone: "success" }
+    );
+    logMontageExportDevtools("frontend_export_downloaded", { mimeType: result.mimeType, bytes: result.blob.size, durationMs: result.durationMs, extension });
+    return result;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      setMontageExportProgress(null);
+      setMontageExportStatus("Exportación local cancelada.", "No se guardó ningún archivo parcial.", { tone: "warning" });
+      return null;
+    }
+    const message = String(error?.message || error || "No se pudo exportar en este dispositivo.").trim();
+    setMontageExportStatus("No se pudo exportar en este dispositivo.", message, { tone: "error" });
+    logMontageExportDevtools("frontend_export_failed", { message }, "error");
+    throw error;
+  } finally {
+    activeFrontendExportAbortController = null;
+    setMontageExportBusy(false, { label: "Exportar" });
+    setMontageExportPreviewPaused(false);
+    window.setTimelinePreviewsSuspended?.(false);
+    stopMontageExportElapsedTimer();
+    if (window.montageExportJobState) {
+      delete window.montageExportJobState.frontendRenderedTextImageCache;
+      delete window.montageExportJobState.frontendDomOverlayImageCache;
+      try {
+        const recorder = window.montageExportJobState.frontendRecorder;
+        if (recorder?.state === "recording") recorder.stop();
+      } catch (_) { }
+      for (const stream of [window.montageExportJobState.frontendVisualStream, window.montageExportJobState.frontendAudioStream]) {
+        try { stream?.getTracks?.().forEach((track) => track.stop()); } catch (_) { }
+      }
+      try { await window.montageExportJobState.frontendAudioContext?.close?.(); } catch (_) { }
+      try {
+        if (window.montageExportJobState.frontendSubtitleCaptureState) {
+          restoreFrontendMontageDomSubtitleCapture(payload, window.montageExportJobState.frontendSubtitleCaptureState);
+        }
+      } catch (_) { }
+      delete window.montageExportJobState.frontendSubtitleCaptureState;
+      delete window.montageExportJobState.frontendRecorder;
+      delete window.montageExportJobState.frontendVisualStream;
+      delete window.montageExportJobState.frontendAudioStream;
+      delete window.montageExportJobState.frontendAudioContext;
+      delete window.montageExportJobState.frontendVideoSceneKey;
+    }
+    window.exportPreviewController?.setExternalVideoPlayback?.(false);
+    try { await window.exportPreviewController?.sync?.(session || window.getActiveSession?.()); } catch (_) { }
+    if (activeExportTab !== "preview") {
+      document.querySelector(`.montage-export-tab[data-export-tab="${activeExportTab}"]`)?.click();
+    }
+    resolveCompletion();
+    activeFrontendExportCompletion = null;
+  }
 }
 
 function normalizeMontageStorageSegment(value = "", fallback = "item") {
@@ -4909,6 +5509,7 @@ async function reconcileMontageExportGeminiAudioDurations(payload = {}) {
     ? payload.dialogueAudioMap
     : {};
   const reconciled = await Promise.all(segments.map(async (segment) => {
+    if (segment?.kind === "free-voice") return segment;
     const rowId = String(segment?.rowId || "").trim();
     const dialogueAudio = rowId && dialogueAudioMap[rowId] && typeof dialogueAudioMap[rowId] === "object"
       ? dialogueAudioMap[rowId]
@@ -5188,87 +5789,8 @@ function inferMontageExportMediaTypeFromUrl(value = "") {
   return "video/mp4";
 }
 
-function normalizeMontageExportStoragePathCandidate(value = "") {
-  const clean = String(value || "").trim();
-  if (!clean) return "";
-  let candidate = clean;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (!/%[0-9a-fA-F]{2}/.test(candidate)) break;
-    try {
-      const decoded = decodeURIComponent(candidate);
-      if (decoded === candidate) break;
-      candidate = decoded;
-    } catch (_) {
-      break;
-    }
-  }
-  return candidate;
-}
-
 async function resolveMontageExportStatusPreviewMedia(data = null) {
-  const source = data && typeof data === "object" ? data : {};
-  const storageCandidates = [
-    String(source.currentStoragePath || "").trim(),
-    normalizeMontageExportStoragePathCandidate(source.currentStoragePath || ""),
-    normalizeMontageExportStoragePathCandidate(source.currentDownloadUrl || "")
-  ];
-  const seenStorageCandidates = new Set();
-  for (const storageCandidate of storageCandidates) {
-    const cleanStorageCandidate = String(storageCandidate || "").trim();
-    if (!cleanStorageCandidate || seenStorageCandidates.has(cleanStorageCandidate)) continue;
-    seenStorageCandidates.add(cleanStorageCandidate);
-    if (/^https?:\/\//i.test(cleanStorageCandidate)) {
-      const normalizedStorageUrl = normalizeMontageSubmissionMediaUrl(cleanStorageCandidate);
-      if (normalizedStorageUrl) {
-        return {
-          dataUrl: normalizedStorageUrl,
-          mediaType: inferMontageExportMediaTypeFromUrl(normalizedStorageUrl) || "video/mp4"
-        };
-      }
-      continue;
-    }
-
-    const firebaseCandidate = buildMontageStorageGsUrl(cleanStorageCandidate);
-    if (firebaseCandidate && typeof window.resolveFirebaseStorageUrl === "function") {
-      try {
-        const resolved = String(await window.resolveFirebaseStorageUrl(firebaseCandidate) || "").trim();
-        const normalizedResolved = normalizeMontageSubmissionMediaUrl(resolved);
-        if (normalizedResolved) {
-          return {
-            dataUrl: normalizedResolved,
-            mediaType: inferMontageExportMediaTypeFromUrl(normalizedResolved) || "video/mp4"
-          };
-        }
-      } catch (_) {
-        // fallback below
-      }
-    }
-
-    const fallbackUrl = typeof window.resolveStorageVideoUrl === "function"
-      ? String(window.resolveStorageVideoUrl(cleanStorageCandidate, cleanStorageCandidate) || "").trim()
-      : "";
-    const normalizedFallback = fallbackUrl ? normalizeMontageSubmissionMediaUrl(fallbackUrl) : "";
-    if (normalizedFallback) {
-      return {
-        dataUrl: normalizedFallback,
-        mediaType: inferMontageExportMediaTypeFromUrl(normalizedFallback) || "video/mp4"
-      };
-    }
-  }
-
-  const downloadCandidate = String(source.currentDownloadUrl || "").trim();
-  const resolvedDownloadCandidate = normalizeMontageExportStoragePathCandidate(downloadCandidate);
-  if (resolvedDownloadCandidate) {
-    const normalizedDownload = normalizeMontageSubmissionMediaUrl(resolvedDownloadCandidate);
-    if (normalizedDownload) {
-      return {
-        dataUrl: normalizedDownload,
-        mediaType: inferMontageExportMediaTypeFromUrl(normalizedDownload) || "video/mp4"
-      };
-    }
-  }
-
-  return null;
+  return montageExportPreviewAssets.resolveStatusMedia(data);
 }
 
 export function stripMontageExportSubmissionPayload(payload = {}) {
@@ -5332,10 +5854,39 @@ export function stripMontageExportSubmissionPayload(payload = {}) {
   return next;
 }
 
+function resolveExportVisualEffects(session, rowId) {
+  const key = String(rowId || "").trim();
+  if (!key) return null;
+  const maps = [
+    session?.visualEffectsMap,
+    session?.session?.visualEffectsMap,
+    session?.payload?.visualEffectsMap,
+    session?.script?.visualEffectsMap,
+    session?.config?.visualEffectsMap,
+    session?.podcastStudioUiState?.visualEffectsMap,
+    session?.podcastVideoConfig?.visualEffectsMap,
+    session?.session?.podcastVideoConfig?.visualEffectsMap
+  ];
+  const found = maps.find((map) => map && map[key])?.[key] || null;
+  if (!found) return null;
+  return {
+    ...found,
+    imageWarp: found.imageWarp || null,
+    imageLayers: Array.isArray(found.imageLayers) ? found.imageLayers : []
+  };
+}
+
 function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries = []) {
-  const stylizedTextMap = activeSession?.stylizedTextMap && typeof activeSession.stylizedTextMap === "object"
-    ? activeSession.stylizedTextMap
-    : {};
+  const stylizedTextMap = (
+    activeSession?.stylizedTextMap
+    || activeSession?.session?.stylizedTextMap
+    || activeSession?.payload?.stylizedTextMap
+    || activeSession?.script?.stylizedTextMap
+    || activeSession?.config?.stylizedTextMap
+    || activeSession?.podcastVideoConfig?.stylizedTextMap
+    || activeSession?.podcastStudioUiState?.stylizedTextMap
+    || {}
+  );
   const entries = (Array.isArray(runtimeEntries) ? runtimeEntries : [])
     .slice()
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
@@ -5357,15 +5908,22 @@ function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries =
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.round(Number.isFinite(runtimeDurationMs) ? runtimeDurationMs : STUDIO_TIMELINE_MIN_CLIP_MS)
     );
+    let textTiming = null;
+    try { textTiming = JSON.parse(rawTextData)?.timing || null; } catch (_) { /* older sessions */ }
+    const offsetMs = Math.max(0, Math.min(durationMs - 500, Math.round(Number(textTiming?.startSec || 0) * 1000)));
+    const visibleMs = Math.max(500, Math.min(durationMs - offsetMs, Math.round(Number(textTiming?.durationSec ?? durationMs / 1000) * 1000)));
     return {
       id: `${rowId}-stylized-text`,
       rowId,
       sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || index + 1) || index + 1)),
-      startMs,
-      durationMs,
+      startMs: startMs + offsetMs,
+      durationMs: visibleMs,
       zIndex: Math.max(20, Math.round(Number(entry?.zIndex || index + 1) || index + 1) + 20),
       sourceWidth: 1280,
       sourceHeight: 720,
+      animation: (() => {
+        try { return JSON.parse(rawTextData)?.animation || null; } catch (_) { return null; }
+      })(),
       dataUrl: ""
     };
   }).filter(Boolean);
@@ -5377,34 +5935,78 @@ function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries =
   };
 }
 
-async function hydrateMontageStylizedTextTimeline(payload = {}, activeSession = null) {
+async function hydrateMontageStylizedTextTimeline(payload = {}, activeSession = null, { allowUploads = true } = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const timeline = payload.stylizedTextTimeline && typeof payload.stylizedTextTimeline === "object"
     ? payload.stylizedTextTimeline
     : null;
   if (!timeline || !Array.isArray(timeline.segments) || !timeline.segments.length) return payload;
-  const editor = window.PodcasterMediaEditor || null;
-  if (typeof editor?.prewarmStylizedText !== "function") return payload;
+  let editor = window.PodcasterMediaEditor || null;
+  if (!editor || typeof editor?.prewarmStylizedText !== "function") {
+    try {
+      await import("./podcaster-media-editor.js?rev=2026-10-07.stylized-editor-columns-1");
+      editor = window.PodcasterMediaEditor || null;
+    } catch (_) {}
+  }
+  const sessionId = String(activeSession?.id || "").trim();
+  const stylizedTextMap = (
+    activeSession?.stylizedTextMap
+    || activeSession?.session?.stylizedTextMap
+    || activeSession?.payload?.stylizedTextMap
+    || activeSession?.script?.stylizedTextMap
+    || activeSession?.config?.stylizedTextMap
+    || activeSession?.podcastVideoConfig?.stylizedTextMap
+    || activeSession?.podcastStudioUiState?.stylizedTextMap
+    || {}
+  );
+  const stylizedTextSession = activeSession?.stylizedTextMap === stylizedTextMap
+    ? activeSession
+    : { ...activeSession, stylizedTextMap };
   const hydratedSegments = [];
   for (const segment of timeline.segments) {
     const rowId = String(segment?.rowId || "").trim();
     if (!rowId) continue;
     let dataUrl = String(segment?.dataUrl || "").trim();
-    if (!dataUrl.startsWith("data:image/")) {
+    if (!dataUrl.startsWith("data:image/") && typeof editor?.prewarmStylizedText === "function") {
       try {
-        dataUrl = String(await editor.prewarmStylizedText(rowId, activeSession) || "").trim();
+        dataUrl = String(await editor.prewarmStylizedText(rowId, stylizedTextSession) || "").trim();
       } catch (error) {
         console.warn("[podcaster][montage-export][stylized-text] prewarm_failed", {
           rowId,
           message: String(error?.message || error || "").trim()
         });
-        dataUrl = "";
       }
     }
-    if (!dataUrl.startsWith("data:image/")) continue;
+    if (!dataUrl.startsWith("data:image/")) {
+      if (segment.storagePath) {
+        hydratedSegments.push(segment);
+      }
+      continue;
+    }
+    let storagePath = String(segment?.storagePath || "").trim();
+    if (allowUploads && !storagePath && sessionId) {
+      try {
+        // fetch(dataUrl) está bloqueado por CSP (connect-src no incluye data:), así
+        // que el PNG se decodifica con dataUrlToFile en lugar de descargarlo.
+        const pngFile = dataUrlToFile(dataUrl, `${rowId}-stylized-text.png`);
+        if (pngFile.size <= 10 * 1024 * 1024) {
+          const uploaded = await uploadPodcasterAsset(pngFile, { kind: "scene-image", sessionId, rowId });
+          if (uploaded?.media?.storagePath) {
+            storagePath = uploaded.media.storagePath;
+          }
+        }
+      } catch (uploadError) {
+        console.warn("[podcaster][montage-export][stylized-text] upload_fallback_to_dataurl", {
+          rowId,
+          error: String(uploadError?.message || uploadError)
+        });
+      }
+    }
     hydratedSegments.push({
       ...segment,
-      dataUrl
+      dataUrl: storagePath ? "" : dataUrl,
+      storagePath,
+      mimeType: "image/png"
     });
   }
   payload.stylizedTextTimeline = {
@@ -5937,7 +6539,7 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
   await reconcileMontageExportGeminiAudioDurations(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
   if (prepared.payload.onlyAudio !== true) {
-    await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
+    await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession, { allowUploads: options?.allowUploads !== false });
   }
   const renderedSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
     ? prepared.payload.onScreenTextRenderedSegments.filter(Boolean)
@@ -5963,7 +6565,8 @@ export function buildMontageExportPayload(session = null) {
   const runtimeEntries = Array.isArray(window.buildTimelineRuntimeEntries?.(activeSession))
     ? window.buildTimelineRuntimeEntries(activeSession)
     : [];
-  if (!runtimeEntries.length) return { ok: false, error: "No hay clips en el timeline para exportar.", payload: null };
+  const hasFreeVideoClips = freeVideoExportEntries(activeSession?.podcastVideoConfig?.freeVideoTrack).length > 0;
+  if (!runtimeEntries.length && !hasFreeVideoClips) return { ok: false, error: "No hay clips en el timeline para exportar.", payload: null };
   const linear = validateMontageExportLinearTimeline(runtimeEntries);
   if (!linear.ok) return { ok: false, error: linear.error, payload: null };
   const videoCfg = window.getPodcastVideoConfig?.(activeSession) || {};
@@ -6040,11 +6643,16 @@ export function buildMontageExportPayload(session = null) {
   const buildGeminiTimelineSegments = () => {
     const track = window.normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
     if (!(track.enabled === true) || !Array.isArray(track.segments) || !track.segments.length) return [];
+    const excludedRowIds = new Set((Array.isArray(track.excludedRowIds) ? track.excludedRowIds : [])
+      .map((value) => String(value || "").trim()).filter(Boolean));
     const baseGeminiVolumePct = normalizeLegacyPct(track?.volumePct, normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100));
     return track.segments
       .map((segment, idx) => {
         const rowId = String(segment?.rowId || "").trim();
         if (!rowId) return null;
+        // Deleted/excluded row audio must not be reconstructed from a stale
+        // Gemini segment while session media maps are reconciling.
+        if (excludedRowIds.has(rowId) || window.isDialogueAudioDeletedForRow?.(activeSession, rowId)) return null;
         const rows = window.getSessionRows?.(activeSession) || [];
         const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
         const clip = window.resolveDialogueVideoForRow?.(activeSession, rowId) || null;
@@ -6066,19 +6674,30 @@ export function buildMontageExportPayload(session = null) {
           || (typeof window.resolveFallbackDialogueAudioForRow === "function" ? window.resolveFallbackDialogueAudioForRow(activeSession, rowId) : null)
           || window.resolveDialogueAudioForRow(activeSession, rowId)
         );
+        if (!storedAudio) return null;
         const src = String(
           storedAudio?.downloadUrl
           || storedAudio?.storagePath
           || storedAudio?.localDataUrl
           || storedAudio?.dataUrl
-          || segment?.audioSrc
-          || runtime?.audioSrc
           || ""
         ).trim();
         const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
         const rawStartMs = Number(segment?.startMs || 0);
-        const startMs = Number.isFinite(rawStartMs) ? Math.round(rawStartMs) : 0;
+        const storedStartMs = Number.isFinite(rawStartMs) ? Math.max(0, Math.round(rawStartMs)) : 0;
+        const runtimeStartMs = Math.max(0, Math.round(Number(runtime?.startMs ?? runtime?.timelineStartMs ?? 0) || 0));
+        const anchorStartMs = Number(segment?.anchorStartMs);
+        let startMs = storedStartMs;
+        if (segment?.manualStartMs !== true && runtimeStartMs > storedStartMs) {
+          // Older tracks stored scene-local offsets (often 0) as if they were
+          // global. Convert only those stale positions; current global positions
+          // and intentional manual overlaps remain untouched.
+          const relativeOffsetMs = Number.isFinite(anchorStartMs) && anchorStartMs > 0
+            ? Math.max(0, storedStartMs - Math.round(anchorStartMs))
+            : storedStartMs;
+          startMs = runtimeStartMs + relativeOffsetMs;
+        }
         const playbackRate = Math.max(
           0.5,
           Math.min(
@@ -6241,7 +6860,12 @@ export function buildMontageExportPayload(session = null) {
   if (onlyAudioExport && window.montageExportState) {
     window.montageExportState.onlyAudio = true;
   }
-  const geminiTimelineSegments = buildGeminiTimelineSegments();
+  const duckFreeVoiceEnabled = videoCfg?.audioMasterDuckFreeVoiceEnabled !== false;
+  const geminiTimelineSegments = [
+    ...buildGeminiTimelineSegments(),
+    ...freeVoiceExportSegments(videoCfg?.freeVoiceTrack).map((segment) => ({ ...segment, duckTrigger: duckFreeVoiceEnabled })),
+    ...(onlyAudioExport ? freeVideoExportAudioSegments(videoCfg?.freeVideoTrack) : [])
+  ];
   const backgroundAutomationWindows = buildSceneBackgroundAutomationWindows();
   const uploadedBackgroundSegments = buildUploadedBackgroundSegments();
   const trackBackgroundSegments = buildTrackBackgroundSegments();
@@ -6295,7 +6919,8 @@ export function buildMontageExportPayload(session = null) {
         ? Math.max(0, Math.min(100, Math.round(Number(sceneMix.geminiPct))))
         : normalizeLegacyPct(entry?.clip?.geminiVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100));
       const audioPlaybackRate = Math.max(0.5, Math.min(10, Number(audio?.playbackRate || row?.playbackRate || 1) || 1));
-      const useNativeVideoAudio = window.shouldKeepNativeVideoAudioForRow?.(activeSession, rowId) || resolvedVeoVolumePct > 0.0001;
+      const useNativeVideoAudio = resolvedVeoVolumePct > 0.0001
+        && window.shouldUseNativeVideoAudioForRow?.(activeSession, rowId) === true;
       const transitionOut = entry?.transitionOut
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
         || null;
@@ -6341,7 +6966,7 @@ export function buildMontageExportPayload(session = null) {
           ).replace(/\s+/g, " ").trim(),
           visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
           videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
-          visualEffects: activeSession?.visualEffectsMap?.[rowId] || null,
+          visualEffects: resolveExportVisualEffects(activeSession, rowId),
           transitionOut,
           sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.sourceDurationMs || 0) || durationMs),
           frameHolds: Array.isArray(entry?.frameHolds) ? entry.frameHolds : [],
@@ -6396,7 +7021,12 @@ export function buildMontageExportPayload(session = null) {
         }
       };
     });
-  const validEntries = entries.filter((item) => item.ok === true && item.entry).map((item) => item.entry);
+  const validEntries = [
+    ...entries.filter((item) => item.ok === true && item.entry).map((item) => item.entry),
+    ...(!onlyAudioExport ? freeVideoExportEntries(videoCfg?.freeVideoTrack).map((entry, index) => ({
+      ...entry, sceneIndex: orderedRuntimeEntries.length + index + 1
+    })) : [])
+  ];
   const skippedEntries = entries.filter((item) => item.ok !== true).map((item) => item.skippedEntry).filter(Boolean);
   if (skippedEntries.length) {
     return {
@@ -6479,6 +7109,7 @@ export function buildMontageExportPayload(session = null) {
       enabled: true,
       durationMs: timelineDurationMs,
       mode: "timeline",
+      masterVolumePct: normalizeLegacyPct(videoCfg?.masterVolume, 100),
       geminiSegments: geminiTimelineSegments,
       backgroundSegments: [...uploadedBackgroundSegments, ...trackBackgroundSegments],
       sceneBackgroundAutomation: backgroundAutomationWindows

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Colección de simuladores científicos</title>
+  <link rel="stylesheet" href="scienceActivities.css">
+  <link rel="stylesheet" href="science-hud-themes.css">
+  <link rel="stylesheet" href="science-simulator-collection.css">
+</head>
+<body class="sa-shell science-collection">
+  <header class="science-collection-header">
+    <div><small>CIENCIA EN ESCENA</small><h1>Explora, cambia, descubre.</h1><p>180 experiencias de Física, Química, Biología y Matemáticas.</p></div>
+    <a href="scienceActivities.html">Abrir editor de actividades →</a>
+  </header>
+  <main class="science-collection-main">
+    <section class="science-collection-selector" aria-label="Elegir experimento">
+      <label class="sa-field" for="collectionTopic"><span>Experimento</span><select id="collectionTopic"></select></label>
+      <p id="collectionStatus" role="status">Preparando la colección…</p>
+    </section>
+    <section class="sa-game-frame" data-visual-style="rive-tokyo-tech" aria-label="Simulador interactivo">
+      <div id="collectionMount" class="sa-game-mount"></div>
+    </section>
+    <p class="science-collection-note">Las imágenes sitúan el experimento. Las medidas proceden del modelo científico; consulta sus supuestos en cada simulador.</p>
+  </main>
+  <script type="module" src="js/science-simulator-collection.mjs"></script>
+</body>
+</html>

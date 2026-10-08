@@ -1,9 +1,9 @@
 /**
  * Menú contextual y acciones de sesiones para Marcie Blog Editor
  */
-import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
-import { showModal, closeActiveModal, showToast } from "./modals.js";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
+import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js?v=20260923r4";
+import { showModal, closeActiveModal, showToast } from "./modals.js?v=20260923r1";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260924r4";
 
 export function openSessionContextMenu(session, event, onRefresh, onReconfigure) {
   event.stopPropagation();
@@ -23,8 +23,7 @@ export function openSessionContextMenu(session, event, onRefresh, onReconfigure)
   }
   if (left < 10) left = 10;
 
-  menu.style.top = `${top}px`;
-  menu.style.left = `${left}px`;
+  menu.animate([{ transform: `translate3d(${left}px, ${top}px, 0)` }], { duration: 1, fill: "forwards" });
 
   menu.innerHTML = `
     <button data-action="reconfigure" class="w-full text-left px-3 py-2 hover:bg-slate-50">Configurar y volver a crear</button>

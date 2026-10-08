@@ -7,14 +7,50 @@ import {
   registerResourceStage,
   setWorkflowActivitySections
 } from "./workflow.js";
+import { getCategoriesForGrade, ALL_OPTION } from "./unit-contracts.js";
 
 const emptyAccepted = () => ({ activities: [], resources: [], teacherNotes: [], reading: null, sya: null, syaOriginal: null });
 const now = () => new Date().toISOString();
 const clone = (value) => typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const revised = (item = {}) => ({ ...item, revision: Math.max(1, Number(item.revision || 1)) });
 const CURRENT_GEMINI_MODEL = "gemini-3.8-flash";
-const LEGACY_GEMINI_MODELS = new Set(["", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-flash-latest"]);
+const LEGACY_GEMINI_MODELS = new Set(["", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-flash-latest"]);
 const normalizeGeminiModel = (value = "") => LEGACY_GEMINI_MODELS.has(String(value || "").trim()) ? CURRENT_GEMINI_MODEL : String(value).trim();
+
+export function normalizeSubtopicKey(val = "") {
+  if (!val) return "";
+  let str = String(val).trim();
+  if (str.includes(":")) {
+    str = str.split(":").pop().trim();
+  }
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function isSameSubtopicKey(subA = "", subB = "") {
+  const keyA = normalizeSubtopicKey(subA);
+  const keyB = normalizeSubtopicKey(subB);
+  return Boolean(keyA && keyB && keyA === keyB);
+}
+
+export function normalizeResourceType(type = "") {
+  const norm = String(type || "").toLowerCase().trim();
+  if (norm === "worksheet" || norm === "ficha") return "ficha";
+  if (norm === "annex" || norm === "anexo") return "anexo";
+  if (norm === "cutout" || norm === "recortable") return "recortable";
+  if (norm === "video-script" || norm === "video" || norm.includes("video")) return "video";
+  return norm;
+}
+
+export const UNIT_RESOURCE_CAPS = Object.freeze({
+  video: 10,
+  recortable: 20,
+  anexo: 20,
+  ficha: 20
+});
 
 export const DEFAULT_SESSION = {
   schemaVersion: 3,
@@ -57,13 +93,38 @@ export function createEmptySession(overrides = {}) {
 
 export function createUnitRecord({ unit = "", title = "", meta = {}, readingMode = "existing", reading = null, activitySections = [] } = {}) {
   const value = String(unit || "1").trim() || "1";
+
+  const categoryMap = getCategoriesForGrade(meta.grade || "Primero");
+  const disabled = new Set(meta.disabledSubtopics || []);
+
+  const selectedCategories = (!meta.category || meta.category === ALL_OPTION)
+    ? Object.keys(categoryMap)
+    : [meta.category];
+
+  const allSubtopics = selectedCategories.flatMap((cat) => {
+    const subs = Array.isArray(categoryMap[cat]) ? categoryMap[cat] : [];
+    return subs.map((subtopic) => ({ category: cat, subtopic }));
+  });
+
+  const activeSubtopics = allSubtopics.filter(({ category, subtopic }) => {
+    return !disabled.has(`${category}:${subtopic}`) && !disabled.has(`:${subtopic}`);
+  });
+
+  const emptyActivities = activeSubtopics.map(({ category, subtopic }) => ({
+    id: createId("activity"),
+    section: category,
+    subtopic: subtopic,
+    html: "",
+    revision: 1
+  }));
+
   return normalizeUnit({
     id: createId("unit"),
     title: title || (value.toLowerCase() === "proyecto" ? "Proyecto" : `Unidad ${value}`),
     createdAt: now(), updatedAt: now(), revision: 0,
     meta: { ...meta, unit: value },
     reading,
-    messages: [], proposals: [], accepted: { ...emptyAccepted(), reading }, preferences: [], researchRuns: [],
+    messages: [], proposals: [], accepted: { ...emptyAccepted(), reading, activities: emptyActivities }, preferences: [], researchRuns: [],
     workflow: createUnitWorkflow({ readingMode, reading, activitySections })
   }, meta);
 }
@@ -100,7 +161,7 @@ export function createStore(initialSession = createEmptySession()) {
     setSessions(sessions = []) { state = { ...state, sessions: sessions.map(normalizeSession) }; notify(); },
     setSession(session) { state = { ...state, session: normalizeSession(session) }; notify(); },
     patchSession(patch = {}) {
-      const unitKeys = ["reading", "sya", "syaOriginal", "syaContextKey", "messages", "proposals", "accepted", "preferences", "researchRuns", "workflow"];
+      const unitKeys = ["reading", "sya", "syaOriginal", "syaContextKey", "messages", "sourceAttachments", "sourceAttachmentsManaged", "proposals", "accepted", "preferences", "researchRuns", "workflow"];
       if (state.session.activeUnitId && unitKeys.some((key) => Object.hasOwn(patch, key))) {
         mutateUnit((unit) => unitKeys.forEach((key) => { if (Object.hasOwn(patch, key)) unit[key] = clone(patch[key]); }));
         const rest = Object.fromEntries(Object.entries(patch).filter(([key]) => !unitKeys.includes(key)));
@@ -190,15 +251,55 @@ export function createStore(initialSession = createEmptySession()) {
     applyContentProposal(proposal = {}) {
       let outcome = { ok: false, error: "No hay una unidad activa." };
       mutateUnit((unit) => {
+        const storedProposal = unit.proposals.find((item) => String(item.id) === String(proposal.id || ""));
+        if (proposal.id && (storedProposal?.status === "approved" || [
+          ...(unit.accepted.activities || []), ...(unit.accepted.resources || []), ...(unit.accepted.teacherNotes || []),
+          ...(unit.accepted.activities || []).flatMap((item) => item.notes || []),
+          ...(unit.accepted.resources || []).flatMap((item) => item.notes || [])
+        ].some((item) => String(item.sourceProposalId || "") === String(proposal.id)))) {
+          outcome = { ok: false, error: "Esta propuesta ya fue aprobada." };
+          return;
+        }
         if (proposal.targetUnitId && proposal.targetUnitId !== unit.id) {
           outcome = { ok: false, error: "La propuesta pertenece a otra unidad." };
           return;
         }
         if (proposal.action !== "create" && Number(proposal.baseRevision) !== Number(unit.revision)) {
-          outcome = { ok: false, error: "El contenido cambió desde que se creó la propuesta. Vuelve a generar la corrección." };
-          return;
+          const targetId = String(proposal.targetContentId || "");
+          const target = [
+            ...(unit.accepted.activities || []), ...(unit.accepted.resources || []), ...(unit.accepted.teacherNotes || []),
+            ...(unit.accepted.activities || []).flatMap((item) => item.notes || []),
+            ...(unit.accepted.resources || []).flatMap((item) => item.notes || [])
+          ].find((item) => String(item.id) === targetId);
+          if (!target || !proposal.artifact?.targetRevision || Number(target.revision || 1) !== Number(proposal.artifact.targetRevision)) {
+            outcome = { ok: false, error: "La página de destino cambió desde que se creó la propuesta. Vuelve a generar la corrección." };
+            return;
+          }
         }
         const type = String(proposal.contentType || "activity");
+        if (type === "sya") {
+          const nextSya = proposal.artifact?.sya;
+          if (!nextSya || typeof nextSya !== "object" || Array.isArray(nextSya)) {
+            outcome = { ok: false, error: "La propuesta de Secuencia y Alcance no contiene datos válidos." };
+            return;
+          }
+          const previousSya = proposal.artifact?.previousSya || {};
+          const activeSya = unit.accepted.sya || unit.sya || previousSya;
+          if (JSON.stringify(activeSya) !== JSON.stringify(previousSya)) {
+            outcome = { ok: false, error: "La Secuencia y Alcance cambió desde esta propuesta. Vuelve a generarla antes de aprobar." };
+            return;
+          }
+          const original = unit.accepted.syaOriginal || unit.syaOriginal || previousSya;
+          unit.syaOriginal = clone(original || nextSya);
+          unit.accepted.syaOriginal = clone(unit.syaOriginal);
+          unit.sya = clone(nextSya);
+          unit.accepted.sya = clone(nextSya);
+          const stored = unit.proposals.find((item) => item.id === proposal.id);
+          if (stored) { stored.status = "approved"; stored.approvedAt = now(); }
+          bump(unit);
+          outcome = { ok: true };
+          return;
+        }
         if (type === "reading") {
           const readingStage = String(proposal.readingStage || "reading");
           unit.accepted.reading = mergeReadingStage(unit.accepted.reading, proposal, unit.id, readingStage);
@@ -210,31 +311,141 @@ export function createStore(initialSession = createEmptySession()) {
           outcome = { ok: true };
           return;
         }
+        if (type === "teacher-note") {
+          const targetId = String(proposal.targetContentId || "");
+          const targetActivityId = String(proposal.targetActivityId || "");
+          const sourceActivityProposalId = String(proposal.artifact?.sourceActivityProposalId || "");
+          const linkedApprovedActivity = sourceActivityProposalId
+            ? unit.accepted.activities.find((item) => String(item.sourceProposalId) === sourceActivityProposalId)
+            : null;
+          const targetResourceId = String(proposal.artifact?.targetResourceId || "");
+          const activity = unit.accepted.activities.find((item) => String(item.id) === targetActivityId) || null;
+          const resource = unit.accepted.resources.find((item) => String(item.id) === targetResourceId) || null;
+          const containers = [
+            { owner: null, notes: unit.accepted.teacherNotes },
+            ...unit.accepted.activities.map((owner) => ({ owner, notes: owner.notes || (owner.notes = []) })),
+            ...unit.accepted.resources.map((owner) => ({ owner, notes: owner.notes || (owner.notes = []) }))
+          ];
+          const currentContainer = targetId
+            ? containers.find(({ notes }) => notes.some((note) => String(note.id) === targetId))
+            : null;
+          const currentIndex = currentContainer ? currentContainer.notes.findIndex((note) => String(note.id) === targetId) : -1;
+          if (["update", "delete", "regenerate"].includes(proposal.action) && currentIndex < 0) {
+            outcome = { ok: false, error: "La nota de destino ya no existe." };
+            return;
+          }
+          const sourceMode = proposal.artifact?.noteMode === "source";
+          if (!proposal.subtopic || (sourceMode ? Boolean(targetActivityId || targetResourceId) : !activity || !isSameSubtopicKey(activity.subtopic, proposal.subtopic))) {
+            outcome = { ok: false, error: "La propuesta no tiene una actividad y un subtema válidos para colocar la nota." };
+            return;
+          }
+          if (sourceMode && currentContainer?.owner) {
+            outcome = { ok: false, error: "La nota de origen libre debe permanecer en la unidad." };
+            return;
+          }
+          if (proposal.artifact?.noteMode === "resource" && (!resource || String(resource.activityId || "") !== targetActivityId)) {
+            outcome = { ok: false, error: "El recurso de la nota ya no está vinculado con esa actividad." };
+            return;
+          }
+          if (proposal.artifact?.noteMode === "resource" && resource) {
+            const rawType = String(resource.type || "").toLowerCase();
+            const rawCode = String(resource.code || "").toLowerCase();
+            if (rawType.includes("recort") || rawType.includes("cutout") || rawCode.includes("recort")) {
+              outcome = { ok: false, error: "Los recortables no deben tener notas del maestro independientes; sus orientaciones deben incluirse dentro de la nota del maestro de la actividad correspondiente." };
+              return;
+            }
+          }
+          if (proposal.action === "delete") currentContainer.notes.splice(currentIndex, 1);
+          else {
+            const existing = currentIndex >= 0 ? currentContainer.notes[currentIndex] : null;
+            const entry = revised({
+              ...(existing || {}), id: existing?.id || createId("notes"), title: proposal.title || existing?.title || "Nota del maestro",
+              html: proposal.html || "", mode: proposal.artifact?.noteMode || existing?.mode || "single",
+              activityId: targetActivityId || linkedApprovedActivity?.id || "", resourceId: targetResourceId,
+              pendingActivityProposalId: linkedApprovedActivity ? "" : sourceActivityProposalId || existing?.pendingActivityProposalId || "",
+              pageOrder: existing?.pageOrder ?? (sourceMode ? unit.accepted.teacherNotes.filter((item) => isSameSubtopicKey(item.subtopic, proposal.subtopic)).length : activity?.notes?.length || 0),
+              section: activity?.section || proposal.section || "", sectionId: activity?.sectionId || proposal.sectionId || "",
+              category: activity?.category || proposal.category || unit.meta.category || "", subtopic: activity?.subtopic || proposal.subtopic,
+              sourceProposalId: proposal.id || existing?.sourceProposalId || "", resourceUsage: proposal.artifact?.resourceUsage || [],
+              styleReview: proposal.artifact?.styleReview || proposal.styleReview || null,
+              revision: existing ? Number(existing.revision || 1) + 1 : 1, acceptedAt: now(), unitId: unit.id
+            });
+            const destination = sourceMode ? unit.accepted.teacherNotes : proposal.artifact?.noteMode === "resource" ? resource.notes : activity.notes;
+            if (existing && currentContainer.notes === destination) currentContainer.notes[currentIndex] = entry;
+            else {
+              if (existing) currentContainer.notes.splice(currentIndex, 1);
+              destination.push(entry);
+            }
+          }
+          const stored = unit.proposals.find((item) => item.id === proposal.id);
+          if (stored) { stored.status = "approved"; stored.approvedAt = now(); }
+          bump(unit);
+          outcome = { ok: true };
+          return;
+        }
         const list = type === "activity" ? unit.accepted.activities : unit.accepted.resources;
-        const index = list.findIndex((item) => String(item.id) === String(proposal.targetContentId || ""));
+        let index = list.findIndex((item) => String(item.id) === String(proposal.targetContentId || ""));
+        if (index < 0 && type === "activity" && proposal.subtopic && proposal.artifact?.pagePlacement !== "add") {
+          const subMatchIndex = list.findIndex((item) => isSameSubtopicKey(item.subtopic, proposal.subtopic));
+          if (subMatchIndex >= 0) index = subMatchIndex;
+        }
+        if (type === "activity" && proposal.action === "create" && !proposal.targetContentId && index >= 0 && list[index].html) {
+          outcome = { ok: false, error: "Ya existe una actividad aprobada para este subtema. La corrección debe apuntar a su ID para conservar su lugar y sus vínculos." };
+          return;
+        }
         if (["update", "delete", "regenerate"].includes(proposal.action) && index < 0) {
           outcome = { ok: false, error: "El recurso de destino ya no existe." };
           return;
         }
         if (proposal.action === "delete") list.splice(index, 1);
         else {
+          const existing = index >= 0 ? list[index] : null;
+          const pendingActivityId = String(proposal.artifact?.sourceActivityProposalId || "");
+          const approvedPendingActivity = pendingActivityId
+            ? unit.accepted.activities.find((item) => String(item.sourceProposalId) === pendingActivityId)
+            : null;
+          const isTargetedActivityEdit = type === "activity" && existing && Boolean(proposal.targetContentId)
+            && ["update", "regenerate"].includes(proposal.action);
           const entry = revised({
-            ...(index >= 0 ? list[index] : {}),
+            ...(existing || {}),
             id: index >= 0 ? list[index].id : createId(type === "activity" ? "activity" : "resource"),
-            title: proposal.title, section: proposal.section || unit.meta.category || "", sectionId: proposal.sectionId || (index >= 0 ? list[index].sectionId : "") || "", html: proposal.html || "",
-            category: proposal.category || (index >= 0 ? list[index].category : "") || unit.meta.category || "",
-            subtopic: proposal.subtopic || (index >= 0 ? list[index].subtopic : "") || unit.meta.subtopic || "",
+            // An edit of an approved activity changes its content in place; its
+            // curricular identity and position come from the exact target item.
+            title: isTargetedActivityEdit ? existing.title : proposal.title,
+            section: isTargetedActivityEdit ? existing.section : proposal.section || unit.meta.category || "",
+            sectionId: isTargetedActivityEdit ? existing.sectionId : proposal.sectionId || existing?.sectionId || "",
+            html: proposal.html || "",
+            category: isTargetedActivityEdit ? existing.category : proposal.category || existing?.category || unit.meta.category || "",
+            subtopic: isTargetedActivityEdit ? existing.subtopic : proposal.subtopic || existing?.subtopic || unit.meta.subtopic || "",
             sourceProposalId: proposal.id || (index >= 0 ? list[index].sourceProposalId : "") || "",
             type: type === "worksheet" ? "ficha" : type === "annex" ? "anexo" : type === "cutout" ? "recortable" : type === "video-script" ? "video" : type,
+            artifact: proposal.artifact || null, assets: proposal.artifact?.assets || [],
+            ...(type === "activity" ? {
+              resourceSpecifications: Array.isArray(proposal.artifact?.resourceSpecifications)
+                ? proposal.artifact.resourceSpecifications
+                : (existing?.resourceSpecifications || [])
+            } : {}),
             citations: proposal.citations || [], researchRunIds: proposal.researchRunIds || [], unitId: unit.id,
-            activityId: proposal.targetActivityId || (index >= 0 ? list[index].activityId : "") || "",
+            activityId: proposal.targetActivityId || approvedPendingActivity?.id || (index >= 0 ? list[index].activityId : "") || "",
+            pendingActivityProposalId: approvedPendingActivity ? "" : pendingActivityId || existing?.pendingActivityProposalId || "",
+            pageOrder: existing?.pageOrder ?? list.filter((item) => isSameSubtopicKey(item.subtopic, proposal.subtopic) && (type === "activity" || normalizeResourceType(item.type) === normalizeResourceType(type))).length,
             revision: index >= 0 ? Number(list[index].revision || 1) + 1 : 1,
             acceptedAt: now()
           });
           if (index >= 0) list[index] = entry; else list.push(entry);
-          if (type === "activity") unit.workflow = markActivitySection(unit.workflow, entry.section, "approved", entry.id, entry.sectionId, entry.subtopic);
+          if (type === "activity") {
+            unit.workflow = markActivitySection(unit.workflow, entry.section, "approved", entry.id, entry.sectionId, entry.subtopic);
+            const bind = (item) => {
+              if (item.pendingActivityProposalId !== proposal.id) return;
+              item.activityId = entry.id;
+              item.pendingActivityProposalId = "";
+            };
+            unit.accepted.resources.forEach(bind);
+            unit.accepted.teacherNotes.forEach(bind);
+          }
           else if (entry.activityId) unit.workflow = registerResourceStage(unit.workflow, { activityId: entry.activityId, resourceType: type, resourceId: entry.id, status: "approved" });
         }
+        if (type !== "activity") recalculateResourceCodes(unit.accepted.resources, unit.meta?.unit);
         const stored = unit.proposals.find((item) => item.id === proposal.id);
         if (stored) { stored.status = "approved"; stored.approvedAt = now(); }
         bump(unit);
@@ -245,7 +456,24 @@ export function createStore(initialSession = createEmptySession()) {
     acceptActivity(activity = {}) {
       mutateUnit((unit) => {
         const entry = revised({ id: activity.id || createId("activity"), notes: [], ...activity, acceptedAt: now(), unitId: unit.id });
-        unit.accepted.activities.push(entry);
+
+        // Find if there is an empty placeholder or an existing activity for this subtopic or ID
+        const existingIndex = unit.accepted.activities.findIndex((a) => a.id === entry.id || (
+          entry.mathGroup
+            ? a.mathGroup === entry.mathGroup && Number(a.mathIndex) === Number(entry.mathIndex)
+            : isSameSubtopicKey(a.subtopic, entry.subtopic)
+        ));
+        if (existingIndex !== -1) {
+          // If the existing one is an empty placeholder, keep its original ID so the DOM doesn't break
+          const isPlaceholder = !unit.accepted.activities[existingIndex].html;
+          if (isPlaceholder) {
+            entry.id = unit.accepted.activities[existingIndex].id;
+          }
+          unit.accepted.activities[existingIndex] = entry;
+        } else {
+          unit.accepted.activities.push(entry);
+        }
+
         unit.workflow = markActivitySection(unit.workflow, entry.section || unit.meta.category || "", "approved", entry.id, entry.sectionId, entry.subtopic);
         bump(unit);
       });
@@ -253,13 +481,23 @@ export function createStore(initialSession = createEmptySession()) {
     acceptResources(resources = []) {
       mutateUnit((unit) => {
         (Array.isArray(resources) ? resources : [resources]).filter(Boolean).forEach((resource) => {
-          const duplicate = unit.accepted.resources.some((item) => resource.sourceProposalId && item.sourceProposalId === resource.sourceProposalId && item.type === resource.type && item.code === resource.code);
+          if (unit.accepted.resources.length >= 100) return;
+          const type = normalizeResourceType(resource.type);
+          const maxAllowed = UNIT_RESOURCE_CAPS[type] ?? 1;
+          const currentCount = unit.accepted.resources.filter((item) => normalizeResourceType(item.type) === type).length;
+          if (currentCount >= maxAllowed) return;
+
+          const duplicate = unit.accepted.resources.some((item) =>
+            (resource.sourceProposalId && item.sourceProposalId === resource.sourceProposalId && item.type === type && item.code === resource.code) ||
+            (resource.id && item.id === resource.id)
+          );
           if (!duplicate) {
-            const entry = revised({ id: resource.id || createId("resource"), notes: [], ...resource, acceptedAt: now(), unitId: unit.id });
+            const entry = revised({ id: resource.id || createId("resource"), notes: [], ...resource, type, acceptedAt: now(), unitId: unit.id });
             unit.accepted.resources.push(entry);
             if (entry.activityId) unit.workflow = registerResourceStage(unit.workflow, { activityId: entry.activityId, resourceType: entry.type || "resource", resourceId: entry.id, status: "approved" });
           }
         });
+        recalculateResourceCodes(unit.accepted.resources, unit.meta?.unit);
         bump(unit);
       });
     },
@@ -270,7 +508,64 @@ export function createStore(initialSession = createEmptySession()) {
       });
     },
     removeActivity(id = "") { mutateUnit((unit) => { unit.accepted.activities = unit.accepted.activities.filter((item) => item.id !== id); bump(unit); }); },
-    removeResource(id = "") { mutateUnit((unit) => { unit.accepted.resources = unit.accepted.resources.filter((item) => item.id !== String(id)); bump(unit); }); },
+    removeResource(id = "", targetUnitId = "") {
+      const session = clone(state.session);
+      const effectiveUnitId = targetUnitId || session.activeUnitId;
+      const index = session.units.findIndex((unit) => unit.id === effectiveUnitId);
+      if (index >= 0) {
+        const unit = clone(session.units[index]);
+        const cleanId = String(id || "").trim();
+        unit.accepted.resources = (unit.accepted.resources || []).filter((item) => String(item.id || "").trim() !== cleanId && String(item.code || "").trim() !== cleanId);
+        if (Array.isArray(unit.accepted.teacherNotes)) {
+          unit.accepted.teacherNotes = unit.accepted.teacherNotes.filter((n) => String(n.resourceId || "").trim() !== cleanId);
+        }
+        (unit.accepted.activities || []).forEach((act) => {
+          if (Array.isArray(act.notes)) act.notes = act.notes.filter((n) => String(n.resourceId || "").trim() !== cleanId);
+        });
+        bump(unit);
+        unit.updatedAt = now();
+        session.units[index] = normalizeUnit(unit, session.academicMeta);
+        commit(session);
+      } else {
+        mutateUnit((unit) => {
+          const cleanId = String(id || "").trim();
+          unit.accepted.resources = (unit.accepted.resources || []).filter((item) => String(item.id || "").trim() !== cleanId && String(item.code || "").trim() !== cleanId);
+          bump(unit);
+        });
+      }
+    },
+    reorderActivities(ids = []) {
+      mutateUnit((unit) => {
+        const current = unit.accepted.activities || [];
+        linkResourcesToActivities(unit, current);
+        const ordered = reorderByIds(current, ids);
+        if (ordered.length !== current.length) return;
+        ordered.forEach((activity, index) => { activity.displayOrder = index; });
+        unit.accepted.activities = ordered;
+        recalculateLinkedResourceCodes(unit);
+        bump(unit);
+      });
+    },
+    reorderResources(ids = []) {
+      mutateUnit((unit) => {
+        const current = unit.accepted.resources || [];
+        const ordered = reorderByIds(current, ids);
+        if (ordered.length !== current.length) return;
+        ordered.forEach((resource, index) => { resource.order = index; });
+        unit.accepted.resources = ordered;
+        recalculateResourceCodes(unit.accepted.resources, unit.meta?.unit);
+        bump(unit);
+      });
+    },
+    reorderTeacherNotes(ids = []) {
+      mutateUnit((unit) => {
+        const current = unit.accepted.teacherNotes || [];
+        const ordered = reorderByIds(current, ids);
+        if (ordered.length !== current.length) return;
+        unit.accepted.teacherNotes = ordered;
+        bump(unit);
+      });
+    },
     updateActivity(id = "", patch = {}) {
       mutateUnit((unit) => {
         unit.accepted.activities = unit.accepted.activities.map((item) => item.id === id ? { ...item, ...patch, revision: Number(item.revision || 1) + 1 } : item);
@@ -300,18 +595,27 @@ export function createStore(initialSession = createEmptySession()) {
     removeTeacherNotes(id = "") {
       mutateUnit((unit) => {
         const target = String(id);
-        const filter = (items) => items.filter((item, index) => item.id !== target && String(index) !== target);
+        const filter = (items) => items.filter((item, index) => item.id !== target && String(index) !== target && String(item.resourceId || "") !== target);
         unit.accepted.teacherNotes = filter(unit.accepted.teacherNotes);
-        [...unit.accepted.activities, ...unit.accepted.resources].forEach((item) => { if (Array.isArray(item.notes)) item.notes = filter(item.notes); });
+        [...unit.accepted.activities, ...unit.accepted.resources].forEach((item) => {
+          if (String(item.id) === target && Array.isArray(item.notes)) item.notes = [];
+          else if (Array.isArray(item.notes)) item.notes = filter(item.notes);
+        });
         bump(unit);
       });
     },
     editTeacherNotes(id = "", html = "") {
       mutateUnit((unit) => {
         const target = String(id);
-        const update = (items) => items.map((item, index) => item.id === target || String(index) === target ? { ...item, html } : item);
+        const update = (items) => items.map((item, index) => item.id === target || String(index) === target || String(item.resourceId || "") === target ? { ...item, html } : item);
         unit.accepted.teacherNotes = update(unit.accepted.teacherNotes);
-        [...unit.accepted.activities, ...unit.accepted.resources].forEach((item) => { if (Array.isArray(item.notes)) item.notes = update(item.notes); });
+        [...unit.accepted.activities, ...unit.accepted.resources].forEach((item) => {
+          if (String(item.id) === target && (!item.notes || !item.notes.length)) {
+            item.notes = [{ id: createId("notes"), html, mode: "resource", createdAt: now() }];
+          } else if (Array.isArray(item.notes)) {
+            item.notes = update(item.notes);
+          }
+        });
         bump(unit);
       });
     },
@@ -320,6 +624,60 @@ export function createStore(initialSession = createEmptySession()) {
       if (value) mutateUnit((unit) => { if (!unit.preferences.includes(value)) unit.preferences.push(value); });
     }
   };
+}
+
+function reorderByIds(items = [], ids = []) {
+  const byId = new Map(items.map((item, index) => [String(item.id || index), item]));
+  const ordered = ids.map((id) => byId.get(String(id))).filter(Boolean);
+  if (ordered.length === items.length) return ordered;
+  const included = new Set(ordered);
+  const replacements = [...ordered];
+  return items.map((item) => included.has(item) ? replacements.shift() : item);
+}
+
+function recalculateLinkedResourceCodes(unit = {}) {
+  const activities = unit.accepted?.activities || [];
+  const resources = unit.accepted?.resources || [];
+  linkResourcesToActivities(unit, activities);
+  const oldOrder = new Map(activities.map((activity, index) => [activity.id, index]));
+  const linked = resources.map((resource, index) => {
+    const activity = activities.find((item) => String(item.id) === String(resource.activityId || ""));
+    return { resource, index, activityOrder: activity ? oldOrder.get(activity.id) ?? 999 : 999 };
+  });
+  linked.sort((a, b) => a.activityOrder - b.activityOrder || Number(a.resource.order ?? a.index) - Number(b.resource.order ?? b.index) || a.index - b.index);
+  unit.accepted.resources = linked.map(({ resource }, index) => { resource.order = index; return resource; });
+  recalculateResourceCodes(unit.accepted.resources, unit.meta?.unit);
+}
+
+function linkResourcesToActivities(unit = {}, activities = []) {
+  (unit.accepted?.resources || []).forEach((resource) => {
+    let activity = activities.find((item) => String(item.id) === String(resource.activityId || resource.targetActivityId || ""));
+    if (!activity && resource.subtopic) activity = activities.find((item) => isSameSubtopicKey(item.subtopic, resource.subtopic));
+    if (!activity) {
+      const match = String(resource.id || resource.code || "").match(/(?:ficha|anexo|recortable|video|res)[-_](\d+)[-_](\d+)/i);
+      if (match) activity = activities[Number(match[2]) - 1];
+    }
+    if (activity) resource.activityId = activity.id;
+  });
+}
+
+function recalculateResourceCodes(resources = [], unitNumber = "1") {
+  const unit = String(unitNumber || "1").replace(/\D+/g, "") || "1";
+  const counts = new Map();
+  resources.forEach((resource) => {
+    const type = normalizeResourceType(resource.type);
+    if (type === "video") {
+      resource.code = "Guion de Video";
+      return;
+    }
+    const label = type === "ficha" ? "Ficha"
+      : type === "anexo" ? "Anexo"
+      : type === "recortable" ? "Recortable"
+      : "Recurso";
+    const index = counts.get(type) || 0;
+    counts.set(type, index + 1);
+    resource.code = `${label} ${unit}${String.fromCharCode(97 + (index % 26))}`;
+  });
 }
 
 export function normalizeSession(input = {}) {
@@ -354,8 +712,13 @@ function normalizeUnit(input = {}, academicMeta = {}) {
     id: String(raw.id || createId("unit")), title: String(raw.title || `Unidad ${unitValue}`),
     createdAt: raw.createdAt || now(), updatedAt: raw.updatedAt || now(), revision: Math.max(0, Number(raw.revision || 0)),
     meta,
-    reading: raw.reading || null, sya: raw.sya || null, syaOriginal: raw.syaOriginal || null,
+    automation: raw.automation || null,
+    reading: raw.reading || raw.accepted?.reading || null,
+    sya: raw.sya || raw.accepted?.sya || null,
+    syaOriginal: raw.syaOriginal || raw.accepted?.syaOriginal || null,
     syaContextKey: String(raw.syaContextKey || ""), messages: Array.isArray(raw.messages) ? raw.messages : [],
+    sourceAttachments: Array.isArray(raw.sourceAttachments) ? raw.sourceAttachments : [],
+    sourceAttachmentsManaged: raw.sourceAttachmentsManaged === true,
     proposals: Array.isArray(raw.proposals) ? raw.proposals : [], accepted: normalizeAccepted(raw.accepted),
     preferences: Array.isArray(raw.preferences) ? raw.preferences : [], researchRuns: Array.isArray(raw.researchRuns) ? raw.researchRuns : [],
     workflow: normalizeUnitWorkflow(raw.workflow || createUnitWorkflow({ readingMode: raw.reading || raw.accepted?.reading ? "existing" : "existing", reading: raw.accepted?.reading || raw.reading || null }))
@@ -412,7 +775,45 @@ function project(session) {
 }
 
 function normalizeAccepted(value = {}) {
-  return { ...emptyAccepted(), ...(value || {}), activities: Array.isArray(value?.activities) ? value.activities.map(revised) : [], resources: Array.isArray(value?.resources) ? value.resources.map(revised) : [], teacherNotes: Array.isArray(value?.teacherNotes) ? value.teacherNotes : [] };
+  let activities = Array.isArray(value?.activities) ? value.activities.map(revised) : [];
+
+  const filledSubtopicKeys = new Set(
+    activities.filter((a) => a.html && String(a.html).trim()).map((a) => normalizeSubtopicKey(a.subtopic))
+  );
+
+  if (filledSubtopicKeys.size > 0) {
+    activities = activities.filter((a) => {
+      const key = normalizeSubtopicKey(a.subtopic);
+      const isPlaceholder = !a.html || !String(a.html).trim();
+      return !isPlaceholder || !filledSubtopicKeys.has(key);
+    });
+  }
+
+  const rawResources = Array.isArray(value?.resources) ? value.resources.map(revised) : [];
+  const typeCounts = { video: 0, recortable: 0, anexo: 0, ficha: 0 };
+  const seenIds = new Set();
+  const resources = [];
+
+  for (const res of rawResources) {
+    if (resources.length >= 100) break;
+    if (!res) continue;
+    const type = normalizeResourceType(res.type);
+    const maxAllowed = UNIT_RESOURCE_CAPS[type] ?? 1;
+    if (res.id && seenIds.has(res.id)) continue;
+    if ((typeCounts[type] || 0) < maxAllowed) {
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+      if (res.id) seenIds.add(res.id);
+      resources.push({ ...res, type });
+    }
+  }
+
+  return {
+    ...emptyAccepted(),
+    ...(value || {}),
+    activities,
+    resources,
+    teacherNotes: Array.isArray(value?.teacherNotes) ? value.teacherNotes : []
+  };
 }
 
 function hasLegacyData(raw = {}) {

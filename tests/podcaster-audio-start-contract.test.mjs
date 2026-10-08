@@ -25,6 +25,73 @@ for(const start of [0,1,731,1000,9531]) test(`audio starts exactly at authored $
  await c.syncAudio(start+2000,1);assert.equal(audio.paused,true);
  assert.equal(c.normalizeRuntimeDialogueSegments([segment],[{rowId:'r',startMs:0}])[0].startMs,start);
 });
+test('excluding a Gemini voice stops its existing player and keeps it silent',async()=>{
+ const {c,audio,segment}=setup();
+ await c.syncAudio(1000,1);
+ assert.equal(audio.playCount,1);
+ c.deps.getPodcastVideoConfig=()=>({geminiDialogueTrack:{enabled:true,segments:[segment],excludedRowIds:['r']}});
+ await c.syncAudio(1000,1);
+ assert.equal(audio.paused,true);
+ assert.equal(audio.playCount,1);
+ await c.syncAudio(1500,1);
+ assert.equal(audio.playCount,1);
+});
+test('an independent voice plays at its saved timeline position and stops at its trim',async()=>{
+ const previousAudio=globalThis.Audio;
+ globalThis.Audio=Audio;
+ try {
+  const {c}=setup();
+  c.resolveDialoguePlaybackAudioSource=async()=> 'https://example.test/voice.mp3';
+  c.deps.getPodcastVideoConfig=()=>({geminiDialogueTrack:{enabled:false,segments:[]},freeVoiceTrack:{clips:[{
+   id:'free-1',storagePath:'session/audio/voice.mp3',sourceDurationMs:5000,startMs:1000,trimInMs:500,trimOutMs:2500
+  }]}});
+  await c.syncAudio(999,1);
+  assert.equal(c.freeVoicePlayers?.['free-1'],undefined);
+  await c.syncAudio(1000,1);
+  assert.equal(c.freeVoicePlayers['free-1'].playCount,1);
+  assert.equal(c.freeVoicePlayers['free-1'].currentTime,.5);
+  await c.syncAudio(3000,1);
+  assert.equal(c.freeVoicePlayers['free-1'].paused,true);
+ } finally { globalThis.Audio=previousAudio; }
+});
+test('a divided voice stops the previous piece before loading the next piece',async()=>{
+ const previousAudio=globalThis.Audio;
+ globalThis.Audio=Audio;
+ try {
+  const {c}=setup();
+  const track={clips:[
+   {id:'left',storagePath:'session/audio/voice.mp3',sourceDurationMs:3000,startMs:0,trimInMs:0,trimOutMs:1000},
+   {id:'right',storagePath:'session/audio/voice.mp3',sourceDurationMs:3000,startMs:1000,trimInMs:1000,trimOutMs:3000}
+  ]};
+  c.deps.getPodcastVideoConfig=()=>({geminiDialogueTrack:{enabled:false,segments:[]},freeVoiceTrack:track});
+  let sourceResolutions=0;
+  c.resolveDialoguePlaybackAudioSource=async()=>{sourceResolutions++;return 'https://example.test/voice.mp3';};
+  await c.syncAudio(0,1);
+  assert.equal(c.freeVoicePlayers.left.paused,false);
+  await c.syncAudio(1000,1);
+  assert.equal(c.freeVoicePlayers.right.paused,false);
+  assert.equal(c.freeVoicePlayers.left,c.freeVoicePlayers.right);
+  assert.equal(sourceResolutions,1);
+ } finally { globalThis.Audio=previousAudio; }
+});
+test('disabling free voice releases its player and never resolves audio while disabled',async()=>{
+ const previousAudio=globalThis.Audio;globalThis.Audio=Audio;
+ try {
+  const {c}=setup();
+  const track={enabled:true,clips:[{id:'voice',storagePath:'session/audio/voice.mp3',sourceDurationMs:3000,startMs:0,trimInMs:0,trimOutMs:2000}]};
+  c.deps.getPodcastVideoConfig=()=>({geminiDialogueTrack:{enabled:false,segments:[]},freeVoiceTrack:track});
+  c.resolveDialoguePlaybackAudioSource=async()=> 'https://example.test/voice.mp3';
+  await c.syncAudio(100,1);
+  assert.ok(c.freeVoicePlayers.voice);
+  track.enabled=false;
+  await c.syncAudio(200,1);
+  assert.equal(Object.keys(c.freeVoicePlayers).length,0);
+  assert.equal(c._freeVoicePlayersBySource.size,0);
+  track.enabled=false;
+  await c.syncAudio(100,1);
+  assert.equal(Object.keys(c.freeVoicePlayers).length,0);
+ } finally { globalThis.Audio=previousAudio; }
+});
 test('syncAudio awaits the actual play promise and ignores stale starts after Pause',async()=>{
  const {c,audio}=setup();let resolve;audio.startPromise=new Promise(r=>{resolve=r;});let done=false;
  const pending=c.syncAudio(1000,1).then(()=>{done=true;});

@@ -15,6 +15,7 @@ const podcastSceneLibraryState = {
     tagColor: "all"
   }
 };
+let podcastSceneLibraryRequest = null;
 
 const podcastSceneInsertModalState = {
   open: false,
@@ -102,7 +103,15 @@ function getSessionRows(session = null) {
   return Array.isArray(directRows) ? directRows : [];
 }
 
-async function fetchPodcastSceneLibrary(options = {}) {
+function fetchPodcastSceneLibrary(options = {}) {
+  if (podcastSceneLibraryRequest) return podcastSceneLibraryRequest;
+  podcastSceneLibraryRequest = fetchPodcastSceneLibraryOnce(options).finally(() => {
+    podcastSceneLibraryRequest = null;
+  });
+  return podcastSceneLibraryRequest;
+}
+
+async function fetchPodcastSceneLibraryOnce(options = {}) {
   podcastSceneLibraryState.loading = true;
   if (options.render !== false) renderPodcastSceneLibrary(runtime.getActiveSession());
   try {

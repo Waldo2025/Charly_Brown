@@ -1,0 +1,1808 @@
+{
+  "period": {
+    "start": "2026-09-01T05:00:00.000Z",
+    "end": "2026-09-30T16:28:50.340Z",
+    "timezone": "America/Cancun"
+  },
+  "allVideoJobs": 334,
+  "inNewSessions": 334,
+  "sessions": [
+    {
+      "sessionId": "session_3gp8dair",
+      "user": "wlopez@asc.education",
+      "title": "La entrevista Español 1 bloque 2",
+      "scenes": 14,
+      "videoAttempts": 21,
+      "readyVideos": 20,
+      "distinctReadyScenes": 12,
+      "extraReadyGenerations": 8,
+      "failedAttempts": 0,
+      "cancelledAttempts": 1,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_dpfeg95t",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_6bfenr2z",
+          "ready": 4,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_28bftc8n",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_dqfxisop",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_5s9umhta",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_r6e5j2u5",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_23lf0d5n",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_og6mj9r1",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_so1kk9yx",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 1
+        },
+        {
+          "rowId": "row_nm9cdyuy",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_a7ba2h8x",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xsvt5k67",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_3fj393qy",
+      "user": "rmora@asc.education",
+      "title": "La narrativa contemporánea, Español 2, Bloque 2, Tema 1",
+      "scenes": 12,
+      "videoAttempts": 19,
+      "readyVideos": 13,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 3,
+      "failedAttempts": 6,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_p74dnx52",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_4qlubc0i",
+          "ready": 2,
+          "errors": 5,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_1e8nxy1n",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_l17nr3mh",
+          "ready": 1,
+          "errors": 1,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_vyavjags",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9e44pd08",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_or9g242m",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_d21mw6bg",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_gz5hj4w2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_kfg8oaye",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_fr49vh6w",
+      "user": "wlopez@asc.education",
+      "title": "La monografía Español 1 Tema 2",
+      "scenes": 12,
+      "videoAttempts": 18,
+      "readyVideos": 18,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 8,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_gbqaiwm3",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_rlbl0bdt",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_6w2slq76",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_v4y932a1",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_wnvfaiji",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_iyzxcsar",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_jm7ctjcs",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_e42l341n",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lm32omsi",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_d4m5hea5",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_uml4sxmu",
+      "user": "wlopez@asc.education",
+      "title": "La narrativa contemporánea experimenta con",
+      "scenes": 1,
+      "videoAttempts": 4,
+      "readyVideos": 1,
+      "distinctReadyScenes": 1,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 3,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_bywo2yks",
+          "ready": 1,
+          "errors": 3,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_if4k1pmr",
+      "user": "wlopez@asc.education",
+      "title": "leer, analizar, escribir y compartir textos narrativos Español 1 Tema 3",
+      "scenes": 12,
+      "videoAttempts": 25,
+      "readyVideos": 23,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 13,
+      "failedAttempts": 1,
+      "cancelledAttempts": 1,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_rzujqbdc",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_37hthsa0",
+          "ready": 1,
+          "errors": 1,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_pzrdgw9e",
+          "ready": 4,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_0tqmbtcs",
+          "ready": 5,
+          "errors": 0,
+          "cancelled": 1
+        },
+        {
+          "rowId": "row_05vbt1fa",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_hlasxhth",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_6nkh7fd7",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_2qvbdgxl",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_f3j4kjaz",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_umecllm6",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_uba5k0ip",
+      "user": "rmora@asc.education",
+      "title": "La historieta como forma narrativa, Español 2",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_31nyna4m",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9eplpbfr",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_8s7ihoya",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_k2zn5b8g",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_vz9nl7x0",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_8vgnn7h2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_13f7jb8r",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_5a2axu3l",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ecbh5d2z",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zxnad5zs",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_lkzeji8d",
+      "user": "rmora@asc.education",
+      "title": "Analizar canciones como textos líricos y productos culturales",
+      "scenes": 12,
+      "videoAttempts": 18,
+      "readyVideos": 18,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 8,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_cblpapg5",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_badotx98",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_8k4cp81h",
+          "ready": 7,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lu2luje0",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lyox26s4",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_w8hxo3ek",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_gsn8223e",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_i0pj4kzb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_jfxgkvk2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_vp6kimbq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_mky7z3p5",
+      "user": "wlopez@asc.education",
+      "title": "creación y lectura en voz alta de poemas Español 1 Tema 4",
+      "scenes": 12,
+      "videoAttempts": 17,
+      "readyVideos": 16,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 6,
+      "failedAttempts": 0,
+      "cancelledAttempts": 1,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_qf0ejynq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ezgus3c4",
+          "ready": 4,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_avesv9b7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_dkifarh6",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9sgakgx1",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_5blcrlwd",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_hk2z0gne",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lr0tcln9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 1
+        },
+        {
+          "rowId": "row_t1z406qw",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ghscmdqb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_ys3mrk9v",
+      "user": "rmora@asc.education",
+      "title": "La lectura dramatizada de una obra de teatro",
+      "scenes": 12,
+      "videoAttempts": 20,
+      "readyVideos": 13,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 3,
+      "failedAttempts": 7,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_vmur3qis",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_bch6fx0d",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_d63bc2ub",
+          "ready": 2,
+          "errors": 7,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_71jlpfx3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_onverut6",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_l5nadnt9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_7826rnjn",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_o3ed31m8",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_r5fn2spu",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_1w4jl842",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_lfiu63j4",
+      "user": "rmora@asc.education",
+      "title": "Analizar manifestaciones poéticas dentro de un movimiento literario",
+      "scenes": 12,
+      "videoAttempts": 15,
+      "readyVideos": 15,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 5,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_8mtfg9r6",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_s8fvc5e2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_iwfj5biw",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_r2opk78z",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_453vhe8e",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_7o8x4u3x",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9x3acpit",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_hywmc0rm",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zafykymm",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_kpgsfyas",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_7xj1taha",
+      "user": "rmora@asc.education",
+      "title": "Las obras literarias del Renacimiento",
+      "scenes": 12,
+      "videoAttempts": 11,
+      "readyVideos": 11,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 1,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_zf3y04br",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ka2kfld9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_bph65vyl",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ggfsun4c",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xeo0c6fl",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_g5qhmelt",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_quus10db",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_j843d85i",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xy4o05qn",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_wneq1cac",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_lhe58bi9",
+      "user": "rmora@asc.education",
+      "title": "Comprender la función de los textos introductorios",
+      "scenes": 12,
+      "videoAttempts": 12,
+      "readyVideos": 12,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 2,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_1u48getm",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zscgje2p",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_b5k2h4z9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_qtygfoxo",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_aaarop9m",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_6aatw6h0",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_w2ty7d4u",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ew6i8jgh",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zxkebvdw",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_enlhmgl4",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_id3xuppb",
+      "user": "rmora@asc.education",
+      "title": "Panel de discusión: argumentar para comprender",
+      "scenes": 12,
+      "videoAttempts": 16,
+      "readyVideos": 16,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 6,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_zzz6vq59",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_umsph2x8",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_mkdohhct",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_rr1gdh7z",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_cmf9eb7e",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_7jak3t1a",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_pbqfr4gq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_wbmfqumc",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_x3mwa1pp",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_1phd5l1j",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_ruumx9sg",
+      "user": "rmora@asc.education",
+      "title": "Funciones: relaciones que cambian",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_g82thhez",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_l4oqv2rt",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_tiz4zze7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_w5c90gqc",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9cpc57m3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ojp4a6oh",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_vb8701eb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9dss7dq1",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_4odr9sv7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_qfjbgyq6",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_ajc35j2v",
+      "user": "wlopez@asc.education",
+      "title": "Comprender y calcular la probabilidad de eventos aleatorios",
+      "scenes": 12,
+      "videoAttempts": 14,
+      "readyVideos": 12,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 2,
+      "failedAttempts": 0,
+      "cancelledAttempts": 2,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_y4tyeco0",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_anihfxgx",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zc0r21hz",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 1
+        },
+        {
+          "rowId": "row_ts7msr6d",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 1
+        },
+        {
+          "rowId": "row_o2lnilnf",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_8mc3ymnq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_qif4mjd9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_iksi55dg",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_v2onxgpk",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_loeb17cf",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_g86a2ez7",
+      "user": "rmora@asc.education",
+      "title": "Sucesiones y expresiones equivalentes: descubre el patrón",
+      "scenes": 12,
+      "videoAttempts": 12,
+      "readyVideos": 12,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 2,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_3od9wux7",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_gjytigcs",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_w7xwiwx3",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_2obuq73b",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_gldqb6gu",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_fjoboy22",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_szea0jzb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_6ae64fql",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_yx8m4inf",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_5fkrqp13",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_0k1k0dv1",
+      "user": "rmora@asc.education",
+      "title": "Porcentajes y proporciones: relaciones que están en todas partes",
+      "scenes": 12,
+      "videoAttempts": 12,
+      "readyVideos": 12,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 2,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_jk67ze0d",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_57stpa8h",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ujbtfu6x",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ap8368fr",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_82ukc1zi",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_2twi5ve2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_wtoeuxi8",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_l1hscm7p",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ew6n35lh",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_27yjwkfv",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "schroeder_0c61c228b15f426d8e",
+      "user": "wlopez@asc.education",
+      "title": "canción instrumental, con ritmo acerca de la p",
+      "scenes": 0,
+      "videoAttempts": 0,
+      "readyVideos": 0,
+      "distinctReadyScenes": 0,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": []
+    },
+    {
+      "sessionId": "session_x6zple76",
+      "user": "rmora@asc.education",
+      "title": "Polígonos: formas, ángulos y estructuras",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_uhw17jmc",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9q9mo5kw",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_h52mf6u3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_fex3abpt",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_5wzj2ak2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lwfl0nu2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_tq9gy1ph",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xu7t6iwe",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_pf1vu4ls",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ietu2iyz",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_967o3z99",
+      "user": "rmora@asc.education",
+      "title": "Pendiente y razón de cambio: cómo cambia una recta",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_bgu9m3wj",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_01qpsdty",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_i2fkzfl3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_f4yeuqal",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_rwgpl5u5",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_zck7t6b1",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_psm3qpt3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_udqh4b9m",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_257uc1zp",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_dbf6dpqq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_k6s1v6lb",
+      "user": "rmora@asc.education",
+      "title": "Sistemas de ecuaciones: modelar para resolver",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_a8ej3r07",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_mppj9fce",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_fptn1eao",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xmf1x9u5",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_qukspzus",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_vtk4bvuf",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_xez775jb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_lza5fwb7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_d9sxi60m",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_bbkwf3wp",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_3qy0o5a6",
+      "user": "rmora@asc.education",
+      "title": "Ecuaciones cuadráticas: modelar para encontrar soluciones",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_qugqtdh7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_sw58addu",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_shv8z4we",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_1sd5bfvf",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_04fqvb5v",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_8w38dbce",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_38m1u7ga",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_mflsralu",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_qxkx90pb",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_a92tv0su",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_cm186i38",
+      "user": "rmora@asc.education",
+      "title": "Ecuaciones cuadráticas: de la parábola a la solución",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_hzjspcw2",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_sbt8rwej",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_rgp3iwsk",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_oent482p",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_1vc3r4e9",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_rm2qr58b",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_uci7q3hr",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_uamh9ee8",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_35ha2yh3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_x3fe4xo3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_zw9r60sw",
+      "user": "rmora@asc.education",
+      "title": "Parábolas: del modelo a la gráfica",
+      "scenes": 12,
+      "videoAttempts": 10,
+      "readyVideos": 10,
+      "distinctReadyScenes": 10,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_ld3wg837",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_z9dk3eld",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_973qr8t3",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_cl8ak815",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_gvhw64a8",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_alhxfxxf",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_r34tfof7",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_7651fmgg",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_z6ivdjvc",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_9by7z4w0",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "session_dgcv8avs",
+      "user": "wlopez@asc.education",
+      "title": "¡Mira a tu alrededor! Podemos",
+      "scenes": 14,
+      "videoAttempts": 20,
+      "readyVideos": 20,
+      "distinctReadyScenes": 14,
+      "extraReadyGenerations": 6,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": [
+        {
+          "rowId": "row_onmylk9d",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_quox9eew",
+          "ready": 3,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_sfbu1zuy",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_3ezxc0dv",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_80w4pym4",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_iqgtk0qw",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_o3ivgxux",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_j4dap14l",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_w38ppxw8",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_kqid7x4d",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_jg7oaq4v",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_ow5omf15",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_tx7jqpep",
+          "ready": 2,
+          "errors": 0,
+          "cancelled": 0
+        },
+        {
+          "rowId": "row_sb7oe1nq",
+          "ready": 1,
+          "errors": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "sessionId": "hLYPCxeqPj0m0wJkakNS",
+      "user": "wlopez@asc.education",
+      "title": "Nueva sesión",
+      "scenes": 2,
+      "videoAttempts": 0,
+      "readyVideos": 0,
+      "distinctReadyScenes": 0,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": []
+    },
+    {
+      "sessionId": "v8Kl45ENB4xhaPZdN08P",
+      "user": "wlopez@asc.education",
+      "title": "Nueva sesión",
+      "scenes": 2,
+      "videoAttempts": 0,
+      "readyVideos": 0,
+      "distinctReadyScenes": 0,
+      "extraReadyGenerations": 0,
+      "failedAttempts": 0,
+      "cancelledAttempts": 0,
+      "sceneBreakdown": []
+    }
+  ]
+}

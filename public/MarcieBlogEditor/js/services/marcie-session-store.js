@@ -15,7 +15,8 @@ import {
   , runTransaction
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { db, getCurrentUser } from "./marcie-firebase.js";
-import { isAidaArticleCompatible, normalizeEditorialMode, normalizeSelectedAudiences } from "../contracts/editorial-contracts.js?v=20260908r9";
+import { isAidaArticleCompatible, normalizeEditorialMode, normalizeSelectedAudiences } from "../contracts/editorial-contracts.js?v=20260923r3";
+import { claimSavings } from "../../../js/savings-client.js";
 
 export const MARCIE_COLLECTION = "MarcieBlogEditor";
 const LOCAL_STORAGE_BACKUP_KEY = "marcie_blog_editor_backup_v1";
@@ -24,6 +25,55 @@ const sessionSaveQueues = new Map();
 const lastCommittedFingerprints = new Map();
 const dirtySessions = new Map();
 const committedRevisions = new Map();
+const tabWriterId = (() => {
+  try {
+    const key = "marcie_editor_tab_writer_v1";
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const created = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch (_) {
+    return `${Date.now()}-${Math.random()}`;
+  }
+})();
+
+function pendingBackupBelongsToThisTab(pending) {
+  if (!pending?.writerId) return typeof document !== "undefined" && document.visibilityState === "visible";
+  return pending.writerId === tabWriterId;
+}
+
+function clearOwnPendingBackup(sessionId) {
+  try {
+    const key = `${LOCAL_STORAGE_PENDING_SAVE_KEY}_${getCurrentUser()?.uid}_${sessionId}`;
+    const pending = JSON.parse(localStorage.getItem(key) || "null");
+    if (pending && pendingBackupBelongsToThisTab(pending)) localStorage.removeItem(key);
+  } catch (_) {}
+}
+
+function persistLocalSnapshot(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (_) {
+    // El respaldo es opcional. Si quedó una copia antigua más grande, quítala
+    // y prueba una sola vez con el snapshot compacto; nunca bloquees Firebase.
+    try {
+      localStorage.removeItem(key);
+      localStorage.setItem(key, value);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+function samePendingSnapshotAsRemote(pending = {}, remote = {}) {
+  const ignored = new Set(["id", "storageRevision", "createdAt", "updatedAt", "saveConflict", "remoteConflict", "_conflictDialog"]);
+  return Object.keys(pending).filter((key) => !ignored.has(key)).every((key) =>
+    JSON.stringify(normalizeFirestoreJson(pending[key], null)) === JSON.stringify(normalizeFirestoreJson(remote[key], null)));
+}
+
 export function resolveMarcieSaveConflict(session, useLocal) {
   const remote = session.remoteConflict;
   if (!remote) return;
@@ -39,11 +89,13 @@ export function markMarcieSessionDirty(session) {
   if (!session?.id) return;
   session.ownerId = session.ownerId || getCurrentUser()?.uid || "";
   dirtySessions.set(session.id, session);
-  try {
-    localStorage.setItem(`${LOCAL_STORAGE_PENDING_SAVE_KEY}_${getCurrentUser()?.uid}_${session.id}`, JSON.stringify({ session, baseUpdatedAt: session.updatedAt }));
-  } catch (_) {}
+  const compact = compactMarcieSessionForFirestore(session);
+  persistLocalSnapshot(
+    `${LOCAL_STORAGE_PENDING_SAVE_KEY}_${getCurrentUser()?.uid}_${session.id}`,
+    JSON.stringify({ session: compact, baseUpdatedAt: session.updatedAt, writerId: tabWriterId })
+  );
 }
-const RETRYABLE_WRITE_CODES = new Set(["resource-exhausted", "unavailable", "deadline-exceeded", "aborted"]);
+const RETRYABLE_WRITE_CODES = new Set(["resource-exhausted", "unavailable", "deadline-exceeded", "aborted", "failed-precondition"]);
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
     for (const session of dirtySessions.values()) if (!session.saveConflict) saveMarcieSession(session).catch(() => {});
@@ -201,11 +253,16 @@ export function normalizeSessionDoc(docSnap) {
     automation: data.automation && typeof data.automation === "object" ? { ...data.automation } : null,
     article: activeArticle,
     articlesByAudience: articlesByAudience,
+    articleDraftsByAudience: data.articleDraftsByAudience && typeof data.articleDraftsByAudience === "object" ? { ...data.articleDraftsByAudience } : {},
     publicationsByAudience,
     approvedAudiences: Array.isArray(data.approvedAudiences) ? data.approvedAudiences.map(String).filter((audience) => !incompatibleAidaAudiences.has(audience)) : [],
     trends: Array.isArray(data.trends) ? data.trends : [],
     researchByAudience: data.researchByAudience && typeof data.researchByAudience === "object" ? { ...data.researchByAudience } : {},
+    researchGlobal: data.researchGlobal && typeof data.researchGlobal === "object" ? { ...data.researchGlobal } : null,
+    researchGlobalFingerprint: String(data.researchGlobalFingerprint || ""),
     proposals: Array.isArray(data.proposals) ? data.proposals : [],
+    videoScripts: Array.isArray(data.videoScripts) ? data.videoScripts : [],
+    videoScriptsByAudience: data.videoScriptsByAudience && typeof data.videoScriptsByAudience === "object" ? { ...data.videoScriptsByAudience } : {},
     log: Array.isArray(data.log) ? data.log : []
   };
 }
@@ -228,6 +285,7 @@ export function subscribeToMarcieSessions(onUpdate, onError, filterOwnerUid = ""
   return onSnapshot(
     q,
     (snapshot) => {
+      const rawRemoteById = new Map(snapshot.docs.map((docSnap) => [docSnap.id, docSnap.data() || {}]));
       let sessions = snapshot.docs.map((docSnap) => normalizeSessionDoc(docSnap));
       sessions = sessions.map(remote => {
         const local = dirtySessions.get(remote.id);
@@ -241,11 +299,16 @@ export function subscribeToMarcieSessions(onUpdate, onError, filterOwnerUid = ""
         try {
           const key = `${LOCAL_STORAGE_PENDING_SAVE_KEY}_${targetUid}_${remote.id}`;
           const pending = JSON.parse(localStorage.getItem(key) || "null");
+          if (!pendingBackupBelongsToThisTab(pending)) return remote;
           if (pending?.session?.ownerId === targetUid) {
             const restored = pending.session;
+            if (samePendingSnapshotAsRemote(restored, rawRemoteById.get(remote.id))) {
+              localStorage.removeItem(key);
+              return remote;
+            }
             if (Number(restored.storageRevision || 0) !== remote.storageRevision) { restored.saveConflict = true; restored.remoteConflict = remote; }
             dirtySessions.set(remote.id, restored);
-            if (!restored.saveConflict) queueMicrotask(() => saveMarcieSession(restored).catch(() => {}));
+            if (!restored.saveConflict && pending.writerId === tabWriterId) queueMicrotask(() => saveMarcieSession(restored).catch(() => {}));
             return restored;
           }
         } catch (_) {}
@@ -261,9 +324,10 @@ export function subscribeToMarcieSessions(onUpdate, onError, filterOwnerUid = ""
       sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
       // Guardar en respaldo local
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_BACKUP_KEY}_${targetUid}`, JSON.stringify(sessions));
-      } catch (_) {}
+      persistLocalSnapshot(
+        `${LOCAL_STORAGE_BACKUP_KEY}_${targetUid}`,
+        JSON.stringify(sessions.map((session) => compactMarcieSessionForFirestore(session)))
+      );
 
       if (typeof onUpdate === "function") {
         onUpdate(sessions);
@@ -347,16 +411,24 @@ export async function createMarcieSession(fields = {}) {
     updatedAt: serverTimestamp(),
     article: initialArticle,
     articlesByAudience: articlesByAudience,
+    articleDraftsByAudience: normalizeFirestoreJson(fields.articleDraftsByAudience || {}, {}),
     trends: Array.isArray(fields.trends) ? fields.trends : [],
     researchByAudience: normalizeFirestoreJson(fields.researchByAudience || {}, {}),
+    researchGlobal: normalizeFirestoreJson(fields.researchGlobal || null, null),
+    researchGlobalFingerprint: String(fields.researchGlobalFingerprint || ""),
     proposals: Array.isArray(fields.proposals) ? fields.proposals : [],
+    videoScripts: normalizeFirestoreJson(Array.isArray(fields.videoScripts) ? fields.videoScripts : [], []),
+    videoScriptsByAudience: normalizeFirestoreJson(fields.videoScriptsByAudience && typeof fields.videoScriptsByAudience === "object" ? fields.videoScriptsByAudience : {}, {}),
     log: [
       { id: `log-${Date.now()}`, at: now.toISOString(), message: "Sesión creada en Firebase" }
     ]
   };
 
   const colRef = collection(db, MARCIE_COLLECTION);
-  const docRef = await addDoc(colRef, compactMarcieSessionForFirestore(payload));
+  const docRef = doc(colRef);
+  const savings = await claimSavings("marcieSessions", docRef.id);
+  if (savings.permit) payload.savingsPermit = savings.permit;
+  await setDoc(docRef, compactMarcieSessionForFirestore(payload));
   return docRef.id;
 }
 
@@ -416,6 +488,7 @@ function compactRejectedSourcesForFirestore(sources = []) {
     url: String(source?.url || source?.requestedUrl || "").slice(0, 1200),
     domain: String(source?.domain || "").slice(0, 200),
     reason: String(source?.reason || "verification_error").slice(0, 200),
+    metadataGaps: Array.isArray(source?.metadataGaps) ? source.metadataGaps.map(String).slice(0, 6) : [],
     discoveredVia: Array.isArray(source?.discoveredVia) ? source.discoveredVia.map(String).slice(0, 8) : []
   }));
 }
@@ -529,6 +602,7 @@ export function compactMarcieSessionForFirestore(session = {}) {
   compact.researchByAudience = compact.researchByAudience && typeof compact.researchByAudience === "object"
     ? Object.fromEntries(Object.entries(compact.researchByAudience).map(([key, dossier]) => [key, compactResearchDossierForFirestore(dossier)]))
     : {};
+  compact.researchGlobal = compact.researchGlobal ? compactResearchDossierForFirestore(compact.researchGlobal) : null;
   compact.trends = (Array.isArray(compact.trends) ? compact.trends : []).map(compactResearchDossierForFirestore);
   compact.log = (Array.isArray(compact.log) ? compact.log : []).slice(0, 100);
   return omitUndefinedFirestoreValues(compact);
@@ -540,7 +614,7 @@ async function persistMarcieSession(session) {
   }
 
   const user = getCurrentUser();
-  if (session.saveConflict) throw new Error("Hay cambios remotos y un respaldo local pendiente. Resuelve el conflicto antes de guardar.");
+  if (session.saveConflict) throw Object.assign(new Error("Hay cambios remotos y un respaldo local pendiente. Resuelve el conflicto antes de guardar."), { code: "marcie_save_conflict" });
   const ownerId = session.ownerId || user?.uid || "";
   const ownerEmail = session.ownerEmail || user?.email || "";
   const docRef = doc(db, MARCIE_COLLECTION, session.id);
@@ -592,10 +666,15 @@ async function persistMarcieSession(session) {
     automation: normalizeFirestoreJson(session.automation || null, null),
     article: normalizeFirestoreJson(normalizedActiveArticle, {}),
     articlesByAudience: normalizeFirestoreJson(normalizedArticles, {}),
+    articleDraftsByAudience: normalizeFirestoreJson(session.articleDraftsByAudience || {}, {}),
     approvedAudiences: normalizeFirestoreJson(Array.isArray(session.approvedAudiences) ? session.approvedAudiences : [], []),
     trends: normalizeFirestoreJson(Array.isArray(session.trends) ? session.trends : [], []),
     researchByAudience: normalizeFirestoreJson(session.researchByAudience && typeof session.researchByAudience === "object" ? session.researchByAudience : {}, {}),
+    researchGlobal: normalizeFirestoreJson(session.researchGlobal || null, null),
+    researchGlobalFingerprint: String(session.researchGlobalFingerprint || ""),
     proposals: normalizeFirestoreJson(Array.isArray(session.proposals) ? session.proposals : [], []),
+    videoScripts: normalizeFirestoreJson(Array.isArray(session.videoScripts) ? session.videoScripts : [], []),
+    videoScriptsByAudience: normalizeFirestoreJson(session.videoScriptsByAudience && typeof session.videoScriptsByAudience === "object" ? session.videoScriptsByAudience : {}, {}),
     log: normalizeFirestoreJson(Array.isArray(session.log) ? session.log : [], [])
   };
   const cleanValues = compactMarcieSessionForFirestore(persistedValues);
@@ -606,6 +685,15 @@ async function persistMarcieSession(session) {
   committedRevisions.set(session.id, storageRevision);
   lastCommittedFingerprints.set(session.id, fingerprint);
   return session.id;
+}
+
+function samePendingSessionState(current, saved) {
+  const comparable = (session) => {
+    const state = normalizeFirestoreJson(session, {});
+    for (const key of ["storageRevision", "updatedAt", "saveConflict", "remoteConflict", "_conflictDialog"]) delete state[key];
+    return JSON.stringify(state);
+  };
+  return comparable(current) === comparable(saved);
 }
 
 export function saveMarcieSession(session) {
@@ -620,9 +708,9 @@ export function saveMarcieSession(session) {
     () => {
       if (sessionSaveQueues.get(session.id) === queued) {
         sessionSaveQueues.delete(session.id);
-        if (JSON.stringify(session) === JSON.stringify(snapshot)) {
+        if (samePendingSessionState(session, snapshot)) {
           dirtySessions.delete(session.id);
-          try { localStorage.removeItem(`${LOCAL_STORAGE_PENDING_SAVE_KEY}_${getCurrentUser()?.uid}_${session.id}`); } catch (_) {}
+          clearOwnPendingBackup(session.id);
         }
         session.storageRevision = committedRevisions.get(session.id) || session.storageRevision || 0;
         if (dirtySessions.has(session.id)) markMarcieSessionDirty(session);
@@ -649,7 +737,7 @@ export async function commitMarcieSessionReplacement(session) {
   await persistMarcieSession(normalizeFirestoreJson(session, {}));
   session.storageRevision = committedRevisions.get(session.id) || session.storageRevision || 0;
   dirtySessions.delete(session.id);
-  try { localStorage.removeItem(`${LOCAL_STORAGE_PENDING_SAVE_KEY}_${getCurrentUser()?.uid}_${session.id}`); } catch (_) {}
+  clearOwnPendingBackup(session.id);
   return session.id;
 }
 

@@ -225,6 +225,9 @@
         const count = await config.onApply(selectedRow);
         saveLastConfig();
         const importer = byId("erSheetsImportModal");
+        if (document.activeElement && importer?.contains(document.activeElement)) {
+          document.activeElement.blur();
+        }
         const hidden = importer?.classList.contains("show") ? new Promise(resolve => importer.addEventListener("hidden.bs.modal", resolve, { once: true })) : Promise.resolve();
         global.bootstrap?.Modal.getInstance(importer)?.hide();
         await hidden;

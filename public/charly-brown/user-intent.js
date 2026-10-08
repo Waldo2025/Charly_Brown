@@ -1,6 +1,9 @@
 export function routeUserIntent(text = "") {
   const value = normalizeIntentText(text);
   if (!value) return "chat";
+  // Resource requests need the MCP context and linked activity, even when they
+  // mention a reading or explicitly say not to modify activities.
+  if (/\b(fichas?|anexos?|recortables?|guion|guiones|design_worksheet|design_annex|design_cutout|design_video_script)\b/.test(value)) return "chat";
   if (/\b(genera|generar|crear|crea|haz|hacer|prepara|preparar|redacta|redactar)\b.*\b(actividades|activities|activity|ejercicios|reactivos)\b/.test(value)) return "activities";
   if (/\b(hacer|haz|mas|más)\s+(facil|fácil|sencillo|simple)\b/.test(value) && /\b(actividad|actividades|activity|activities|propuesta)\b/.test(value)) return "activities";
   if (/\b(hacer|haz|mas|más)\s+(dificil|difícil|retador|experto)\b/.test(value) && /\b(actividad|actividades|activity|activities|propuesta)\b/.test(value)) return "activities";

@@ -13,14 +13,15 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.853";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-10-05.assets-direct-image-1";
 import { createPodcasterMediaRuntimeApi } from "../podcaster/podcaster-media-runtime.js?v=2026-1.0.10.539";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
+import { initializeMontageExportChoiceControls } from "../podcaster/montage-export-choice-controls.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
 import { createPodcasterAcademicMetadataApi } from "../podcaster/podcaster-academic-metadata.js?v=2026-1.0.10.717";
-import { buildPreviewDocument } from "./escape-room-package-builder.mjs?v=20260912-jigsaw-v106";
+import { buildPreviewDocument } from "./escape-room-package-builder.mjs?v=20260925-sequence-column-v1";
 import "../podcaster/podcaster-scene-media-render-spec.js";
 import { createVideoPlayerReviewManager } from "./video-player-review-manager.js";
 import { setScenePanelSectionVisibility, bindNewProposalToggleButtons } from "./video-player-panel-ui.js";
@@ -4491,6 +4492,14 @@ function mergeHomePodcastVideoConfig(base = {}, incoming = {}) {
 
 const multimediaPlaybackDeps = {
   preferDirectFirebaseStorage: true,
+  // video-player.html does not mount the editor's panel-music facade, but a
+  // session can still have a preview audio element created by that facade.
+  // Expose the same stop hook to the shared playback controller when it is
+  // available so Stop cannot leave that element playing behind the player.
+  stopPanelMusic: () => {
+    try { window.PodcasterUI?.stopPanelMusic?.(); } catch (_) { }
+    try { window.stopPanelMusic?.(); } catch (_) { }
+  },
   getTimelineTotalDurationMs: (s) => {
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
     if (!entries.length) return 0;
@@ -5034,6 +5043,31 @@ function initMultimediaPlayer() {
     podcastVideoStage: stage
   };
 
+  // Shared visual-composition modules (used by Snoopy and video-player) need
+  // a small read-only bridge because video-player does not expose PodcasterUI.
+  window.PodcasterVideoPlayerSession = () => currentMultimediaSession;
+  window.PodcasterVideoPlayerState = homePlaybackState;
+  window.ensureTimelineClipsByRowId = (session = null, options = {}) => {
+    const s = session || currentMultimediaSession;
+    if (!s) return {};
+    const existingMap = s?.timelineClipMap || s?.podcastVideoConfig?.timelineClipsByRowId || s?.podcastStudioUiState?.timelineClipsByRowId;
+    if (existingMap && Object.keys(existingMap).length > 0) return existingMap;
+    const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s) || [];
+    const map = {};
+    for (const entry of entries) {
+      const rowId = String(entry?.rowId || "").trim();
+      if (rowId) {
+        map[rowId] = {
+          ...entry,
+          startMs: Number(entry.startMs || 0),
+          durationMs: Number(entry.effectiveDurationMs || entry.durationMs || 0),
+          trimInMs: Number(entry.trimInMs || 0),
+          trimOutMs: Number(entry.trimOutMs || entry.effectiveDurationMs || entry.durationMs || 0)
+        };
+      }
+    }
+    return map;
+  };
   multimediaPlaybackController.init(els, multimediaPlaybackDeps);
 
   const playBtn = document.getElementById("playerPlayBtn");
@@ -5367,6 +5401,7 @@ async function abrirReproductorMultimedia(session) {
     // Forzar un primer renderizado de la UI de transporte (que incluye el monitor de escena)
     multimediaPlaybackDeps.updatePodcastVideoTransportUi();
 
+    homePlaybackState.runtimeEntries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session);
     multimediaPlaybackController.sync(session);
     multimediaPlaybackController.stop();
 
@@ -5536,6 +5571,7 @@ async function abrirReproductorMultimedia(session) {
     });
 
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session);
+    homePlaybackState.runtimeEntries = entries;
     if (entries.length > 0) {
       await multimediaPlaybackController.tick(0);
     }
@@ -5751,8 +5787,84 @@ if (!document.getElementById("notification-styles")) {
 let exportJobState = {
   jobId: null,
   pollTimer: null,
-  isBusy: false
+  isBusy: false,
+  sessionId: ""
 };
+
+let viewerMontageExportHistory = [];
+
+function renderViewerMontageExportHistory() {
+  const group = document.getElementById("montageExportDownloadGroup");
+  const menu = document.getElementById("montageExportDownloadMenu");
+  const trigger = document.getElementById("montageExportDownloadBtn");
+  if (!group || !menu || !trigger) return;
+  const sessionId = String(currentMultimediaSession?.id || "").trim();
+  const key = `cb_podcast_montage_export_history_v1:${sessionId}`;
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem(key) || "[]"); } catch (_) { /* noop */ }
+  const latest = currentMultimediaSession?.podcastVideoConfig?.latestMontageExport
+    || currentMultimediaSession?.session?.podcastVideoConfig?.latestMontageExport;
+  const entries = [...(Array.isArray(stored) ? stored : []), ...(latest?.downloadUrl ? [latest] : [])];
+  const seen = new Set();
+  viewerMontageExportHistory = entries
+    .filter((entry) => entry?.downloadUrl && (!entry.sessionId || entry.sessionId === sessionId)
+      && !String(entry.mimeType || "").startsWith("audio/")
+      && !/\.(?:mp3|m4a|wav|ogg)$/i.test(String(entry.filename || "")))
+    .sort((a, b) => (Number(b.createdAtMs) || Date.parse(b.createdAtIso || b.createdAt || "") || 0)
+      - (Number(a.createdAtMs) || Date.parse(a.createdAtIso || a.createdAt || "") || 0))
+    .filter((entry) => {
+      if (seen.has(entry.downloadUrl)) return false;
+      seen.add(entry.downloadUrl);
+      return true;
+    });
+  group.hidden = viewerMontageExportHistory.length === 0;
+  menu.hidden = true;
+  trigger.setAttribute("aria-expanded", "false");
+  menu.replaceChildren();
+  if (group.hidden) return;
+  const title = document.createElement("div");
+  title.className = "montage-export-download-menu-title";
+  title.textContent = "Videos exportados";
+  menu.appendChild(title);
+  viewerMontageExportHistory.forEach((entry, index) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "montage-export-download-item";
+    item.dataset.montageExportIndex = String(index);
+    item.title = `Descargar ${entry.filename || "montage.mp4"}`;
+    const icon = document.createElement("i");
+    icon.className = "fas fa-file-video";
+    icon.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.className = "montage-export-download-item-name";
+    name.textContent = entry.filename || "montage.mp4";
+    item.append(icon, name);
+    if (index === 0) {
+      const badge = document.createElement("span");
+      badge.className = "montage-export-download-item-latest";
+      badge.textContent = "Más reciente";
+      item.appendChild(badge);
+    }
+    const downloadIcon = document.createElement("i");
+    downloadIcon.className = "fas fa-download";
+    downloadIcon.setAttribute("aria-hidden", "true");
+    item.appendChild(downloadIcon);
+    menu.appendChild(item);
+  });
+}
+
+function saveViewerMontageExportHistory(reference) {
+  const sessionId = String(exportJobState.sessionId || currentMultimediaSession?.id || "").trim();
+  if (!sessionId || !reference?.downloadUrl) return;
+  const key = `cb_podcast_montage_export_history_v1:${sessionId}`;
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem(key) || "[]"); } catch (_) { /* noop */ }
+  const entries = Array.isArray(stored) ? stored : [];
+  const history = [{ ...reference, sessionId, createdAtMs: Date.now(), createdAtIso: new Date().toISOString() },
+    ...entries.filter((entry) => entry?.downloadUrl !== reference.downloadUrl)].slice(0, 20);
+  try { localStorage.setItem(key, JSON.stringify(history)); } catch (_) { /* noop */ }
+  if (String(currentMultimediaSession?.id || "").trim() === sessionId) renderViewerMontageExportHistory();
+}
 
 function setViewerMontageExportStatus(text = "", hint = "", tone = "neutral", progress = null) {
   const modal = document.getElementById("montageExportModal");
@@ -5810,6 +5922,7 @@ function initExportUiEvents() {
   const customBitrateBox = document.getElementById("montageExportCustomBitrateBox");
   const filenameInput = document.getElementById("montageExportFilename");
   const sessionTitle = modal?.querySelector(".floating-panel-session-title");
+  initializeMontageExportChoiceControls(modal);
 
   btnOpen?.addEventListener("click", () => {
     const sessionId = String(currentMultimediaSession?.id || "").trim();
@@ -5818,6 +5931,7 @@ function initExportUiEvents() {
     if (filenameInput && !filenameInput.dataset.userEdited) filenameInput.value = title;
     if (sessionTitle) sessionTitle.textContent = title;
     modal.hidden = false;
+    renderViewerMontageExportHistory();
     setViewerMontageExportStatus("Listo para exportar.", "Configura el montaje y revisa las opciones antes de iniciar.", "neutral");
   });
 
@@ -5849,6 +5963,50 @@ function initExportUiEvents() {
   document.getElementById("montageExportPreviewPauseBtn")?.addEventListener("click", () => multimediaPlaybackController.pause());
   document.getElementById("montageExportPreviewStopBtn")?.addEventListener("click", () => multimediaPlaybackController.stop());
   document.getElementById("montageExportRefreshPreviewBtn")?.addEventListener("click", () => multimediaPlaybackController.seek(0));
+
+  const historyTrigger = document.getElementById("montageExportDownloadBtn");
+  const historyMenu = document.getElementById("montageExportDownloadMenu");
+  historyTrigger?.addEventListener("click", () => {
+    if (!historyMenu || !viewerMontageExportHistory.length) return;
+    historyMenu.hidden = !historyMenu.hidden;
+    historyTrigger.setAttribute("aria-expanded", String(!historyMenu.hidden));
+    if (!historyMenu.hidden) historyMenu.querySelector("button")?.focus();
+  });
+  historyMenu?.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-montage-export-index]");
+    const entry = viewerMontageExportHistory[Number(item?.dataset.montageExportIndex)];
+    if (!entry?.downloadUrl) return;
+    const link = document.createElement("a");
+    link.href = entry.downloadUrl;
+    link.download = entry.filename || "montage.mp4";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    historyMenu.hidden = true;
+    historyTrigger?.setAttribute("aria-expanded", "false");
+  });
+  document.getElementById("montageExportPlayLatestBtn")?.addEventListener("click", () => {
+    const latest = viewerMontageExportHistory[0];
+    if (!latest?.downloadUrl) return;
+    const link = document.createElement("a");
+    link.href = latest.downloadUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("#montageExportDownloadGroup")) return;
+    if (historyMenu) historyMenu.hidden = true;
+    historyTrigger?.setAttribute("aria-expanded", "false");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || historyMenu?.hidden) return;
+    historyMenu.hidden = true;
+    historyTrigger?.setAttribute("aria-expanded", "false");
+    historyTrigger?.focus();
+  });
 
   btnConfirm?.addEventListener("click", () => startMontageExport());
 }
@@ -5926,6 +6084,26 @@ async function startMontageExport() {
         onScreenText: resolveDashboardRowOnScreenText(row),
         visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
         videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+        visualEffects: (() => {
+          const key = String(rowId || "").trim();
+          if (!key) return null;
+          const maps = [
+            currentMultimediaSession?.visualEffectsMap,
+            currentMultimediaSession?.session?.visualEffectsMap,
+            currentMultimediaSession?.payload?.visualEffectsMap,
+            currentMultimediaSession?.script?.visualEffectsMap,
+            currentMultimediaSession?.config?.visualEffectsMap,
+            currentMultimediaSession?.podcastStudioUiState?.visualEffectsMap,
+            currentMultimediaSession?.podcastVideoConfig?.visualEffectsMap,
+            currentMultimediaSession?.session?.podcastVideoConfig?.visualEffectsMap
+          ];
+          const found = maps.find((map) => map && map[key])?.[key] || null;
+          return found ? {
+            ...found,
+            imageWarp: found.imageWarp || null,
+            imageLayers: Array.isArray(found.imageLayers) ? found.imageLayers : []
+          } : null;
+        })(),
         video: {
           storagePath: videoStoragePath || "",
           url: videoDownloadUrl || "",
@@ -5966,6 +6144,14 @@ async function startMontageExport() {
         enabled: true,
         backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
       },
+      stylizedTextTimeline: (typeof window.buildMontageStylizedTextTimeline === "function"
+        ? window.buildMontageStylizedTextTimeline(currentMultimediaSession, entries)
+        : null),
+      overlayCards: (typeof window.buildMontageOverlayCardSegments === "function"
+        ? window.buildMontageOverlayCardSegments(currentMultimediaSession, entries)
+        : (currentMultimediaSession?.podcastVideoConfig?.timelineOverlayCardsById
+          ? { enabled: true, segments: Object.values(currentMultimediaSession.podcastVideoConfig.timelineOverlayCardsById) }
+          : { enabled: false, segments: [] })),
       onScreenTextTimeline: (onScreenTextTimeline.segments.length || onScreenTextTimeline.suppressFallbackFromEntries === true) ? {
         enabled: onScreenTextTimeline.segments.length > 0,
         settings: onScreenTextTimeline.settings,
@@ -5995,6 +6181,7 @@ async function startMontageExport() {
 
     if (response.jobId) {
       exportJobState.jobId = response.jobId;
+      exportJobState.sessionId = String(currentMultimediaSession.id || "").trim();
       setViewerMontageExportStatus("Exportación iniciada…", "El backend está preparando los recursos del montaje.", "neutral", 0.08);
       pollExportStatus();
     } else {
@@ -6019,7 +6206,7 @@ async function pollExportStatus() {
   if (!exportJobState.jobId) return;
 
   try {
-    const exportStatusUrl = buildExportApiUrl(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
+    const exportStatusUrl = buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
     const data = await authFetchJson(exportStatusUrl, {
       auth: false
     });
@@ -6027,6 +6214,8 @@ async function pollExportStatus() {
     if (data.status === "ready") {
       const url = data.downloadUrl || data.export?.downloadUrl;
       if (url) {
+        saveViewerMontageExportHistory({ ...data.export, downloadUrl: url,
+          filename: data.export?.filename || "video-exportado.mp4" });
         setViewerMontageExportStatus("Exportación lista.", "El archivo se descargará automáticamente.", "success", 1);
         showNotification("✅ ¡Video listo! Iniciando descarga...", "success");
         const a = document.createElement("a");

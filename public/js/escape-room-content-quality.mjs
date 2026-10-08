@@ -5,7 +5,7 @@ import {
   normalizePairList,
   normalizeSequenceItems,
   normalizeTextList
-} from "./escape-room-creator-model.mjs?v=20260912-jigsaw-v63";
+} from "./escape-room-creator-model.mjs?v=20260925-signed-answers-v64";
 
 function clean(value = "") {
   return String(value ?? "").trim();

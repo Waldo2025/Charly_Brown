@@ -1,15 +1,35 @@
-# Sally browser service
+# Sally MCP Moodle service
 
-## Operational task integration (local, not yet deployed)
+Sally exposes an authenticated MCP endpoint at `POST /api/sally/mcp`. It uses
+Moodle web capabilities where available and a constrained Playwright browser for
+course, module, user-import and metacourse workflows. Read and prepare tools do
+not write. Every prepared batch has an immutable SHA-256 hash and expires after
+15 minutes; execution requires the exact hash and `confirm: true`.
 
-The root composer now records project context. Named task subchats use authenticated
-`/api/sally/:sessionId/tasks` routes: create/list, GET task, POST `messages`,
-POST `context`, POST `control`, GET `artifacts/:index`. A message receives an
-acknowledgement after durable storage; investigation runs asynchronously and the
-UI polls its task ID. Full results live in private Storage, with version pointers
-in server-managed `SallyBrownTasks` Firestore documents.
+The browser viewer uses a one-use, 30-second ticket to upgrade to WebSocket.
+Chromium `Page.startScreencast` frames are sent as binary JPEG at a 10 FPS target;
+input acknowledgements are independent from frame capture. HTTP snapshots remain
+as a reconnect fallback. Cloud Run must use a 3600-second request timeout, best-
+effort session affinity, one instance for this in-memory pilot, and no end-to-end
+HTTP/2. See the official Cloud Run WebSocket guidance:
+https://docs.cloud.google.com/run/docs/triggering/websockets
+
+## Unified MCP chat (local, not yet deployed)
+
+`sallyBriefPane` is the operational chat. The first message creates its task
+automatically; later messages continue it through authenticated
+`/api/sally/:sessionId/tasks` routes. The chat records an optional read-only model
+course and a writable destination on the same Moodle origin, asks for either when
+missing, and keeps older model/target conversations readable. Full results live
+in private Storage, with version pointers in server-managed `SallyBrownTasks`
+Firestore documents.
 
 The server model chooses typed read tools and proposes catalogued operations.
+When Moodle or a plugin has no specialized adapter it may propose a typed
+`browser_workflow` using only semantic role, label, text, placeholder or title
+locators. Raw selectors, JavaScript, external navigation and secret fields are
+rejected. High-risk actions are limited to one operation and require an exact
+second confirmation.
 No Moodle writes occur during investigation. Approval is tied to a plan hash;
 manual takeover pauses work, uncertain steps cannot be repeated automatically,
 and a task from a previous server instance requires explicit recovery.
@@ -50,6 +70,8 @@ run outside the renderer. No Electron is required by the web transport.
   Firebase Storage; session documents hold summaries and references.
 - Plan execution requires approval of the exact sanitized plan. Unknown actions
   fail closed. Local filesystem uploads are forbidden through the server API.
+- User passwords and generated CSV are held only in an expiring in-memory buffer.
+  Previews mask passwords and successful, cancelled or expired imports erase CSV.
 
 ## Deployment
 
@@ -70,12 +92,27 @@ Environment:
 - `SALLY_WEB_ORIGINS`: allowed editor origins (Firebase Hosting and localhost/127.0.0.1 on ports 3000 and 5010
   by default). Add a custom frontend domain before serving Sally from it.
 - `GOOGLE_CLOUD_PROJECT`: `charly-brown`.
+- `GEMINI_API_KEY`: Secret Manager value used only for guarded Computer Use
+  fallback on unrecognized Moodle fields.
+- `SALLY_COMPUTER_MODEL`: defaults to `gemini-3.8-flash`.
+- `SALLY_MOODLE_TOKEN`: optional Moodle Web Services token. When present, MCP
+  prefers official course/user functions and falls back to Playwright when the
+  function is not enabled by the site's external service.
 
 Run `npm ci && npm test` in this directory. `node smoke.js` checks Chromium and
 the public Moodle login without authenticating. Repository scripts also test
 destination-only extraction against a local Moodle-like fixture and visual UI.
 `node scripts/deploy-sally-hosting.mjs` from the repository publishes only Sally
 files and adds the server to the live CSP, preserving unrelated published files.
+
+Official implementation references:
+
+- MCP Streamable HTTP transport: https://ts.sdk.modelcontextprotocol.io/server
+- Moodle External Services API: https://moodledev.io/docs/5.0/apis/subsystems/external
+- Moodle user CSV upload: https://docs.moodle.org/502/en/Upload_users
+- Gemini Computer Use: https://ai.google.dev/gemini-api/docs/computer-use
+- Playwright CDP sessions: https://playwright.dev/docs/api/class-cdpsession
+- Chrome `Page.startScreencast`: https://chromedevtools.github.io/devtools-protocol/tot/Page/
 
 ## Scope still requiring certification
 
@@ -115,13 +152,11 @@ Do not claim full Moodle replication or every Moodle operation is certified.
 
 ## Manual control and tabbed formats
 
-Manual input is coalesced into ordered batches (up to 64 entries per request).
-Adjacent wheel events are summed and adjacent text events joined without crossing
-click/key boundaries. One capture is returned per batch; stale frames are ignored
-by timestamp. While controlling manually the server captures up to every 300 ms
-and the web client polls every 250 ms; background tabs retain heartbeat-only
-polling. Firebase and session authorization still run for every HTTP request.
-These are cadence targets, not a guaranteed end-to-end latency.
+Manual input is coalesced into ordered 16 ms batches of up to 64 entries. Adjacent
+wheel and text events are combined without crossing click/key boundaries. The
+WebSocket returns input sequence acknowledgements without waiting for screenshots;
+CDP frames are throttled to 8–12 FPS and stale frames are dropped under backpressure.
+Background tabs suspend screencasting and retain heartbeat-only polling.
 
 `course-reader.js` detects format classes and Onetopic DOM markers, follows
 same-course section/tab links recursively, and activates fixed role-based lazy
@@ -133,14 +168,12 @@ Maximum 250 discovered views per run. Authentication restrictions are not bypass
 Reference: https://github.com/davidherney/moodle-format_onetopic/tree/master/templates/courseformat
 Certification still requires the user's Moodle theme/plugin and manual login.
 
-## Separate model and destination conversations
+## Unified model and destination context
 
-The two chat tabs persist independent drafts and immutable messages (`thread`).
-Legacy entries are assigned using `courseView` or their operation kind. Reading
-the model requires no destination URL. Explicit transfers create destination-only
-plans; messages can also be copied as references without modifying either course.
-Read-only questions receive a full generated answer, retained without client
-truncation; non-STOP provider responses are visibly marked incomplete.
+New conversations use `scope: unified`; their endpoint state distinguishes a
+read-only model from the destination where approved changes run. The model is
+optional but the choice must be explicit. Legacy `model` and `target` entries are
+normalized in memory and remain readable without rewriting stored history.
 
 Before approval, the authenticated `checkpoint` command reads original HTML and
 visibility for existing page/label edits. The web client must persist that copy

@@ -1,32 +1,24 @@
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import sharp from 'sharp';
+import workers from '../functions/src/pigpen-generation-workers.js';
 
-const source = await readFile(new URL("../public/js/PigPenCreator.js", import.meta.url), "utf8");
-
-function functionSource(name, nextName) {
-  const start = source.indexOf(`function ${name}`);
-  const end = source.indexOf(`function ${nextName}`, start + 1);
-  assert.notEqual(start, -1, `${name} must exist`);
-  assert.notEqual(end, -1, `${nextName} must exist after ${name}`);
-  return source.slice(start, end);
-}
-
-test("visual audit compresses oversized generated images before sending them", () => {
-  const prepareSource = functionSource("prepareImageForVisualAudit", "auditGeneratedImage");
-  const auditSource = functionSource("auditGeneratedImage", "generateValidatedImage");
-  assert.match(source, /MAX_IMAGE_AUDIT_DATA_URL_CHARS = 900 \* 1024/);
-  assert.match(prepareSource, /maxDimension: 768, quality: 0\.62/);
-  assert.match(prepareSource, /maxDimension: 512, quality: 0\.48/);
-  assert.match(prepareSource, /outputMimeType: "image\/webp"/);
-  assert.match(auditSource, /await prepareImageForVisualAudit\(imageDataUrl\)/);
-  assert.doesNotMatch(auditSource, /imageDataPart\(imageDataUrl\)/);
+test('the reviewer receives the brief and actual compressed images',async()=>{
+  const original=await sharp({create:{width:2000,height:1500,channels:3,background:'#445566'}}).png().toBuffer();
+  const room={room:{generated_room:{}},mission:{contexto:'El triángulo tiene lados 3, 4 y 5.',preguntas:[]}};
+  const image={key:'room',questionIndex:null,path:'escaperooms/u/s/t/test.webp',url:'https://example.test/test.webp'};
+  const values={master:{rooms:[]},room,image};let request;
+  const worker=workers.createWorkers({bucket:{file:()=>({download:async()=>[original]})},artifacts:{get:async key=>structuredClone(values[key])},
+    client:{models:{generateContent:async input=>{request=input;return {candidates:[{content:{parts:[{text:JSON.stringify({approved:true,issues:[],checks:[]})}]}}]};}}}});
+  const result=await worker({ownerId:'u',sessionId:'s',topicId:'t',config:{modelo:'gemini-2.5-flash'}},{stage:'review',input:{masterRef:'master',roomRef:'room',imageRefs:['image']}},new AbortController().signal);
+  assert.equal(result.approved,true);
+  assert.match(request.contents[0].parts[0].text,/triángulo tiene lados 3, 4 y 5/);
+  const encoded=request.contents[0].parts.find(p=>p.inlineData).inlineData;
+  const meta=await sharp(Buffer.from(encoded.data,'base64')).metadata();assert.ok(meta.width<=768&&meta.height<=768);assert.equal(encoded.mimeType,'image/jpeg');
+  assert.equal(result.room.mission.imagen,image.url);
 });
-
-test("binary-to-data-url conversion works without spreading the whole image", () => {
-  const converterSource = functionSource("imageBytesToDataUrl", "prepareImageForVisualAudit").replace(/\s*async\s*$/, "");
-  const convert = Function(`return (${converterSource.trim()});`)();
-  const result = convert(new Uint8Array([0, 1, 2, 253, 254, 255]), "image/webp");
-  assert.equal(result, "data:image/webp;base64,AAEC/f7/");
-  assert.match(converterSource, /chunkSize = 0x8000/);
+test('review cannot read an image outside the authorized topic',async()=>{
+  const values={master:{rooms:[]},room:{mission:{preguntas:[]}},image:{path:'escaperooms/other/s/t/image.webp'}};
+  const worker=workers.createWorkers({bucket:{file:()=>{throw Error('Must not access bucket');}},artifacts:{get:async key=>values[key]},client:{models:{}}});
+  await assert.rejects(worker({ownerId:'u',sessionId:'s',topicId:'t',config:{}},{stage:'review',input:{masterRef:'master',roomRef:'room',imageRefs:['image']}},new AbortController().signal),{status:403});
 });

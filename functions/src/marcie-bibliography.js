@@ -4,7 +4,7 @@
   const esc = value => clean(value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
   function doi(value) { return clean(value).replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").replace(/^doi:\s*/i, "").toLowerCase(); }
   function sourceAuthors(source = {}) {
-    return (Array.isArray(source.authors) ? source.authors : [source.authors || source.author]).filter(Boolean);
+    return (Array.isArray(source.authors) ? source.authors : [source.authors || source.author || (source.sourceType === "youtube_video" ? source.channel : "")]).filter(Boolean);
   }
   function isInstitutionName(value, source = {}) {
     const raw = clean(typeof value === "object" ? value.name : value);
@@ -43,7 +43,15 @@
     const chosen = list.length > 20 ? [...list.slice(0, 19), "…", list[list.length - 1]] : list;
     return chosen.length === 1 ? chosen[0] : chosen.slice(0, -1).join(", ") + (list.length > 20 ? ", " : ", & ") + chosen.at(-1);
   }
-  function year(source) { return clean(source.year || source.publishedAt || source.datePublished).match(/\b(?:18|19|20)\d{2}\b/)?.[0] || "s. f."; }
+  function year(source) {
+    const direct = clean(source.year || source.publishedAt || source.datePublished).match(/\b(?:18|19|20)\d{2}\b/)?.[0];
+    if (direct) return direct;
+    const citationYear = clean(source.apaCitation).match(/\(((?:18|19|20)\d{2})\)/)?.[1];
+    if (citationYear) return citationYear;
+    const urlYear = clean(source.url || source.finalUrl).match(/\/(?:18|19|20)(\d{2})\b/)?.[0]?.replace(/\//g, "");
+    if (urlYear && urlYear.length === 4) return urlYear;
+    return "s. f.";
+  }
   function link(source) {
     const id = doi(source.doi);
     const value = id ? "https://doi.org/" + id : clean(source.url || source.finalUrl);
@@ -111,13 +119,23 @@
   function blockIds(article, block = {}) {
     return [...new Set([...(block.sourceIds || []), ...(block.referenceIds || []), ...markerIds(article, [block.text || "", ...(block.items || [])].join("\n"))].map(String))];
   }
+  function visibleBlockIds(article = {}, block = {}) {
+    const references = pool(article);
+    const byId = new Map(references.flatMap(source => [source.id, ...(source.aliasIds || [])].filter(Boolean).map(id => [String(id), source])));
+    const rawVideoIds = [...String(block.text || "").matchAll(/\b(youtube-[A-Za-z0-9_-]+)\b/gi)].map(match => "youtube-" + match[1].slice(8));
+    const ids = [...new Set([...blockIds(article, block), ...rawVideoIds].map(id => resolveId(article, id)))];
+    return new Set(ids.filter(id => byId.get(id)?.sourceType !== "youtube_video" && !/^youtube-/i.test(id)));
+  }
+  function publishedIds(article = {}) {
+    return new Set((article.blocks || []).flatMap(block => [...visibleBlockIds(article, block)]));
+  }
   function sources(article = {}) {
-    const used = new Set([...(article.usedSourceIds || []), ...(article.blocks || []).flatMap(block => blockIds(article, block))].map(id => resolveId(article, id)));
+    const used = publishedIds(article);
     const candidates = [
       ...(article.usedSources || []),
       ...(article.sources || []),
       ...(article.supplementarySources || []),
-      ...pool(article).filter(s => used.has(String(s.id)) || (s.aliasIds || []).some(id => used.has(String(id))))
+      ...pool(article).filter(s => s.sourceType === "youtube_video" || used.has(String(s.id)) || (s.aliasIds || []).some(id => used.has(String(id))))
     ];
     const found = new Map();
     for (const source of candidates) {
@@ -166,23 +184,29 @@
     if (!entries.length) return "";
     const token = tokenIds.join(", ");
     const content = entries.map(({ id, source }) => source
-      ? '<a href="#source-' + esc(source.id) + '" title="' + esc(parts(source)) + '" aria-label="Referencia: ' + esc(citation(source)) + '" style="text-decoration:none">' + esc(citation(source, false)) + '</a>'
+      ? '<a href="#source-' + esc(source.id) + '" title="' + esc(parts(source)) + '" aria-label="Referencia: ' + esc(citation(source)) + '">' + esc(citation(source, false)) + '</a>'
       : '<span title="Falta el documento de la referencia ' + esc(id) + '" aria-label="Referencia sin documento asociado">?</span>').join("; ");
-    return '<span data-citation-link contenteditable="false" data-citation-token="' + esc(token) + '" style="white-space:nowrap">(' + content + ')</span>';
+    return '<span data-citation-link contenteditable="false" data-citation-token="' + esc(token) + '">(' + content + ')</span>';
   }
   function metadataGaps(source = {}) {
     const list = sourceAuthors(source);
     const gaps = [];
     if (!clean(source.title)) gaps.push("title");
+    if (clean(source.sourceType).toLowerCase() === "youtube_video") {
+      if (!clean(source.channel) && !list.length) gaps.push("author");
+      if (!link(source)) gaps.push("locator");
+      return gaps;
+    }
     if (!list.length && !clean(source.publisher)) gaps.push("author");
-    if (!/^\d{4}$/.test(year(source))) gaps.push("year");
+    if (!/^\d{4}$/.test(year(source)) && clean(source.evidenceRole).toLowerCase() !== "historical") gaps.push("year");
     if (!clean(source.journal || source.publisher)) gaps.push("publication");
     if (!link(source)) gaps.push("locator");
     return gaps;
   }
   function integrity(article = {}) {
     const references = sources(article);
-    const missing = [...new Set((article.blocks || []).flatMap(block => blockIds(article, block)))].filter(id => !references.some(source => source.id === resolveId(article, id) || source.aliasIds?.includes(resolveId(article, id))));
+    const published = publishedIds(article);
+    const missing = [...published].filter(id => !references.some(source => source.id === id || source.aliasIds?.includes(id)));
     return { valid: !missing.length, missing, referenceCount: references.length };
   }
   function assertIntegrity(article = {}) {
@@ -190,22 +214,42 @@
     if (!result.valid) throw new Error("Hay citas sin documento bibliográfico asociado: " + result.missing.join(", ") + ". Completa o vuelve a investigar esas referencias antes de continuar.");
     return result;
   }
+  function normalizePunctuationSpacing(value = "") {
+    // Horizontal spacing only: preserve paragraph breaks, decimals and URLs.
+    return String(value).replace(/[ \t\u00a0\u202f]+(?=[.,;:!?…])/g, "");
+  }
+  function normalizeRenderedPunctuation(html) {
+    // Never rewrite tag attributes, citation tokens or link destinations.
+    return String(html).split(/(<[^>]*>)/g).map(part => part.startsWith("<") ? part
+      : normalizePunctuationSpacing(part.replace(/(?:&nbsp;|&#160;|&#x0*a0;)+(?=[.,;:!?…])/gi, "")))
+      .join("").replace(/[ \t\u00a0\u202f]+((?:<\/(?:strong|b|em|i|u|span|a)>)+[.,;:!?…])/gi, "$1");
+  }
   function renderCitations(article, block, html) {
     const references = sources(article);
+    const published = visibleBlockIds(article, block);
+    const videoLabels = references.filter(source => source.sourceType === "youtube_video").map(source => citation(source));
     const inlineIds = new Set();
-    const rendered = String(html).split(/(<[^>]*>)/g).map(part => part.startsWith("<") ? part : part.replace(/\[([^\]\n]+)\](?!\()/g, (token, content) => {
-      const ids = [...new Set(markerGroupIds(article, content))];
-      if (!ids.length) return token;
-      const resolvedIds = ids.map(id => {
-        const resolved = resolveId(article, id);
-        inlineIds.add(resolved);
-        return resolved;
-      });
+    const renderToken = (ids) => {
+      const resolvedIds = ids.map(id => resolveId(article, /^youtube-/i.test(String(id)) ? "youtube-" + String(id).slice(8) : id)).filter(id => published.has(id));
+      resolvedIds.forEach(id => inlineIds.add(id));
+      if (!resolvedIds.length) return "";
       const linked = citationGroupLink(references, resolvedIds, ids);
-      if (linked) return linked;
-      return '<span data-citation-link data-citation-token="' + esc(ids.join(", ")) + '" contenteditable="false" title="Referencia pendiente: falta el documento original" aria-label="Referencia sin documento asociado">(?)</span>';
-    })).join("");
-    const remaining = blockIds(article, block).filter(id => !inlineIds.has(resolveId(article, id)));
+      return linked || '<span data-citation-link contenteditable="false" title="Referencia pendiente: falta el documento original" aria-label="Referencia sin documento asociado">(?)</span>';
+    };
+    const rendered = normalizeRenderedPunctuation(String(html).split(/(<[^>]*>)/g).map(part => {
+      if (part.startsWith("<")) return part;
+      return part.split(/(\[[^\]\n]+\](?!\())/g).map(fragment => {
+        if (/^\[[^\]\n]+\]$/.test(fragment)) {
+          const ids = [...new Set(markerGroupIds(article, fragment.slice(1, -1)))];
+          return ids.length ? renderToken(ids) : /^\[youtube-[A-Za-z0-9_-]+\]$/i.test(fragment) ? "" : fragment;
+        }
+        return videoLabels.reduce((text, label) => text.replaceAll(label, ""), fragment)
+          .replace(/\b(?:source|reference)-[A-Za-z0-9_]+(?:[.:-][A-Za-z0-9_]+)*\b/g, id => renderToken([id]))
+          .replace(/\(\s*(youtube-[A-Za-z0-9_-]+)\s*,\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*\)/gi, (_, id) => renderToken([id]))
+          .replace(/\bYouTube-[A-Za-z0-9_-]+\b/g, id => renderToken([id]));
+      }).join("");
+    }).join(""));
+    const remaining = blockIds(article, block).filter(id => published.has(resolveId(article, id)) && !inlineIds.has(resolveId(article, id)));
     const pending = remaining.filter(id => !references.some(source => source.id === resolveId(article, id) || source.aliasIds?.includes(resolveId(article, id))));
     const trailing = links(article, remaining) + pending.map(id => '<span data-citation-link data-citation-token="' + esc(id) + '" contenteditable="false" title="Falta el documento de esta referencia">(?)</span>').join(" ");
     if (trailing && /<\/li>\s*<\/(?:ul|ol)>\s*$/.test(rendered)) return rendered.replace(/(<\/li>\s*<\/(?:ul|ol)>\s*)$/, (_, suffix) => " " + trailing + suffix);
@@ -222,7 +266,7 @@
     }).join("\n\n");
     return "# " + (article.title || "") + "\n\n" + (article.subtitle ? article.subtitle + "\n\n" : "") + blocks + "\n\n## Referencias bibliográficas\n\n" + references.map(source => '<a id="source-' + esc(source.id) + '"></a>' + parts(source, "markdown")).join("\n\n");
   }
-  const api = { markdown, citation, links, sources, resolveId, markerIds, blockIds, integrity, assertIntegrity, metadataGaps, renderCitations, format: s => parts(s), formatHtml: s => parts(s, true), formatMarkdown: s => parts(s, "markdown"), year, authors, link };
+  const api = { normalizePunctuationSpacing, markdown, citation, links, sources, resolveId, markerIds, blockIds, integrity, assertIntegrity, metadataGaps, renderCitations, format: s => parts(s), formatHtml: s => parts(s, true), formatMarkdown: s => parts(s, "markdown"), year, authors, link };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MarcieBibliography = api;
 })(globalThis);

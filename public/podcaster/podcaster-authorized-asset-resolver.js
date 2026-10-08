@@ -1,4 +1,37 @@
 const DEFAULT_EXPIRY_SKEW_MS = 60 * 1000;
+const ASSET_API_STORAGE_PREFIX = "podcaster/";
+const GS_SCHEME_RE = /^gs:\/\//i;
+
+// `/api/assets/signed-url`, `proxy-media` y `proxy-image` comparten el mismo
+// portero (normalizeStoragePath en functions/src/assets.js): sólo firman rutas
+// bajo `podcaster/`. Cualquier otra ruta (por ejemplo las imágenes de la
+// galería, `images/<uid>/image-creator/...`) responde 400 invalid_storage_path,
+// así que debe resolverse por otra vía en lugar de consultar la API.
+export function isAssetApiStoragePath(storagePath = "") {
+  return String(storagePath || "").trim().startsWith(ASSET_API_STORAGE_PREFIX);
+}
+
+function isOwnerScopedStoragePath(storagePath = "") {
+  return /^podcaster\/sessions\/[^/]+\/owners\/[^/]+\//i.test(normalizeAssetStoragePath(storagePath));
+}
+
+// Los generadores (Veo, archivos de imagen) devuelven `gs://<bucket>/<ruta>` y
+// el portero de la API recorta ese prefijo antes de decidir. Hay que hacer lo
+// mismo aquí: con el esquema sin recortar una ruta `podcaster/` se clasificaría
+// como fuera de contrato y `images/...` caería en un `ref()` inválido.
+export function normalizeAssetStoragePath(value = "") {
+  let clean = String(value || "").trim();
+  if (!clean) return "";
+  if (GS_SCHEME_RE.test(clean)) {
+    const withoutScheme = clean.replace(GS_SCHEME_RE, "");
+    const slashIndex = withoutScheme.indexOf("/");
+    clean = slashIndex >= 0 ? withoutScheme.slice(slashIndex + 1) : "";
+  }
+  if (/%2f/i.test(clean) || /%25/i.test(clean)) {
+    try { clean = decodeURIComponent(clean); } catch (_) { }
+  }
+  return clean.replace(/^\/+/, "").trim();
+}
 
 function toFiniteTimestamp(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -68,14 +101,15 @@ export function createAuthorizedAssetResolver(options = {}) {
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   const expirySkewMs = Math.max(0, Number(options.expirySkewMs ?? DEFAULT_EXPIRY_SKEW_MS) || 0);
   const baseUrl = resolveBaseUrl(options.baseUrl);
+  const directResolve = typeof options.resolveDirectRecord === "function" ? options.resolveDirectRecord : null;
   const cache = new Map();
   const pending = new Map();
   const generations = new Map();
 
   const keyFor = (proxyUrl = "", explicitStoragePath = "") => {
-    const cleanStoragePath = String(
-      explicitStoragePath || extractAuthorizedAssetStoragePath(proxyUrl, { baseUrl }) || ""
-    ).trim();
+    const cleanStoragePath = normalizeAssetStoragePath(
+      explicitStoragePath || extractAuthorizedAssetStoragePath(proxyUrl, { baseUrl })
+    );
     if (cleanStoragePath) return `storage:${cleanStoragePath}`;
     return `url:${String(proxyUrl || "").trim()}`;
   };
@@ -96,11 +130,10 @@ export function createAuthorizedAssetResolver(options = {}) {
     const clean = String(proxyUrl || "").trim();
     if (!clean) return { url: "", expiresAt: null, storagePath: "" };
 
-    const storagePath = String(
+    const storagePath = normalizeAssetStoragePath(
       resolveOptions.storagePath
       || extractAuthorizedAssetStoragePath(clean, { baseUrl })
-      || ""
-    ).trim();
+    );
     if (!storagePath) {
       return { url: clean, expiresAt: null, storagePath: "" };
     }
@@ -118,8 +151,24 @@ export function createAuthorizedAssetResolver(options = {}) {
 
     const requestGeneration = generationFor(key);
     const request = (async () => {
-      const data = await fetchJson(`/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`);
-      const record = normalizeAuthorizedAssetRecord(data, { storagePath });
+      let record;
+      // Los assets locales de una sesión usan el namespace del propietario y
+      // pueden existir antes de sincronizar el documento de sesión. Resolverlos
+      // con Firebase Storage evita un 404 de signed-url en ese caso; Storage
+      // sigue aplicando sus propias reglas de acceso.
+      if (isOwnerScopedStoragePath(storagePath) && directResolve) {
+        record = normalizeAuthorizedAssetRecord(await directResolve(storagePath), { storagePath });
+      } else if (isAssetApiStoragePath(storagePath)) {
+        const data = await fetchJson(`/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`);
+        record = normalizeAuthorizedAssetRecord(data, { storagePath });
+      } else if (directResolve) {
+        record = normalizeAuthorizedAssetRecord(await directResolve(storagePath), { storagePath });
+      } else {
+        // Sin resolver directo no hay forma segura de autorizar la ruta: se
+        // devuelve la URL lógica tal cual, sin gastar una petición que la API
+        // ya rechazó con 400.
+        record = normalizeAuthorizedAssetRecord({ url: clean, storagePath });
+      }
       if (!record.url) throw new Error("signed_asset_url_missing");
       if (generationFor(key) === requestGeneration) {
         // Missing/invalid expiry metadata is deliberately not cached. This keeps
@@ -144,11 +193,10 @@ export function createAuthorizedAssetResolver(options = {}) {
   const invalidate = (value = "", invalidateOptions = {}) => {
     const clean = String(value || "").trim();
     if (!clean && !invalidateOptions.storagePath) return false;
-    const storagePath = String(
+    const storagePath = normalizeAssetStoragePath(
       invalidateOptions.storagePath
       || extractAuthorizedAssetStoragePath(clean, { baseUrl })
-      || ""
-    ).trim();
+    );
     const key = keyFor(clean, storagePath);
     const existed = cache.delete(key);
     const hadPending = pending.delete(key);
@@ -186,11 +234,10 @@ export function createAuthorizedAssetResolver(options = {}) {
   };
 
   const getCachedRecord = (value = "", getOptions = {}) => {
-    const storagePath = String(
+    const storagePath = normalizeAssetStoragePath(
       getOptions.storagePath
       || extractAuthorizedAssetStoragePath(value, { baseUrl })
-      || ""
-    ).trim();
+    );
     const record = cache.get(keyFor(value, storagePath));
     return isFresh(record) ? { ...record } : null;
   };

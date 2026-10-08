@@ -27,6 +27,23 @@ const [{ PodcasterPlaybackController }, { resolveSceneSourceStateAtTimelineMs }]
   import("../public/podcaster/podcaster-scene-timing.js"),
 ]);
 
+test("playback reuses its timeline entries cache across animation frames", () => {
+  const controller = new PodcasterPlaybackController();
+  const session = {};
+  const entries = [{ rowId: "scene-1", startMs: 0, endMs: 1000 }];
+  let builds = 0;
+  controller.deps = { buildTimelineRuntimeEntries: () => { builds += 1; return entries; } };
+  controller.state.session = session;
+  controller.state.isPlaying = true;
+  controller.cachedTickEntries = entries;
+  controller.cachedTickSessionRef = session;
+  controller.cachedTickEntriesTime = 0;
+
+  assert.equal(controller.getEntryAtMs(500)?.rowId, "scene-1");
+  assert.equal(controller.getEntryAtMs(600)?.rowId, "scene-1");
+  assert.equal(builds, 0);
+});
+
 class FakeClassList {
   constructor(initial = []) {
     this.values = new Set(initial);

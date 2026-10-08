@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildActivityPrompt, buildActivityReadingContext, buildResourcePrompt, validateEmbeddedActivityResources, validateResourceArtifact, REFERENCE_EDITORIAL_ACTIVITY_PROFILE } = require("../src/charly-brown-agent-tools.js");
+const { buildActivityPrompt, buildActivityReadingContext, buildResourcePrompt, buildTeacherNotesPrompt, validateEmbeddedActivityResources, validateResourceArtifact, REFERENCE_EDITORIAL_ACTIVITY_PROFILE } = require("../src/charly-brown-agent-tools.js");
 
 test("activity prompts include the reference editorial structure without source text", () => {
   const prompt = buildActivityPrompt({
@@ -57,4 +57,71 @@ test("activity prompts prioritize the complete narrative over synonyms", () => {
   assert.match(context.supportingMaterial, /Sinónimos: rápido: veloz/);
   assert.ok(prompt.indexOf("Lucía siguió las huellas") < prompt.indexOf("Sinónimos: rápido: veloz"));
   assert.match(prompt, /No conviertas la tabla de sinónimos.*fuente principal/);
+});
+
+test("activity prompts enforce rounded title, no detonating question, imperative verbs, resource codes and grade differentiation", () => {
+  const promptGrade1 = buildActivityPrompt({
+    unit: { title: "Mi comunidad", meta: { level: "Primaria", grade: "Primero", trimester: "1", unit: "1" } },
+    activity: { section: "Expresión oral" },
+    resourceTypes: ["worksheet", "annex", "cutout", "video-script"]
+  });
+
+  // Rounded title directly without negative prompt bloat
+  assert.match(promptGrade1, /cb-activity-title/);
+  assert.match(promptGrade1, /título temático creativo/);
+  assert.match(promptGrade1, /tipografía rounded/);
+
+  // Imperative verbs first
+  assert.match(promptGrade1, /NUNCA comiences una actividad con una pregunta/);
+  assert.match(promptGrade1, /pregunta va SIEMPRE DESPUÉS de la instrucción imperativa inicial/);
+
+  // Official resource codes
+  assert.match(promptGrade1, /Ficha 1a/);
+  assert.match(promptGrade1, /Anexo 1a/);
+  assert.match(promptGrade1, /Recortable 1a/);
+  assert.match(promptGrade1, /Video/);
+
+  // Grade 1 differentiation: much shorter
+  assert.match(promptGrade1, /CRITERIO PEDAGÓGICO OBLIGATORIO PARA PRIMERO DE PRIMARIA/);
+  assert.match(promptGrade1, /MUCHO MÁS CORTAS/);
+
+  // Grade 6 differentiation: much longer
+  const promptGrade6 = buildActivityPrompt({
+    unit: { title: "Ecosistemas", meta: { level: "Primaria", grade: "Sexto", trimester: "2", unit: "3" } },
+    activity: { section: "Ciencias" },
+    resourceTypes: ["worksheet"]
+  });
+  assert.match(promptGrade6, /CRITERIO PEDAGÓGICO OBLIGATORIO PARA SEXTO DE PRIMARIA/);
+  assert.match(promptGrade6, /MUCHO MÁS LARGAS/);
+  assert.match(promptGrade6, /Ficha 3a/);
+});
+
+test("activity prompts prohibit emojis and require textual IC tags", () => {
+  const prompt = buildActivityPrompt({
+    unit: { title: "Mi comunidad", meta: { level: "Primaria", grade: "Primero", trimester: "1", unit: "1" } },
+    activity: { section: "Expresión oral" },
+    resourceTypes: ["worksheet"]
+  });
+  assert.match(prompt, /PROHIBIDO USAR EMOJIS/);
+  assert.match(prompt, /\[IC\. T\. IND\]/);
+  assert.match(prompt, /\[IC\. T\. PAR\]/);
+  assert.match(prompt, /\[IC\. T\.EQ\]/);
+});
+
+test("teacher notes prompts enforce subtopic orientations and exclusive ficha notes section at the end", () => {
+  const prompt = buildTeacherNotesPrompt({
+    unit: {
+      title: "Mi comunidad",
+      meta: { level: "Primaria", grade: "Primero", trimester: "1", unit: "1" },
+      accepted: {
+        activities: [{ id: "act-1", title: "Actividad 1", section: "Lenguaje" }],
+        resources: [{ id: "res-1", code: "Ficha 1a", title: "Vocales", type: "worksheet" }]
+      }
+    }
+  });
+  assert.match(prompt, /Actividad General/);
+  assert.match(prompt, /Notas pedagógicas exclusivas para Fichas/);
+  assert.match(prompt, /una ficha por página/);
+  assert.match(prompt, /Propósito formativo/);
+  assert.match(prompt, /Impacto cognitivo/);
 });

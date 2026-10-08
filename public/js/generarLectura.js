@@ -1935,10 +1935,10 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
     if (mencionaSecuencia && !esAnalisis) {
       const snapshot = await getDocs(query(collection(db, "secuenciaAlcance")));
       const categorias = {
-        "Lenguaje y comunicación": ["Ortografía", "ExpresionEscrita", "ExpresionOral", "Gramatica"],
+        "Lenguaje y comunicación": ["Ortografía", "Gramatica", "ExpresionEscrita", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades", "Artes"],
+        "Ciencias experimentales": ["ConocimientoDelMedio", "Naturales", "MiLocalidad"],
         "Ciencias sociales": ["Historia", "Geografia"],
-        "Ciencias experimentales": ["Naturales"],
-        "Formación socioemocional": ["CivicaEtica", "Socioemocional"],
+        "Formación socioemocional": ["Socioemocional", "CivicaEtica"],
         "Matemáticas": ["Matematicas"]
       };
       let html = "";

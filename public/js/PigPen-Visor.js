@@ -1,6 +1,6 @@
 import { buildSameOriginApiUrl } from "./api-client.js";
-import { normalizeEscapeRoomProject } from "./escape-room-creator-model.mjs?v=20260912-jigsaw-v63";
-import { buildPreviewDocument } from "./escape-room-package-builder.mjs?v=20260912-jigsaw-v106";
+import { normalizeEscapeRoomProject } from "./escape-room-creator-model.mjs?v=20260925-signed-answers-v64";
+import { buildPreviewDocument } from "./escape-room-package-builder.mjs?v=20260925-sequence-column-v1";
 
 const elements = {
   sessionTitle: document.getElementById("pvSessionTitle"),

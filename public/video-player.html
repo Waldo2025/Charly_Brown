@@ -11,9 +11,14 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" data-cache-href="home.css">
-  <link rel="stylesheet" data-cache-href="podcaster.css">
+  <link rel="stylesheet" data-cache-href="podcaster.css?rev=2026-10-05.scene-tools-rail-2">
   <link rel="stylesheet" data-cache-href="video-progress-report.css?v=2026-1.0.10.615">
   <link rel="stylesheet" data-cache-href="video-player-scenes-panel.css?v=2026-1.0.10.616">
+  <link rel="stylesheet" href="podcaster/podcaster-overlay-card-studio.css">
+  <link rel="stylesheet" href="podcaster.css?rev=2026-10-05.scene-tools-rail-2">
+  <link rel="stylesheet" href="podcaster/css/podcaster-overlays-2026.css?rev=2026-10-02.player-composition-2">
+  <link rel="stylesheet" href="podcaster/css/podcaster-image-effects.css?rev=2026-10-02.player-composition-2">
+  <link rel="stylesheet" href="podcaster/css/podcaster-scene-image-layers.css?rev=2026-10-05.layers-rail-in-panel-3">
   <style>
     :root {
       color-scheme: dark;
@@ -2193,6 +2198,9 @@
               background: var(--vp-stage);
               will-change: opacity, transform;
             }
+            .player-video[hidden] {
+              display: none !important;
+            }
             .player-video-backdrop {
               object-fit: cover;
               filter: blur(26px) saturate(1.08);
@@ -2222,9 +2230,22 @@
               background: var(--vp-stage);
               will-change: opacity, transform, filter;
             }
+            .podcast-active-speaker-image[hidden] {
+              display: none !important;
+            }
             .podcast-active-speaker-image.is-visible {
               opacity: 1;
               visibility: visible;
+            }
+            .player-stage .podcast-image-warp-stage-canvas {
+              position: absolute;
+              z-index: 6;
+              pointer-events: none;
+            }
+            .player-stage .podcast-scene-image-layers-stage {
+              position: absolute;
+              z-index: 7;
+              pointer-events: none;
             }
             .player-video:not(.player-video-backdrop) {
               top: 0;
@@ -2736,54 +2757,69 @@
       </div>
       <div class="montage-export-body">
         <div class="montage-export-grid">
-          <label class="row-field">
-            <span>Modo</span>
-            <select id="montageExportMode">
+          <label class="row-field montage-export-filename">
+            <span class="montage-export-field-title"><i class="fas fa-file-signature" aria-hidden="true"></i> Nombre del archivo</span>
+            <input id="montageExportFilename" type="text" value="montage">
+          </label>
+          <div class="row-field montage-export-mode">
+            <span class="montage-export-field-title"><i class="fas fa-sliders-h" aria-hidden="true"></i> Modo</span>
+            <select id="montageExportMode" class="montage-export-native-select" tabindex="-1" aria-hidden="true" hidden>
               <option value="normal" selected>Normal</option>
               <option value="review">Revisión</option>
             </select>
-          </label>
+            <div class="montage-export-choice-group" data-export-select="montageExportMode" role="radiogroup" aria-label="Modo de exportación">
+              <button type="button" role="radio" data-export-value="normal" aria-checked="true"><i class="fas fa-video" aria-hidden="true"></i> Normal</button>
+              <button type="button" role="radio" data-export-value="review" aria-checked="false"><i class="fas fa-clipboard-check" aria-hidden="true"></i> Revisión</button>
+            </div>
+          </div>
           <label class="row-field">
-            <span>Motor de Render</span>
+            <span class="montage-export-field-title"><i class="fas fa-cogs" aria-hidden="true"></i> Motor de Render</span>
             <select id="montageExportRenderMode">
               <option value="browser" selected>Navegador (Playwright)</option>
             </select>
           </label>
-          <div class="row-field">
-            <span>Solo Audio</span>
-            <label class="montage-export-check">
-              <input id="montageExportOnlyAudio" type="checkbox">
-              <span>Exportar solo MP3</span>
-            </label>
-          </div>
-          <label class="row-field">
-            <span>Formato</span>
-            <select id="montageExportFormat">
+          <div class="row-field montage-export-format">
+            <span class="montage-export-field-title"><i class="fas fa-file-video" aria-hidden="true"></i> Formato</span>
+            <select id="montageExportFormat" class="montage-export-native-select" tabindex="-1" aria-hidden="true" hidden>
               <option value="mp4_h264">MP4 (H.264) · Compatible</option>
               <option value="webm_vp9">WebM (VP9) · Web moderno</option>
             </select>
-          </label>
-          <label class="row-field">
-            <span>Resolución</span>
-            <select id="montageExportResolution">
+            <div class="montage-export-choice-group" data-export-select="montageExportFormat" role="radiogroup" aria-label="Formato de video">
+              <button type="button" role="radio" data-export-value="mp4_h264" aria-checked="true"><i class="fas fa-file-video" aria-hidden="true"></i><span>MP4 <small>H.264</small></span></button>
+              <button type="button" role="radio" data-export-value="webm_vp9" aria-checked="false"><i class="fas fa-globe" aria-hidden="true"></i><span>WebM <small>VP9</small></span></button>
+            </div>
+          </div>
+          <div class="row-field montage-export-resolution">
+            <span class="montage-export-field-title"><i class="fas fa-expand" aria-hidden="true"></i> Resolución</span>
+            <select id="montageExportResolution" class="montage-export-native-select" tabindex="-1" aria-hidden="true" hidden>
               <option value="source" selected>Fuente original</option>
               <option value="1080p">1080p final (1920×1080)</option>
               <option value="720p">720p final (1280×720)</option>
               <option value="480p">480p final (854×480)</option>
             </select>
-            <small>Si el video original es menor, el export puede escalarlo sin añadir detalle real.</small>
-          </label>
-          <div class="row-field montage-export-quality">
-            <span>Calidad</span>
-            <div class="montage-export-quality-buttons" role="group" aria-label="Preset de calidad">
-              <button class="timeline-mode-btn" type="button" data-quality="high">Alta</button>
-              <button class="timeline-mode-btn is-active" type="button" data-quality="balanced">Balanceada</button>
-              <button class="timeline-mode-btn" type="button" data-quality="small">Ligera</button>
+            <div class="montage-export-choice-group" data-export-select="montageExportResolution" role="radiogroup" aria-label="Resolución final">
+              <button type="button" role="radio" data-export-value="source" aria-checked="true"><i class="fas fa-image" aria-hidden="true"></i> Original</button>
+              <button type="button" role="radio" data-export-value="1080p" aria-checked="false"><i class="fas fa-tv" aria-hidden="true"></i> 1080p</button>
+              <button type="button" role="radio" data-export-value="720p" aria-checked="false"><i class="fas fa-desktop" aria-hidden="true"></i> 720p</button>
+              <button type="button" role="radio" data-export-value="480p" aria-checked="false"><i class="fas fa-mobile-alt" aria-hidden="true"></i> 480p</button>
             </div>
-            <small>Usa CRF + preset: alta calidad con menor peso.</small>
+          </div>
+          <div class="row-field montage-export-quality">
+            <span class="montage-export-field-title"><i class="fas fa-tachometer-alt" aria-hidden="true"></i> Calidad</span>
+            <div class="montage-export-quality-buttons" role="group" aria-label="Preset de calidad">
+              <button class="timeline-mode-btn" type="button" data-quality="high"><i class="fas fa-gem" aria-hidden="true"></i> Alta</button>
+              <button class="timeline-mode-btn is-active" type="button" data-quality="balanced"><i class="fas fa-sliders-h" aria-hidden="true"></i> Balanceada</button>
+              <button class="timeline-mode-btn" type="button" data-quality="small"><i class="fas fa-feather-alt" aria-hidden="true"></i> Ligera</button>
+            </div>
+          </div>
+          <div class="row-field montage-export-audio-only">
+            <label class="montage-export-check">
+              <input id="montageExportOnlyAudio" type="checkbox">
+              <span><i class="fas fa-music" aria-hidden="true"></i> Solo MP3</span>
+            </label>
           </div>
           <label class="row-field">
-            <span>Control de Bitrate</span>
+            <span class="montage-export-field-title"><i class="fas fa-tachometer-alt" aria-hidden="true"></i> Control de Bitrate</span>
             <select id="montageExportBitrateMode">
               <option value="vbr" selected>Variable (Inteligente)</option>
               <option value="cbr">Constante (Fijo)</option>
@@ -2792,37 +2828,33 @@
           </label>
           <div id="montageExportCustomBitrateBox" class="montage-export-custom-bitrate" hidden>
             <label class="row-field">
-              <span>Bitrate Máximo (Mbps)</span>
+              <span class="montage-export-field-title"><i class="fas fa-chart-line" aria-hidden="true"></i> Bitrate Máximo (Mbps)</span>
               <input id="montageExportMaxBitrate" type="number" min="0.1" max="50" step="0.1" value="5">
             </label>
             <label class="row-field">
-              <span>Calidad / CRF (0-51)</span>
+              <span class="montage-export-field-title"><i class="fas fa-adjust" aria-hidden="true"></i> Calidad / CRF (0-51)</span>
               <input id="montageExportMinBitrate" type="number" min="0" max="51" step="1" value="20">
             </label>
           </div>
-          <label class="row-field montage-export-filename">
-            <span>Nombre del archivo</span>
-            <input id="montageExportFilename" type="text" value="montage">
-          </label>
           <div class="row-field">
-            <span>Logo del video</span>
+            <span class="montage-export-field-title"><i class="fas fa-stamp" aria-hidden="true"></i> Logo del video</span>
             <label class="montage-export-check">
               <input id="montageExportIncludeLogo" type="checkbox" checked>
-              <span>Incluir logo ASC en la esquina</span>
+              <span><i class="fas fa-stamp" aria-hidden="true"></i> Incluir logo ASC en la esquina</span>
             </label>
           </div>
           <div class="row-field">
-            <span>Modo Karaoke</span>
+            <span class="montage-export-field-title"><i class="fas fa-microphone" aria-hidden="true"></i> Modo Karaoke</span>
             <label class="montage-export-check">
               <input id="montageExportPartyKaraoke" type="checkbox" checked>
-              <span>Activar modo party karaoke (subtítulo sincronizado por palabras)</span>
+              <span><i class="fas fa-microphone" aria-hidden="true"></i> Activar modo party karaoke (subtítulo sincronizado por palabras)</span>
             </label>
           </div>
           <div id="montageExportReviewExcelField" class="row-field montage-export-review-excel" hidden>
-            <span>Archivo adicional</span>
+            <span class="montage-export-field-title"><i class="fas fa-file-excel" aria-hidden="true"></i> Archivo adicional</span>
             <label class="montage-export-check">
               <input id="montageExportIncludeReviewExcel" type="checkbox" checked>
-              <span>Descargar Excel de revisión con una fila por escena</span>
+              <span><i class="fas fa-file-excel" aria-hidden="true"></i> Descargar Excel de revisión con una fila por escena</span>
             </label>
             <small>Incluye la tabla del guión y una columna final llamada “Cambios sugeridos”.</small>
           </div>
@@ -2882,6 +2914,8 @@
             </div>
           </div>
         </section>
+      </div>
+      <div class="montage-export-actions">
         <div id="montageExportStatusBox" class="montage-export-status" aria-live="polite" data-tone="neutral">
           <div class="montage-export-status-row">
             <div class="montage-export-spinner" aria-hidden="true"></div>
@@ -2892,8 +2926,6 @@
             <div id="montageExportProgressBar" class="montage-export-progress-bar"></div>
           </div>
         </div>
-      </div>
-      <div class="montage-export-actions">
         <button id="cancelMontageExportBtn"
           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
           type="button">Cancelar</button>
@@ -2901,10 +2933,18 @@
           <i class="fas fa-play-circle" aria-hidden="true"></i>
           <span>Continuar exportación</span>
         </button>
-        <select id="montageExportDownloadBtn" class="dialogue-video-directive-action is-primary montage-export-download-select"
-          aria-label="Exportaciones MP4 descargadas" hidden>
-          <option value="">Seleccionar exportación</option>
-        </select>
+        <div id="montageExportDownloadGroup" class="montage-export-download-group" hidden>
+          <button id="montageExportDownloadBtn" class="row-icon-btn montage-export-action-btn" type="button"
+            title="Ver videos exportados" aria-label="Ver videos exportados" aria-expanded="false"
+            aria-controls="montageExportDownloadMenu">
+            <i class="fas fa-film" aria-hidden="true"></i>
+          </button>
+          <button id="montageExportPlayLatestBtn" class="row-icon-btn montage-export-action-btn is-play" type="button"
+            title="Reproducir el video exportado más reciente" aria-label="Reproducir el video exportado más reciente">
+            <i class="fas fa-play" aria-hidden="true"></i>
+          </button>
+          <div id="montageExportDownloadMenu" class="montage-export-download-menu" aria-label="Videos exportados" hidden></div>
+        </div>
         <button id="confirmMontageExportBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
           type="button">
           <i class="fas fa-file-export" aria-hidden="true"></i>
@@ -2958,9 +2998,14 @@
   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="vendor/gsap/gsap.min.js"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-media-editor.js?rev=2026-10-02.player-composition-2"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-image-warp.js?rev=2026-10-02.player-composition-2"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-scene-image-layers.js?rev=2026-10-05.layers-rail-in-panel-1"></script>
   <!-- PodcasterPlaybackController se carga desde home.js como módulo importado -->
-  <script data-cache-src="podcaster/podcaster-stop-motion.js"></script>
-  <script type="module" data-cache-src="podcaster/podcaster-overlay-cards.js"></script>
+  <script data-cache-src="podcaster/podcaster-stop-motion.js?v=2026-10-04.stop-motion-chip-1"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-overlay-cards.js?rev=2026-10-02.player-composition-2"></script>
   <script>
     (() => {
       const button = document.getElementById("toggleVideoPlayerThemeBtn");
@@ -3034,7 +3079,7 @@
       });
     })();
   </script>
-  <script type="module" data-cache-src="js/home.js"></script>
+  <script type="module" data-cache-src="js/home.js?rev=2026-10-05.assets-direct-image-1"></script>
   <div id="sceneReferenceViewer" class="scene-reference-viewer" role="dialog" aria-modal="true"
     aria-labelledby="sceneReferenceViewerTitle" aria-hidden="true">
     <div class="scene-reference-viewer-card">

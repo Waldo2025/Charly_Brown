@@ -41,6 +41,81 @@ function formatSceneNumberList(values = [], limit = 8) {
   return sorted.length > limit ? `${visible}…` : visible;
 }
 
+const menuPortalRegistry = new WeakMap();
+
+// El menú portalizado sale del scope de #podcastVideoShell; se copian las variables del tema activo.
+const MENU_PORTAL_THEME_VARIABLES = [
+  "--snoopy-canvas", "--snoopy-surface", "--snoopy-surface-subtle", "--snoopy-surface-elevated",
+  "--snoopy-control", "--snoopy-control-hover", "--snoopy-text", "--snoopy-text-muted",
+  "--snoopy-border", "--snoopy-border-strong", "--snoopy-accent", "--snoopy-accent-soft", "--snoopy-shadow",
+  "--pod-surface", "--pod-surface-2", "--pod-surface-3", "--pod-text", "--pod-muted",
+  "--pod-border", "--pod-border-strong", "--pod-accent", "--pod-accent-soft", "--pod-shadow", "--pod-shadow-lg"
+];
+
+function syncMenuPortalTheme(menu, button) {
+  const scopedStyles = window.getComputedStyle(button);
+  MENU_PORTAL_THEME_VARIABLES.forEach((name) => {
+    const value = String(scopedStyles.getPropertyValue(name) || "").trim();
+    if (value) menu.style.setProperty(name, value);
+  });
+}
+
+function clearMenuPortalTheme(menu) {
+  MENU_PORTAL_THEME_VARIABLES.forEach((name) => menu.style.removeProperty(name));
+}
+
+function placeMenuPortal(menu, button) {
+  const rect = button.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.right - menuRect.width;
+  left = Math.max(8, Math.min(left, window.innerWidth - menuRect.width - 8));
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - menuRect.height - 6);
+  }
+  menu.style.position = "fixed";
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+  menu.style.right = "auto";
+}
+
+// Teleporta el menú a document.body para sacarlo de los contextos de apilamiento del editor.
+export function setMenuPortalOpen(menu, button, open = false) {
+  if (!menu || !button) return false;
+  if (open) {
+    if (!menuPortalRegistry.has(menu)) {
+      const reposition = () => {
+        if (!menu.hidden) placeMenuPortal(menu, button);
+      };
+      menuPortalRegistry.set(menu, {
+        parent: menu.parentElement,
+        nextSibling: menu.nextSibling,
+        reposition
+      });
+      document.body.appendChild(menu);
+      window.addEventListener("scroll", reposition, true);
+      window.addEventListener("resize", reposition);
+    }
+    menu.hidden = false;
+    syncMenuPortalTheme(menu, button);
+    placeMenuPortal(menu, button);
+    return true;
+  }
+  menu.hidden = true;
+  const entry = menuPortalRegistry.get(menu);
+  if (!entry) return true;
+  window.removeEventListener("scroll", entry.reposition, true);
+  window.removeEventListener("resize", entry.reposition);
+  menu.style.position = "";
+  menu.style.top = "";
+  menu.style.left = "";
+  menu.style.right = "";
+  clearMenuPortalTheme(menu);
+  if (entry.parent) entry.parent.insertBefore(menu, entry.nextSibling || null);
+  menuPortalRegistry.delete(menu);
+  return true;
+}
+
 export function validateRowReferenceFolderFiles(files = [], rows = []) {
   const sceneRows = Array.isArray(rows) ? rows : [];
   const sceneCount = sceneRows.length;
@@ -205,6 +280,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   const nowIso = () => deps.nowIso?.() || new Date().toISOString();
   let pendingRowReferenceSelectionRowId = "";
   let bulkRowReferenceSelectionBusy = false;
+  let pendingRowReferenceFolderApplyAsScene = false;
   const pendingRowReferenceUploads = new Map();
 
   function buildReferenceMediaCacheKey(scope = "", id = "", mediaKind = "image") {
@@ -1334,7 +1410,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     button.setAttribute("aria-busy", bulkRowReferenceSelectionBusy ? "true" : "false");
   }
 
-  function promptRowReferenceFolderSelection() {
+  function promptRowReferenceFolderSelection(options = {}) {
     const els = getElements();
     const rows = Array.isArray(getActiveSession()?.script?.rows) ? getActiveSession().script.rows : [];
     if (bulkRowReferenceSelectionBusy || !els.rowReferenceFolderInput) return false;
@@ -1343,6 +1419,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       window.setGenerationStatus?.("No hay escenas", "");
       return false;
     }
+    pendingRowReferenceFolderApplyAsScene = options.applyAsScene === true;
     els.rowReferenceFolderInput.value = "";
     els.rowReferenceFolderInput.click();
     return true;
@@ -1398,12 +1475,51 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
         );
         window.setGenerationStatus?.("Referencias locales guardadas; subida incompleta", "");
       }
+      if (pendingRowReferenceFolderApplyAsScene) {
+        pendingRowReferenceFolderApplyAsScene = false;
+        const applyReferenceAsScene = window.PodcasterSceneMedia?.applyReference;
+        if (typeof applyReferenceAsScene !== "function") {
+          window.addChatMessage?.("system", "No se pudo aplicar las referencias como escenas: API no disponible.");
+        } else {
+          let sceneApplied = 0;
+          let sceneFailed = 0;
+          for (const item of prepared) {
+            if (expectedSessionId !== String(getActiveSession()?.id || "").trim()) {
+              window.addChatMessage?.("system", "La sesión cambió mientras se aplicaban las referencias. Se detuvo la aplicación.");
+              break;
+            }
+            window.setGenerationStatus?.(
+              `Aplicando escena ${item.sceneNumber} de ${prepared.length}…`,
+              "is-busy"
+            );
+            await yieldForReferenceProcessing();
+            try {
+              const saved = await applyReferenceAsScene(getActiveSession(), item.rowId, item.reference);
+              if (saved?.status === "applied") sceneApplied += 1;
+              else sceneFailed += 1;
+            } catch (_) {
+              sceneFailed += 1;
+            }
+          }
+          deps.renderPodcastVideoShell?.(getActiveSession());
+          if (sceneApplied) {
+            window.setGenerationStatus?.(
+              `${sceneApplied} escenas usan su imagen de referencia${sceneFailed ? `; ${sceneFailed} no se pudieron aplicar` : ""}`,
+              "is-live"
+            );
+          } else {
+            window.addChatMessage?.("system", "No se pudo aplicar ninguna referencia como imagen de escena.");
+            window.setGenerationStatus?.("Error al aplicar referencias como escenas", "");
+          }
+        }
+      }
       return { ...applied, uploadResult };
     } catch (error) {
       window.addChatMessage?.("system", `No se aplicó la carpeta de referencias (${error.message}).`);
       window.setGenerationStatus?.("Error al cargar referencias", "");
       return { ok: false, reason: "processing-failed", error };
     } finally {
+      pendingRowReferenceFolderApplyAsScene = false;
       setBulkRowReferenceSelectionBusy(false);
     }
   }
@@ -1420,9 +1536,40 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     const els = getElements();
     if (els.attachAllRowReferenceImagesBtn && !els.attachAllRowReferenceImagesBtn.dataset.mediaReferenceFolderBound) {
       els.attachAllRowReferenceImagesBtn.dataset.mediaReferenceFolderBound = "1";
-      els.attachAllRowReferenceImagesBtn.addEventListener("click", () => {
-        promptRowReferenceFolderSelection();
-      });
+      const menu = document.getElementById("attachAllReferenceMenu");
+      const setMenuOpen = (open) => {
+        if (!menu) return;
+        setMenuPortalOpen(menu, els.attachAllRowReferenceImagesBtn, open);
+        els.attachAllRowReferenceImagesBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+      if (menu) {
+        els.attachAllRowReferenceImagesBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setMenuOpen(Boolean(menu.hidden));
+        });
+        menu.addEventListener("click", (event) => {
+          const option = event.target.closest("[data-action]");
+          if (!option) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setMenuOpen(false);
+          if (option.dataset.action === "attach-all-reference-from-folder") {
+            promptRowReferenceFolderSelection({ applyAsScene: false });
+          } else if (option.dataset.action === "apply-all-references-from-folder") {
+            promptRowReferenceFolderSelection({ applyAsScene: true });
+          }
+        });
+        document.addEventListener("click", (event) => {
+          if (event.target.closest(".attach-all-reference-menu-wrap")) return;
+          if (menu.contains(event.target)) return;
+          setMenuOpen(false);
+        });
+      } else {
+        els.attachAllRowReferenceImagesBtn.addEventListener("click", () => {
+          promptRowReferenceFolderSelection();
+        });
+      }
     }
     if (els.rowReferenceFolderInput && !els.rowReferenceFolderInput.dataset.mediaReferenceBound) {
       els.rowReferenceFolderInput.dataset.mediaReferenceBound = "1";

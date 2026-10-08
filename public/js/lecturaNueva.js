@@ -2762,9 +2762,6 @@ function initLecturaNuevaDOM() {
               <button class="lectura-action-btn action-ver btn-ver" data-id="${id}" title="Ver lectura" aria-label="Ver lectura">
                 <i class="far fa-eye"></i>
               </button>
-              <button class="lectura-action-btn action-live btn-live-read" data-id="${id}" title="Leer con Gemini Flash Live" aria-label="Leer con Gemini Flash Live" data-coleccion="lecturasNuevas">
-                <i class="fas fa-volume-up"></i>
-              </button>
               <button class="lectura-action-btn action-editar btn-editar" data-id="${id}" title="Editar lectura" aria-label="Editar lectura">
                 <i class="fas fa-pen"></i>
               </button>

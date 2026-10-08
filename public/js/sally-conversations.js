@@ -8,6 +8,7 @@ export function messagesFor(history, id) {
 }
 export function conversationsFrom(history) {
   const result = new Map();
+  result.set(legacyId("unified"),{id:legacyId("unified"),thread:"unified",name:"Conversación MCP",archived:false});
   for (const thread of ["model","target"]) result.set(legacyId(thread), {id:legacyId(thread),thread,name:`Conversación anterior · ${thread === "model" ? "Modelo" : "Destino"}`,archived:false});
   for (const entry of [...history].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))) {
     if(entry.kind !== "conversation") continue;

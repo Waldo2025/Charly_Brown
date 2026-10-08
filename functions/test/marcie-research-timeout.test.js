@@ -10,7 +10,8 @@ test("research has time to complete and returns a CORS-safe error before the pla
   assert.ok(match, "geminiApi timeout must be declared");
   const platformTimeoutMs = Number(match[1]) * 1000;
   assert.equal(platformTimeoutMs, 540_000);
-  assert.equal(RESEARCH_DEADLINE_MS, 510_000);
+  assert.equal(RESEARCH_DEADLINE_MS, 210_000);
+  assert.ok(RESEARCH_DEADLINE_MS < 240_000, "server aborts before the browser retries");
   assert.ok(RESEARCH_DEADLINE_MS < platformTimeoutMs);
 });
 

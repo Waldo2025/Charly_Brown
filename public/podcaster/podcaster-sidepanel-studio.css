@@ -664,6 +664,12 @@
   animation: podcaster-control-sheen 4.4s ease-in-out infinite;
 }
 
+.chat-stage-header-actions :is(button, summary)::before,
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button::before {
+  content: none !important;
+  animation: none !important;
+}
+
 .podcaster-app :is(
   #togglePodcastVideoBtn,
   #toggleSnoopyCreatorThemeBtn,
@@ -751,10 +757,8 @@
 .chat-stage-header-actions :is(button, summary) > i,
 #podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button > i {
   color: currentColor !important;
-  text-shadow:
-    0 -1px 0 rgba(255, 255, 255, .88),
-    0 1px 1px rgba(7, 12, 24, .32);
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, .42));
+  text-shadow: none;
+  filter: none;
 }
 
 @container podcaster-sidepanel (max-width: 239px) {

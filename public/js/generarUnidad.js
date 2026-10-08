@@ -656,167 +656,6 @@ function _unidadSetGraphicRenderSettingsForCategory(categoria = "", settings = {
   return next;
 }
 
-async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = "") {
-  await ensureRuntimeConfigLoaded();
-  if (shouldShortCircuitGeminiBackendFetch()) {
-    throw new Error("BACKEND_GEMINI_OFFLINE");
-  }
-  const user = auth.currentUser;
-  const token = user ? await user.getIdToken() : "";
-  const headers = {
-    "Content-Type": "application/json"
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const candidateUrls = [];
-  const primaryUrl = buildApiUrl("/api/gemini/live-token");
-  if (primaryUrl) candidateUrls.push(primaryUrl);
-  const host = String(window.location.hostname || "").toLowerCase();
-  const isLocalHost = host === "127.0.0.1" || host === "localhost";
-  if (isLocalHost) {
-    if (!candidateUrls.includes("http://127.0.0.1:8787/api/gemini/live-token")) {
-      candidateUrls.unshift("http://127.0.0.1:8787/api/gemini/live-token");
-    }
-    if (!candidateUrls.includes("http://localhost:8787/api/gemini/live-token")) {
-      candidateUrls.push("http://localhost:8787/api/gemini/live-token");
-    }
-  }
-
-  let response = null;
-  let lastError = null;
-  const bodyPayload = JSON.stringify({
-    model: normalizeGeminiModel(modelLive || GEMINI_LIVE_MODEL_DEFAULT),
-    systemInstruction: String(systemInstruction || "").trim(),
-    voiceName: String(charlyTtsVoiceName || "Aoede").trim() || "Aoede"
-  });
-
-  for (const url of candidateUrls) {
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: bodyPayload
-      });
-      if (response.ok) break;
-      if (response.status === 405 || response.status === 404) {
-        continue;
-      }
-      break;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  if (!response && lastError) {
-    markGeminiBackendUnavailable("live_token_unreachable");
-    const msg = String(lastError?.message || "").toLowerCase();
-    if (isLocalHost && (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("err_connection_refused"))) {
-      throw new Error("BACKEND_GEMINI_OFFLINE");
-    }
-    throw lastError;
-  }
-  if (!response) {
-    throw new Error("API_UNAVAILABLE");
-  }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    if (response.status === 404) {
-      geminiLiveDisableEphemeralToken = true;
-      try { sessionStorage.setItem("cb_disable_gemini_ephemeral_token", "1"); } catch (_) {}
-      throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
-    }
-    throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
-  }
-  clearGeminiBackendUnavailable();
-  return data;
-}
-
-function _createGeminiLiveProxyAdapter(tokenJson = {}) {
-  return {
-    live: {
-      connect: ({ callbacks = {} } = {}) => new Promise((resolve, reject) => {
-        const websocketUrl = String(tokenJson?.websocketUrl || "").trim();
-        const ticket = String(tokenJson?.ticket || "").trim();
-        if (!websocketUrl || !ticket) return reject(new Error("El backend Live no devolvió websocketUrl y ticket."));
-        const target = new URL(websocketUrl, window.location.href);
-        target.searchParams.set("ticket", ticket);
-        const socket = new WebSocket(target.toString());
-        let opened = false;
-        let ready = false;
-        let readyTimeout = setTimeout(() => {
-          if (!ready) {
-            const err = new Error("Timeout esperando confirmación del proxy Live.");
-            callbacks.onerror?.(err);
-            reject(err);
-            try { socket.close(); } catch (_) {}
-          }
-        }, 15000);
-
-        const session = {
-          sendClientContent(payload = {}) {
-            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
-            socket.send(JSON.stringify({ type: "clientContent", turns: payload.turns || [], turnComplete: payload.turnComplete !== false }));
-          },
-          sendRealtimeInput(payload = {}) {
-            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
-            socket.send(JSON.stringify({ type: "realtimeInput", audio: payload.audio || {} }));
-          },
-          sendToolResponse(payload = {}) {
-            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
-            socket.send(JSON.stringify({ type: "toolResponse", functionResponses: payload.functionResponses || [] }));
-          },
-          close() {
-            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "close" }));
-            socket.close(1000, "client_close");
-          }
-        };
-        socket.addEventListener("open", () => {
-          opened = true;
-        });
-        socket.addEventListener("message", (event) => {
-          let envelope = null;
-          try { envelope = JSON.parse(String(event.data || "{}")); } catch (_) { return; }
-          if (envelope?.type === "ready") {
-            if (!ready) {
-              ready = true;
-              clearTimeout(readyTimeout);
-              try { callbacks.onopen?.(); } catch (_) {}
-              resolve(session);
-            }
-            return;
-          }
-          if (envelope?.type === "serverContent") callbacks.onmessage?.(envelope.message || {});
-          if (envelope?.type === "error") {
-            const err = new Error(String(envelope.message || envelope.code || "Live proxy error"));
-            callbacks.onerror?.(err);
-            if (!ready) {
-              clearTimeout(readyTimeout);
-              reject(err);
-            }
-          }
-        });
-        socket.addEventListener("error", () => {
-          const error = new Error("No se pudo conectar con Gemini Live proxy.");
-          callbacks.onerror?.(error);
-          if (!ready) {
-            clearTimeout(readyTimeout);
-            reject(error);
-          }
-        });
-        socket.addEventListener("close", (event) => {
-          clearTimeout(readyTimeout);
-          callbacks.onclose?.(event);
-        });
-      })
-    }
-  };
-}
-
-async function requestGeminiLiveTokenDirect(modelLive = "", systemInstruction = "") {
-  void modelLive;
-  void systemInstruction;
-  throw new Error("Gemini directo en frontend está deshabilitado.");
-}
-
 function logVisual(msg) {
   if (typeof window.logVisual === "function") {
     window.logVisual(msg);
@@ -4572,7 +4411,6 @@ window.cbUnidadDock = {
 
 const NO_PARAMETRO_MSG = "No se ha encontrado tal parámetro, pero puedes elegirlo manualemente";
 const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-const GEMINI_LIVE_MODEL_DEFAULT = "gemini-2.5-flash-native-audio-preview-12-2025";
 const GEMINI_TTS_MODEL_DEFAULT = "gemini-2.5-pro-preview-tts";
 const THEME_SETTINGS_STORAGE_KEY = "cb_theme_settings_v1";
 const VOICE_COMMANDS_STORAGE_KEY = "cb_voice_command_settings_v1";
@@ -4650,7 +4488,6 @@ let charlyDbContextCache = { ts: 0, key: "", text: "" };
 let charlyDbContextBlockedUntil = 0;
 let charlyAwake = true;
 const charlyWakeWordAlwaysOn = true;
-const GEMINI_LIVE_VOICE_ONLY = true;
 const CHARLY_BREVITY_POLICY = "Responde en español con máximo 1 frase corta (ideal 6-16 palabras). Evita relleno y explicaciones largas. Solo amplía si el usuario pide detalle explícitamente.";
 
 function _releaseUnidadMicrophoneForExternalOwner(reason = "external_request") {
@@ -4791,7 +4628,6 @@ const VOICE_COMMANDS_ALWAYS_ON = false;
 const GEMINI_TTS_MIN_INTERVAL_MS = 1800;
 const GEMINI_TTS_COOLDOWN_BASE_MS = 12000;
 const GEMINI_TTS_COOLDOWN_MAX_MS = 90000;
-const GEMINI_LIVE_REALTIME_MIN_INTERVAL_MS = 120;
 
 const SALUDOS_UNIDAD_PRIMERA = [
   "Hola {nombre}, listo para ayudarte. ¿Qué deseas hacer primero?",
@@ -9870,69 +9706,20 @@ function _notifyAgentSpeechPlaybackError(token = 0, err = null) {
 async function hablarAgenteUnidad(texto = "", opciones = {}) {
   const textoPlano = String(texto || "").trim();
   if (!textoPlano) return false;
-  const {
-    cancelarPrevio = true,
-    withMic = null,
-    forceRestart = null,
-    onPlaybackStart = null,
-    onPlaybackEnd = null,
-    onPlaybackError = null
-  } = opciones || {};
-  const persona = activeUnidadAgentPersona;
-  const personaNombre = String(persona?.nombre || "Charly").trim() || "Charly";
-  const playbackToken = ++agentSpeechPlaybackToken;
-  agentSpeechPlaybackOnEnd = typeof onPlaybackEnd === "function" ? onPlaybackEnd : null;
-  agentSpeechPlaybackOnError = typeof onPlaybackError === "function" ? onPlaybackError : null;
-  _clearAgentSpeechPlaybackTimer();
-  _marcarFraseHabladaUnidad(textoPlano);
-  _actualizarVozCharlyDesdeThemeSettings();
-  unidadVoiceShouldRun = true;
-  const agenteExclusivo = _agenteUnidadEnModoExclusivo();
-  const shouldUseMic = typeof withMic === "boolean" ? withMic : !agenteExclusivo;
-  const shouldForceRestart = typeof forceRestart === "boolean"
-    ? forceRestart
-    : (!agenteExclusivo && shouldUseMic);
-  const modelLive = _resolverModeloGeminiFlashLive();
-  const desiredConfigKey = _buildGeminiLiveSessionConfigKey(modelLive);
-
-  // Si la sesión Live ya está abierta pero con otra voz/persona, se debe reiniciar
-  // antes de enviar el texto para que respete la voz configurada del agente activo.
-  if (geminiLiveSessionUnidad && geminiLiveIsOpen && geminiLiveSessionConfigKey !== desiredConfigKey) {
-    try {
-      await iniciarGeminiLiveUnidad({ withMic: shouldUseMic, forceRestart: true });
-    } catch (err) {
-      logVisual(`⚠️ No se pudo reconfigurar Live con la voz del agente: ${err?.message || "sin detalle"}`);
-    }
-  }
-
-  if (geminiLiveSessionUnidad && geminiLiveIsOpen) {
-    if (typeof onPlaybackStart === "function") {
-      try { onPlaybackStart(); } catch (_) {}
-    }
-    _hablarCentralizadoLive(textoPlano, { cancelarPrevio });
-    return true;
-  }
-  try {
-    if (typeof onPlaybackStart === "function") {
-      try { onPlaybackStart(); } catch (_) {}
-    }
-    _encolarHablaLive(textoPlano, { cancelarPrevio });
-    iniciarGeminiLiveUnidad({
-      withMic: shouldUseMic,
-      forceRestart: shouldForceRestart
-    }).catch((err) => {
-      if (String(err?.message || "").includes("LIVE_TOKEN_ENDPOINT_NOT_FOUND")) {
-        _hablarUnidadLocalRapida(textoPlano, { cancelarPrevio });
-      }
-      _notifyAgentSpeechPlaybackError(playbackToken, err);
-      logVisual(`⚠️ No se pudo iniciar Live para ${personaNombre}: ${err?.message || "sin detalle"}`);
-    });
-    return true;
-  } catch (err) {
-    _notifyAgentSpeechPlaybackError(playbackToken, err);
-    logVisual(`⚠️ No se pudo hablar como ${personaNombre}: ${err?.message || "sin detalle"}`);
+  const { cancelarPrevio = true, onPlaybackStart, onPlaybackEnd, onPlaybackError } = opciones || {};
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    onPlaybackError?.(new Error("Voz del navegador no disponible"));
     return false;
   }
+  if (cancelarPrevio) window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(textoPlano);
+  utterance.lang = charlyVoiceLocale || CHARLY_VOICE_LOCALE_DEFAULT;
+  utterance.voice = _resolverVozNaturalUnidad();
+  utterance.onstart = () => onPlaybackStart?.();
+  utterance.onend = () => onPlaybackEnd?.();
+  utterance.onerror = (event) => onPlaybackError?.(event);
+  window.speechSynthesis.speak(utterance);
+  return true;
 }
 
 function _setAgentExclusiveVoiceMode(active = false) {
@@ -13226,9 +13013,6 @@ function _lecturasAgentRenderCurrentSlide() {
     </div>
   ` : "";
   refs.imageActions.innerHTML = `
-    <button type="button" class="lecturas-asc-agent-read ${autoReadActive ? "is-active" : ""}" data-action="auto-read" aria-label="${autoReadActive ? "Pausar lectura con Gemini Live" : "Leer con Gemini Live"}">
-      <i class="fas ${autoReadActive ? "fa-pause" : "fa-play"}" aria-hidden="true"></i>
-    </button>
     <span class="lecturas-asc-agent-regenerate-wrap" style="position:relative; display:inline-flex;">
       <button type="button" class="lecturas-asc-agent-regenerate" data-action="toggle-regenerate-menu" data-retry-index="${lecturasAgentViewerState.currentIndex}" aria-label="${isCover ? "Opciones de regenerar portada" : "Opciones de regenerar imagen"}" ${disabled}>
         <i class="fas fa-redo-alt" aria-hidden="true"></i>
@@ -14687,23 +14471,12 @@ function hablarUnidad(texto = "", opciones = {}) {
     _hablarUnidadLocalRapida(textoPlano, { cancelarPrevio });
     return;
   }
-  if (GEMINI_LIVE_VOICE_ONLY) {
-    if (preferLive) {
-      _hablarCentralizadoLive(textoPlano, { cancelarPrevio });
-      return;
-    }
+  if (!preferLive) {
     const okTts = _hablarConGeminiTts(textoPlano, {
       cancelarPrevio,
-      onFail: () => {
-        const okLive = _hablarConGeminiLive(textoPlano, { cancelarPrevio });
-        if (!okLive) logVisual("🔇 Gemini TTS/Live voz no disponible para este mensaje.");
-      }
+      onFail: () => _hablarUnidadLocalRapida(textoPlano, { cancelarPrevio })
     });
     if (okTts) return;
-    const okLive = _hablarConGeminiLive(textoPlano, { cancelarPrevio });
-    if (okLive) return;
-    logVisual("🔇 Gemini TTS/Live voz no disponible para este mensaje.");
-    return;
   }
   if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
   _marcarFraseHabladaUnidad(textoPlano);
@@ -17437,522 +17210,16 @@ async function detenerGeminiLiveUnidad() {
   }
 }
 
-function _buildGeminiLiveSessionConfigKey(modelLive = "") {
-  return JSON.stringify({
-    model: String(modelLive || ""),
-    persona: String(activeUnidadAgentPersona?.id || "charly"),
-    voice: String(charlyTtsVoiceName || ""),
-    mood: String(charlyVoiceMood || ""),
-    locale: String(charlyVoiceLocale || ""),
-    speed: Number(charlyVoiceSpeed || 1),
-    pitch: Number(charlyVoicePitch || 1)
-  });
-}
 
-async function _asegurarCapturaMicGeminiLive(sessionEpoch = 0) {
-  if (geminiLiveMicStream && geminiLiveInputCtx && geminiLiveProcessorNode && geminiLiveSourceNode) {
-    geminiLiveMicUploadPaused = false;
-    if (_agenteUnidadEnModoExclusivo()) _asegurarControladorAgenteUnidad().setMicState(true, "reuse-stream");
-    return true;
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Este navegador no soporta captura de micrófono.");
-  }
 
-  geminiLiveMicStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      sampleRate: 16000,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
 
-  geminiLiveInputCtx = new AudioContext();
-  geminiLiveSourceNode = geminiLiveInputCtx.createMediaStreamSource(geminiLiveMicStream);
-  geminiLiveProcessorNode = await _crearNodoCapturaMicUnidad(geminiLiveInputCtx);
-  const liveInputCtx = geminiLiveInputCtx;
-  const inputSampleRate = Number(liveInputCtx?.sampleRate) || 48000;
 
-  if (geminiLiveProcessorNode?.port) {
-    geminiLiveProcessorNode.port.onmessage = (event) => {
-      if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-      if (!geminiLiveSessionUnidad || !geminiLiveIsOpen || !unidadVoiceShouldRun || !liveInputCtx || liveInputCtx.state === "closed") return;
-      if (geminiLiveMicUploadPaused) return;
-      if (Date.now() < Number(geminiLiveInputCircuitOpenUntil || 0)) return;
-      const now = Date.now();
-      if ((now - Number(geminiLiveLastRealtimeSendAt || 0)) < GEMINI_LIVE_REALTIME_MIN_INTERVAL_MS) return;
-      const input = event?.data instanceof Float32Array ? event.data : new Float32Array(0);
-      if (!input.length) return;
-      const down = _downsampleFloat32(input, inputSampleRate, 16000);
-      if (!down.length) return;
-      const ok = _safeSendRealtimeInput({
-        audio: {
-          data: _float32ToPcm16Base64(down),
-          mimeType: "audio/pcm;rate=16000"
-        }
-      }, "ws_closed_realtime_port");
-      if (ok) geminiLiveLastRealtimeSendAt = now;
-    };
-    geminiLiveSourceNode.connect(geminiLiveProcessorNode);
-  } else {
-    geminiLiveProcessorNode.onaudioprocess = (event) => {
-      if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-      if (!geminiLiveSessionUnidad || !geminiLiveIsOpen || !unidadVoiceShouldRun || !liveInputCtx || liveInputCtx.state === "closed") return;
-      if (geminiLiveMicUploadPaused) return;
-      if (Date.now() < Number(geminiLiveInputCircuitOpenUntil || 0)) return;
-      const now = Date.now();
-      if ((now - Number(geminiLiveLastRealtimeSendAt || 0)) < GEMINI_LIVE_REALTIME_MIN_INTERVAL_MS) return;
-      const input = event.inputBuffer.getChannelData(0);
-      const down = _downsampleFloat32(input, inputSampleRate, 16000);
-      if (!down.length) return;
-      const ok = _safeSendRealtimeInput({
-        audio: {
-          data: _float32ToPcm16Base64(down),
-          mimeType: "audio/pcm;rate=16000"
-        }
-      }, "ws_closed_realtime_onaudio");
-      if (ok) geminiLiveLastRealtimeSendAt = now;
-    };
-    geminiLiveSourceNode.connect(geminiLiveProcessorNode);
-    geminiLiveProcessorNode.connect(geminiLiveInputCtx.destination);
-  }
-  geminiLiveMicUploadPaused = false;
-  logVisual("🎤 Micrófono Live activo");
-  if (_agenteUnidadEnModoExclusivo()) _asegurarControladorAgenteUnidad().setMicState(true, "capture-ready");
-  return true;
-}
 
-function _normalizarModeloGeminiLive(modelo = "") {
-  return String(modelo || "")
-    .replace(/^models\//i, "")
-    .replace(":generateContent", "")
-    .replace(":streamGenerateContent", "")
-    .trim()
-    .toLowerCase();
-}
 
-function _resolverModeloGeminiFlashLive() {
-  const modeloSelect = _normalizarModeloGeminiLive(getSelectedModel() || "");
-  // La activación por wake-word debe usar siempre una variante Flash Live.
-  if (modeloSelect && /(flash-live|native-audio-preview)/.test(modeloSelect)) {
-    return modeloSelect;
-  }
-  return GEMINI_LIVE_MODEL_DEFAULT;
-}
 
-async function iniciarGeminiLiveUnidad(options = {}) {
-  const withMic = options?.withMic !== false;
-  const forceRestart = options?.forceRestart === true;
-  if (geminiLiveConnectPromise) return geminiLiveConnectPromise;
-  const sessionEpoch = Date.now();
-  _actualizarVozCharlyDesdeThemeSettings();
-  const modelLive = _resolverModeloGeminiFlashLive();
-  const desiredConfigKey = _buildGeminiLiveSessionConfigKey(modelLive);
 
-  if (!forceRestart && geminiLiveSessionUnidad && geminiLiveIsOpen && geminiLiveSessionConfigKey === desiredConfigKey) {
-    if (withMic) {
-      await _asegurarCapturaMicGeminiLive(geminiLiveActiveSessionEpoch);
-    } else {
-      geminiLiveMicUploadPaused = true;
-    }
-    return geminiLiveSessionUnidad;
-  }
-
-  geminiLiveConnectPromise = (async () => {
-    await detenerGeminiLiveUnidad();
-    geminiLiveActiveSessionEpoch = sessionEpoch;
-    geminiLiveSessionClosing = true;
-    geminiLiveMicUploadPaused = true;
-    geminiLiveInputCircuitOpenUntil = Date.now() + 900;
-    geminiLiveLastRealtimeSendAt = 0;
-
-    let liveConnection = null;
-    try {
-      const tokenJson = await requestGeminiLiveTokenViaApi(
-        modelLive,
-        _buildLiveSystemInstructionActual()
-      );
-      if (!tokenJson?.websocketUrl || !tokenJson?.ticket) throw new Error("Ticket Live vacío.");
-      liveConnection = tokenJson;
-    } catch (err) {
-      throw new Error(`No se pudo crear token efímero para Live API: ${err?.message || "sin detalle"}`);
-    }
-
-    const Modality = { AUDIO: "AUDIO" };
-    const ai = _createGeminiLiveProxyAdapter(liveConnection);
-
-    geminiLiveSessionUnidad = await ai.live.connect({
-      model: modelLive,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: _buildLiveSystemInstructionActual(),
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: charlyTtsVoiceName
-            }
-          }
-        },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        thinkingConfig: {
-          thinkingBudget: 0
-        }
-      },
-      callbacks: {
-        onopen: () => {
-          if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-          geminiLiveIsOpen = true;
-          geminiLiveSessionClosing = false;
-          geminiLiveMicUploadPaused = !withMic;
-          geminiLiveInputCircuitOpenUntil = 0;
-          geminiLiveSessionConfigKey = desiredConfigKey;
-          logVisual(`🎧 Live API conectada (${modelLive})`);
-          if (_agenteUnidadEnModoExclusivo()) {
-            _asegurarControladorAgenteUnidad().setMicState(withMic, withMic ? "live-open" : "live-open-no-mic");
-          }
-          _procesarColaHablaLive();
-        },
-        onmessage: (message) => {
-          if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-          if (message?.serverContent?.interrupted) {
-            _limpiarAudioGeminiProgramado();
-            return;
-          }
-
-          const inputTx = message?.serverContent?.inputTranscription?.text || "";
-          if (inputTx) {
-            lastLiveInputAt = Date.now();
-            logVisual(`🎤 [Live] ${inputTx}`);
-            _programarProcesamientoLiveTranscripcion(inputTx);
-          }
-
-          const outTx = message?.serverContent?.outputTranscription?.text || "";
-          if (outTx) {
-            logVisual(`🗣️ [Gemini] ${outTx}`);
-            _agregarMemoriaConversacion("assistant", outTx);
-            if (charlyLecturaEnCurso && charlyLecturaPlan) {
-              charlyLecturaPlan.chunkHadOutput = true;
-            }
-            if (_agenteUnidadEnModoExclusivo()) {
-              _asegurarControladorAgenteUnidad().updateSpeechText(outTx);
-            }
-          }
-          const permitirAudioSalida = Date.now() <= geminiLiveAllowOutputUntil;
-
-          const parts = message?.serverContent?.modelTurn?.parts || [];
-          parts.forEach((part) => {
-            const data = part?.inlineData?.data || "";
-            if (data) {
-              if (charlyLecturaEnCurso && charlyLecturaPlan) {
-                charlyLecturaPlan.chunkHadOutput = true;
-              }
-              if (permitirAudioSalida) _reproducirPcmGemini(data);
-            }
-          });
-          if (message?.serverContent?.turnComplete === true) {
-            _programarCierreHablaAgenteLive("turn-complete");
-          }
-          if (charlyLecturaEnCurso && message?.serverContent?.turnComplete === true) {
-            const plan = charlyLecturaPlan;
-            const elapsed = Date.now() - Number(plan?.lastChunkSentAt || 0);
-            const hadOutput = !!plan?.chunkHadOutput;
-            if (hadOutput || elapsed > 1800) {
-              _avanzarLecturaCompletaCharly("turnComplete");
-            } else {
-              logVisual("ℹ️ turnComplete sin audio del bloque; espero timer para avanzar.");
-            }
-          }
-        },
-        onerror: (e) => {
-          if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-          geminiLiveIsOpen = false;
-          geminiLiveSessionClosing = true;
-          geminiLiveMicUploadPaused = true;
-          geminiLiveInputCircuitOpenUntil = Date.now() + 4500;
-          _setIndicadorHablandoCharly(false);
-          if (_agenteUnidadEnModoExclusivo()) _asegurarControladorAgenteUnidad().setMicState(false, "live-error");
-          logVisual(`❌ Live API error: ${e?.message || "desconocido"}`);
-          geminiLiveSessionUnidad = null;
-          geminiLiveSessionConfigKey = "";
-          if (charlyLecturaEnCurso) {
-            _programarReconectarLecturaLive("onerror");
-            return;
-          }
-          _detenerLecturaCompletaCharly();
-          _programarReconectarLive("onerror");
-        },
-        onclose: (e) => {
-          if (geminiLiveActiveSessionEpoch !== sessionEpoch) return;
-          geminiLiveIsOpen = false;
-          geminiLiveSessionClosing = true;
-          geminiLiveMicUploadPaused = true;
-          geminiLiveInputCircuitOpenUntil = Date.now() + 4500;
-          _setIndicadorHablandoCharly(false);
-          if (_agenteUnidadEnModoExclusivo()) _asegurarControladorAgenteUnidad().setMicState(false, "live-close");
-          logVisual(`🔌 Live API cerrada: ${e?.reason || "sin detalle"}`);
-          geminiLiveSessionUnidad = null;
-          geminiLiveSessionConfigKey = "";
-          if (charlyLecturaEnCurso) {
-            _programarReconectarLecturaLive("onclose");
-            return;
-          }
-          _detenerLecturaCompletaCharly();
-          _programarReconectarLive("onclose");
-        }
-      }
-    });
-
-    if (withMic) {
-      await _asegurarCapturaMicGeminiLive(sessionEpoch);
-    }
-    return geminiLiveSessionUnidad;
-  })();
-
-  try {
-    return await geminiLiveConnectPromise;
-  } finally {
-    geminiLiveConnectPromise = null;
-  }
-}
-
-function actualizarEstadoBotonVozUnidad() {
-  if (!btnVozUnidad) return;
-  btnVozUnidad.dataset.active = unidadVoiceShouldRun ? "1" : "0";
-  btnVozUnidad.innerHTML = unidadVoiceShouldRun
-    ? '<i class="fa-solid fa-microphone-slash"></i><span class="unidad-btn-text"> Desactivar voz</span>'
-    : '<i class="fa-solid fa-microphone"></i><span class="unidad-btn-text"> Activar voz</span>';
-}
-
-function _programarReintentoVozPorInteraccionUsuario() {
-  if (unidadVoiceAwaitingUserGestureRetry) return;
-  unidadVoiceAwaitingUserGestureRetry = true;
-  const eventos = ["pointerdown", "keydown", "touchstart"];
-  const handler = () => {
-    eventos.forEach((evt) => window.removeEventListener(evt, handler, true));
-    unidadVoiceAwaitingUserGestureRetry = false;
-    if (!_vozGlobalHabilitadaPorConfiguracion() && !agentExclusiveVoiceMode) return;
-    unidadVoiceShouldRun = true;
-    charlyAwake = true;
-    actualizarEstadoBotonVozUnidad();
-    setTimeout(() => {
-      if (unidadVoiceShouldRun && !unidadVoiceIsListening) {
-        iniciarEscuchaVozUnidad();
-      }
-    }, 60);
-  };
-  eventos.forEach((evt) => window.addEventListener(evt, handler, { capture: true, once: true }));
-  logVisual("🎤 Voz en espera de interacción para activar micrófono.");
-}
-
-function inicializarReconocimientoVozUnidad() {
-  if (!SpeechRecognitionAPI) return null;
-  if (unidadVoiceRecognition) return unidadVoiceRecognition;
-
-  const recognition = new SpeechRecognitionAPI();
-  recognition.lang = "es-MX";
-  recognition.continuous = true;
-  // Permite detectar wake-word antes del resultado final para responder más rápido.
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-
-  recognition.onstart = () => {
-    unidadVoiceIsListening = true;
-    unidadVoiceStartRetryMs = 650;
-    clearTimeout(unidadVoiceRestartTimer);
-    if (_agenteUnidadEnModoExclusivo()) {
-      _asegurarControladorAgenteUnidad().setMode("listening");
-      _asegurarControladorAgenteUnidad().setMicState(true, "global-shared");
-    }
-    actualizarEstadoBotonVozUnidad();
-  };
-
-  recognition.onend = () => {
-    unidadVoiceIsListening = false;
-    if (_agenteUnidadEnModoExclusivo()) {
-      _asegurarControladorAgenteUnidad().setMicState(false, "global-shared");
-    }
-    actualizarEstadoBotonVozUnidad();
-    const modalAbierto = modalUnidad?.style.display === "block";
-    const shouldKeepListening = unidadVoiceShouldRun
-      && (agentExclusiveVoiceMode || modalAbierto || charlyWakeWordAlwaysOn);
-    if (!shouldKeepListening) return;
-    clearTimeout(unidadVoiceRestartTimer);
-    unidadVoiceRestartTimer = setTimeout(() => {
-      if (unidadVoiceShouldRun && !unidadVoiceIsListening) iniciarEscuchaVozUnidad();
-    }, 350);
-  };
-
-  recognition.onerror = (event) => {
-    const err = event?.error || "desconocido";
-    if (_agenteUnidadEnModoExclusivo()) {
-      _asegurarControladorAgenteUnidad().setMicState(false, "global-shared");
-    }
-    if (err === "not-allowed" || err === "service-not-allowed") {
-      // Algunos navegadores bloquean start() fuera de interacción de usuario.
-      // Mantener comandos activos y reintentar en el próximo gesto.
-      unidadVoiceShouldRun = true;
-      actualizarEstadoBotonVozUnidad();
-      _programarReintentoVozPorInteraccionUsuario();
-      return;
-    }
-    if (err !== "no-speech" && err !== "aborted") {
-      logVisual(`🎤 Error de reconocimiento de voz: ${err}`);
-    }
-  };
-
-  recognition.onresult = (event) => {
-    const result = event.results?.[event.results.length - 1];
-    const transcript = result?.[0]?.transcript || "";
-    if (!transcript) return;
-    const norm = _normalizarTexto(transcript);
-    if (!norm) return;
-    if (_lecturasAgentIsAutoReadSpeaking()) {
-      // Durante lectura automática, ignoramos reconocimiento para evitar
-      // auto-comandos provocados por el propio audio del agente.
-      return;
-    }
-    const isFinal = !!result?.isFinal;
-    const inExclusiveAgent = _agenteUnidadEnModoExclusivo();
-    const ignoredBySpeakingGate = _debeIgnorarEntradaPorHablaAgente(norm);
-    // En modo agente exclusivo priorizamos captar respuestas finales del usuario
-    // justo al terminar de hablar (ej: "sí", "no", "continuar").
-    if (ignoredBySpeakingGate && !(inExclusiveAgent && isFinal)) return;
-    if (inExclusiveAgent && !isFinal) return;
-    if (!isFinal) {
-      const esControlLectura = charlyLecturaEnCurso && (_esComandoDetenerLectura(norm) || _esComandoContinuarLectura(norm));
-      const esComandoSistema =
-        _esComandoDespertar(norm) ||
-        _esComandoDescanso(norm) ||
-        _esComandoSaludo(norm);
-      if (!esComandoSistema && !esControlLectura) return;
-    }
-    const canon = _canonTextoVoz(transcript);
-    if (geminiLiveSessionUnidad && geminiLiveIsOpen) {
-      const now = Date.now();
-      if (canon && canon === lastLiveTranscriptCanon && (now - Number(lastLiveTranscriptAt || 0)) < 2600) {
-        // Evita doble ejecución (Live + SpeechRecognition) del mismo comando.
-        return;
-      }
-    }
-    logVisual(`🎤 Comando ${isFinal ? "final" : "interino"}: ${transcript}`);
-    procesarComandoVozUnidad(transcript, { skipDedup: !isFinal }).catch(() => { });
-  };
-
-  unidadVoiceRecognition = recognition;
-  return recognition;
-}
-
-function iniciarEscuchaVozUnidad() {
-  if (!SpeechRecognitionAPI) {
-    hablarUnidad("Tu navegador no soporta reconocimiento de voz.");
-    return;
-  }
-
-  const recognition = inicializarReconocimientoVozUnidad();
-  if (!recognition || unidadVoiceIsListening) return;
-  try {
-    recognition.start();
-  } catch (err) {
-    const name = String(err?.name || "").trim();
-    const msg = String(err?.message || err || "").trim();
-    const low = `${name} ${msg}`.toLowerCase();
-    if (low.includes("invalidstateerror") || low.includes("already started")) return;
-    if (low.includes("not-allowed") || low.includes("service-not-allowed") || low.includes("notallowederror")) {
-      unidadVoiceShouldRun = true;
-      actualizarEstadoBotonVozUnidad();
-      _programarReintentoVozPorInteraccionUsuario();
-      return;
-    }
-    if (!unidadVoiceShouldRun) return;
-    clearTimeout(unidadVoiceRestartTimer);
-    unidadVoiceRestartTimer = setTimeout(() => {
-      if (unidadVoiceShouldRun && !unidadVoiceIsListening) iniciarEscuchaVozUnidad();
-    }, unidadVoiceStartRetryMs);
-    unidadVoiceStartRetryMs = Math.min(unidadVoiceStartRetryMs + 250, 1800);
-    logVisual(`🎤 Reintentando escucha (${name || "Error"} ${msg || "sin detalle"})`);
-  }
-}
-
-function iniciarEscuchaPasivaCharly() {
-  if (!SpeechRecognitionAPI) return;
-  if (!_vozGlobalHabilitadaPorConfiguracion()) {
-    unidadVoiceShouldRun = false;
-    actualizarEstadoBotonVozUnidad();
-    return;
-  }
-  // Comandos globales directos (sin requerir abrir/cerrar agente).
-  unidadVoiceShouldRun = true;
-  if (typeof charlyAwake !== "undefined") charlyAwake = true;
-  actualizarEstadoBotonVozUnidad();
-  iniciarEscuchaVozUnidad();
-}
-
-function detenerEscuchaVozUnidad() {
-  unidadVoiceShouldRun = false;
-  voiceCopilotoPendiente = false;
-  voiceCopilotoActivo = false;
-  clearTimeout(unidadVoiceRestartTimer);
-  if (unidadVoiceRecognition && unidadVoiceIsListening) {
-    try { unidadVoiceRecognition.stop(); } catch (_) { }
-  }
-  detenerGeminiLiveUnidad().catch(() => { });
-  unidadVoiceIsListening = false;
-  actualizarEstadoBotonVozUnidad();
-}
-
-function mantenerEscuchaPasivaCharly() {
-  // Mantiene a Charly disponible por wakeword sin dejar la sesión Live abierta.
-  try {
-    detenerGeminiLiveUnidad().catch(() => { });
-  } catch (_) {
-    // noop
-  }
-  if (!_vozGlobalHabilitadaPorConfiguracion()) {
-    unidadVoiceShouldRun = false;
-    voiceCopilotoPendiente = false;
-    voiceCopilotoActivo = false;
-    actualizarEstadoBotonVozUnidad();
-    return;
-  }
-  unidadVoiceShouldRun = true;
-  voiceCopilotoPendiente = false;
-  voiceCopilotoActivo = false;
-  if (typeof charlyAwake !== "undefined") charlyAwake = true;
-  actualizarEstadoBotonVozUnidad();
-  iniciarEscuchaVozUnidad();
-}
-
-async function iniciarAsistenteVozUnidad(options = {}) {
-  const agentExclusive = options?.agentExclusive === true;
-  if (!agentExclusive && !_vozGlobalHabilitadaPorConfiguracion()) {
-    unidadVoiceShouldRun = false;
-    _setAgentExclusiveVoiceMode(false);
-    actualizarEstadoBotonVozUnidad();
-    return false;
-  }
-  unidadVoiceShouldRun = true;
-  _setAgentExclusiveVoiceMode(agentExclusive);
-  // Al abrir el modal de unidad, Charly debe quedar activo para obedecer
-  // comandos directos de selects sin requerir "despierta charly".
-  charlyAwake = true;
-  actualizarEstadoBotonVozUnidad();
-  geminiLiveAllowOutputUntil = 0;
-  try {
-    await iniciarGeminiLiveUnidad({
-      withMic: !agentExclusive,
-      forceRestart: agentExclusive === true
-    });
-  } catch (err) {
-    logVisual(`⚠️ Live API no disponible, uso reconocimiento local: ${err?.message || "sin detalle"}`);
-  }
-
-  setTimeout(() => {
-    if (!unidadVoiceShouldRun || agentExclusiveVoiceMode) return;
-    iniciarEscuchaVozUnidad();
-  }, 350);
+async function iniciarGeminiLiveUnidad() {
+  return null;
 }
 
 function _normalizarGeneroUsuario(value = "") {
@@ -20688,20 +19955,23 @@ function toggleInvertirSeleccion() {
 function obtenerCategoriasPorGrado(grado) {
   if (["Primero", "Segundo"].includes(grado)) {
     return {
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"],
-      "Ciencias sociales": ["Historia", "Geografia"],
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+      "Ciencias experimentales": ["ConocimientoDelMedio"],
+      "Formación socioemocional": ["Socioemocional", "CivicaEtica"],
       "Matemáticas": ["Matematicas"]
     };
   } else if (["Tercero"].includes(grado)) {
     return {
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+      "Ciencias experimentales": ["Naturales", "MiLocalidad"],
       "Ciencias sociales": ["Historia", "Geografia"],
+      "Formación socioemocional": ["Socioemocional", "CivicaEtica"],
       "Matemáticas": ["Matematicas"]
     };
   } else {
     return {
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "ComprensionLectora", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
-      "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"],
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+      "Ciencias experimentales": ["Naturales"],
       "Ciencias sociales": ["Historia", "Geografia"],
       "Formación socioemocional": ["Socioemocional", "CivicaEtica"],
       "Matemáticas": ["Matematicas"]
@@ -29617,18 +28887,23 @@ function verificarEstructuraUnificada(categoria, contenidoHTML) {
 
 function formatearSubtema(nombre) {
   const reemplazos = {
-    "ExpresionOral": "Expresión oral",
+    "Ortografía": "Convenciones lingüísticas: Ortografía",
+    "Ortografia": "Convenciones lingüísticas: Ortografía",
+    "Gramatica": "Convenciones lingüísticas: Gramática",
+    "Gramática": "Convenciones lingüísticas: Gramática",
     "ExpresionEscrita": "Expresión escrita",
-    "TrazosDeLetras": "Trazos de letras",
-    "ExpresiónOral": "Expresión oral",
     "ExpresiónEscrita": "Expresión escrita",
-    "ComprensionLectora": "Comprensión Lectora",
-    "ConvencionesLinguisticas": "Convenciones Lingüísticas",
-    "Gramatica": "Gramática",
-    "Ortografia": "Ortografía",
+    "ExpresionOral": "Expresión oral",
+    "ExpresiónOral": "Expresión oral",
+    "TrazosDeLetras": "Trazos y letras",
+    "ComprensionLectora": "Comprensión lectora",
+    "ConvencionesLinguisticas": "Convenciones lingüísticas",
     "ConocimientoDelMedio": "Conocimiento del medio",
     "CivicaEtica": "Formación Cívica y Ética",
-    "Habilidades": "Habilidades",
+    "Socioemocional": "Educación socioemocional",
+    "Habilidades": "Habilidades del lenguaje",
+    "Artes": "Mapa mental (Plantilla)",
+    "Matematicas": "Pensamiento Matemático"
   };
   return reemplazos[nombre] || nombre.replace(/([a-z])([A-Z])/g, '$1 $2');
 }

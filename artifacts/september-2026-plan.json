@@ -1,0 +1,1759 @@
+{
+  "source": "https://docs.google.com/spreadsheets/d/1KeIukb-Cu_iv9eiJii3Jg1O2P4-bMgaE7K2OvKSgerg/edit",
+  "videoScripts": [
+    {
+      "sheet": "Español trim 2",
+      "row": 1,
+      "col": 1,
+      "head": "Español 1 - Tema 1",
+      "desc": "La entrevista https://charly-brown.web.app/video-player?sessionId=session_3gp8dair",
+      "link": "session_3gp8dair"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 1,
+      "col": 9,
+      "head": "Español 1 - Tema 2",
+      "desc": "La monografía https://charly-brown.web.app/video-player.html?sessionId=session_fr49vh6w",
+      "link": "session_fr49vh6w"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 1,
+      "col": 17,
+      "head": "Español 1 - Tema 3",
+      "desc": "leer, analizar, escribir y compartir textos narrativos https://charly-brown.web.app/video-player.html?sessionId=session_if4k1pmr",
+      "link": "session_if4k1pmr"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 1,
+      "col": 25,
+      "head": "Español 1 - Tema 4",
+      "desc": "creación y lectura en voz alta de poemas https://charly-brown.web.app/video-player.html?sessionId=session_mky7z3p5",
+      "link": "session_mky7z3p5"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 18,
+      "col": 1,
+      "head": "Español 2 - Tema 1",
+      "desc": "La narrativa contemporánea= https://charly-brown.web.app/video-player?sessionId=session_3fj393qy",
+      "link": "session_3fj393qy"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 18,
+      "col": 9,
+      "head": "Español 2 - Tema 2",
+      "desc": "La historieta como forma narrativa= https://charly-brown.web.app/video-player.html?sessionId=session_uba5k0ip",
+      "link": "session_uba5k0ip"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 18,
+      "col": 17,
+      "head": "Español 2 - Tema 3",
+      "desc": "Analizar canciones como textos líricos y productos culturales= https://charly-brown.web.app/video-player?sessionId=session_lkzeji8d",
+      "link": "session_lkzeji8d"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 33,
+      "col": 1,
+      "head": "Español 3 - Tema 1",
+      "desc": "La lectura dramatizada de una obra de teatro= https://charly-brown.web.app/video-player?sessionId=session_ys3mrk9v",
+      "link": "session_ys3mrk9v"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 33,
+      "col": 9,
+      "head": "Español 3 - Tema 2",
+      "desc": "Analizar manifestaciones poéticas dentro de un movimiento literario= https://charly-brown.web.app/video-player?sessionId=session_lfiu63j4",
+      "link": "session_lfiu63j4"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 33,
+      "col": 17,
+      "head": "Español 3 - Tema 3",
+      "desc": "Las obras literarias del Renacimiento= https://charly-brown.web.app/video-player?sessionId=session_7xj1taha",
+      "link": "session_7xj1taha"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 33,
+      "col": 25,
+      "head": "Español 3 - Tema 4",
+      "desc": "Comprender la función de los textos introductorios= https://charly-brown.web.app/video-player?sessionId=session_lhe58bi9",
+      "link": "session_lhe58bi9"
+    },
+    {
+      "sheet": "Español trim 2",
+      "row": 33,
+      "col": 33,
+      "head": "Español 3 - Tema 5",
+      "desc": "Panel de discusión: argumentar para comprender= https://charly-brown.web.app/video-player?sessionId=session_id3xuppb",
+      "link": "session_id3xuppb"
+    },
+    {
+      "sheet": "Geografía Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Geografía 1 - Tema 1",
+      "desc": "Procesos naturales y biodiversidad",
+      "link": ""
+    },
+    {
+      "sheet": "Geografía Trim2",
+      "row": 18,
+      "col": 1,
+      "head": "Geografía 1 - Tema 2",
+      "desc": "Recursos naturales y espacios económicos",
+      "link": ""
+    },
+    {
+      "sheet": "Geografía Trim2",
+      "row": 35,
+      "col": 1,
+      "head": "Geografía 1 - Tema 3",
+      "desc": "Interdependencia económica global y retos locales",
+      "link": ""
+    },
+    {
+      "sheet": "Geografía Trim2",
+      "row": 52,
+      "col": 1,
+      "head": "Geografía 1 - Tema 4",
+      "desc": "Dinámica de la población y migración mundial",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Cívica 1 - Tema 1",
+      "desc": "Relación sociedad y naturaleza: consumo y producción",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 1,
+      "col": 9,
+      "head": "Cívica 1 - Tema 2",
+      "desc": "Cambio del paisaje y desafíos ambientales",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 1,
+      "col": 17,
+      "head": "Cívica 1 - Tema 3",
+      "desc": "Diversidad biocultural, pueblos originarios e identidad",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 18,
+      "col": 1,
+      "head": "Cívica 2 - Tema 1",
+      "desc": "Espacio geográfico y desarrollo en la América colonial",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 18,
+      "col": 9,
+      "head": "Cívica 2 - Tema 2",
+      "desc": "Crisis climática y alternativas sustentables",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 18,
+      "col": 17,
+      "head": "Cívica 2 - Tema 3",
+      "desc": "Mestizaje, migración e interculturalidad",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 33,
+      "col": 1,
+      "head": "Cívica 3 - Tema 1",
+      "desc": "Energía, Revolución Industrial y contaminación",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 33,
+      "col": 9,
+      "head": "Cívica 3 - Tema 2",
+      "desc": "Equilibrio ecológico, ética ambiental y sustentabilidad",
+      "link": ""
+    },
+    {
+      "sheet": "Cívica Trim2",
+      "row": 33,
+      "col": 17,
+      "head": "Cívica 3 - Tema 3",
+      "desc": "Identidad latinoamericana y patrimonio biocultural",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Historia del mundo - Tema 1",
+      "desc": "Las grandes guerras / Guetos y campos de concentración y de exterminio",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 1,
+      "col": 9,
+      "head": "Historia del mundo - Tema 2",
+      "desc": "Panorama mundial, organismos para la paz y movimientos por la justicia",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 1,
+      "col": 17,
+      "head": "Historia del mundo - Tema 3",
+      "desc": "La Guerra Fría y el conflicto de Medio Oriente",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 1,
+      "col": 25,
+      "head": "Historia del mundo - Tema 4",
+      "desc": "El fin del sistema bipolar",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 16,
+      "col": 1,
+      "head": "Historia de México 1 - Tema 1",
+      "desc": "El mundo prehispánico",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 16,
+      "col": 9,
+      "head": "Historia de México 1 - Tema 2",
+      "desc": "La civilización mesoamericana",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 16,
+      "col": 17,
+      "head": "Historia de México 1 - Tema 3",
+      "desc": "Los reinos indígenas en vísperas de la conquista",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 31,
+      "col": 1,
+      "head": "Historia de México 2 - Tema 1",
+      "desc": "Hacia la fundación de un nuevo Estado",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 31,
+      "col": 9,
+      "head": "Historia de México 2 - Tema 2",
+      "desc": "Intervenciones extranjeras y despojo territorial",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 31,
+      "col": 17,
+      "head": "Historia de México 2 - Tema 3",
+      "desc": "En busca de un sistema político: liberales y conservadores",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 31,
+      "col": 25,
+      "head": "Historia de México 2 - Tema 4",
+      "desc": "Restauración de la República, Porfiriato y Revolución",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 46,
+      "col": 1,
+      "head": "Historia de México 2 - Tema 5",
+      "desc": "Revolución mexicana y reconstrucción",
+      "link": ""
+    },
+    {
+      "sheet": "Historia Trim2",
+      "row": 46,
+      "col": 9,
+      "head": "Historia de México 2 - Tema 6",
+      "desc": "De caudillos a presidentes",
+      "link": ""
+    },
+    {
+      "sheet": "Biología Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Biología 1 - Tema 1",
+      "desc": "Interacciones de los organismos en el ecosistema",
+      "link": ""
+    },
+    {
+      "sheet": "Biología Trim2",
+      "row": 18,
+      "col": 1,
+      "head": "Biología 1 - Tema 2",
+      "desc": "Biodiversidad",
+      "link": ""
+    },
+    {
+      "sheet": "Biología Trim2",
+      "row": 35,
+      "col": 1,
+      "head": "Biología 1 - Tema 3",
+      "desc": "Genes y ADN: continuidad y ciclos",
+      "link": ""
+    },
+    {
+      "sheet": "Biología Trim2",
+      "row": 52,
+      "col": 1,
+      "head": "Biología 1 - Tema 4",
+      "desc": "El cambio de los seres vivos en el tiempo",
+      "link": ""
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 1,
+      "col": 1,
+      "head": "Matemáticas 1 - Tema 1",
+      "desc": "Comprender y calcular la probabilidad de eventos aleatorios https://charly-brown.web.app/video-player.html?sessionId=session_ajc35j2v",
+      "link": "session_ajc35j2v"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 1,
+      "col": 9,
+      "head": "Matemáticas 1 - Tema 2",
+      "desc": "Estadística: datos que cuentan historias",
+      "link": ""
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 1,
+      "col": 17,
+      "head": "Matemáticas 1 - Tema 3",
+      "desc": "Porcentajes y proporciones: relaciones que están en todas partes= https://charly-brown.web.app/video-player?sessionId=session_0k1k0dv1",
+      "link": "session_0k1k0dv1"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 1,
+      "col": 25,
+      "head": "Matemáticas 1 - Tema 4",
+      "desc": "Ecuaciones de primer grado: despeja la incógnita",
+      "link": ""
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 18,
+      "col": 1,
+      "head": "Matemáticas 2 - Tema 1",
+      "desc": "Funciones: relaciones que cambian= https://charly-brown.web.app/video-player?sessionId=session_ruumx9sg",
+      "link": "session_ruumx9sg"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 18,
+      "col": 9,
+      "head": "Matemáticas 2 - Tema 2",
+      "desc": "Sucesiones y expresiones equivalentes: descubre el patrón= https://charly-brown.web.app/video-player?sessionId=session_g86a2ez7",
+      "link": "session_g86a2ez7"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 18,
+      "col": 17,
+      "head": "Matemáticas 2 - Tema 3",
+      "desc": "Polígonos: formas, ángulos y estructuras= https://charly-brown.web.app/video-player?sessionId=session_x6zple76",
+      "link": "session_x6zple76"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 1,
+      "head": "Matemáticas 3 - Tema 1",
+      "desc": "Pendiente y razón de cambio: cómo cambia una recta= https://charly-brown.web.app/video-player?sessionId=session_967o3z99",
+      "link": "session_967o3z99"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 9,
+      "head": "Matemáticas 3 - Tema 2",
+      "desc": "Sistemas de ecuaciones: modelar para resolver= https://charly-brown.web.app/video-player?sessionId=session_k6s1v6lb",
+      "link": "session_k6s1v6lb"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 17,
+      "head": "Matemáticas 3 - Tema 3",
+      "desc": "Ecuaciones cuadráticas: modelar para encontrar soluciones= https://charly-brown.web.app/video-player?sessionId=session_3qy0o5a6",
+      "link": "session_3qy0o5a6"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 25,
+      "head": "Matemáticas 3 - Tema 4",
+      "desc": "Ecuaciones cuadráticas: de la parábola a la solución= https://charly-brown.web.app/video-player?sessionId=session_cm186i38",
+      "link": "session_cm186i38"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 33,
+      "head": "Matemáticas 3 - Tema 5",
+      "desc": "Parábolas: del modelo a la gráfica= https://charly-brown.web.app/video-player?sessionId=session_zw9r60sw",
+      "link": "session_zw9r60sw"
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 41,
+      "head": "Matemáticas 3 - Tema 6",
+      "desc": "Gráficas lineales y parabólicas: interpretar el cambio",
+      "link": ""
+    },
+    {
+      "sheet": "Matemáticas Trim 2",
+      "row": 35,
+      "col": 49,
+      "head": "Matemáticas 3 - Tema 7",
+      "desc": "Progresiones cuadráticas: patrones que crecen",
+      "link": ""
+    },
+    {
+      "sheet": "Fisica Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Física 2 - Tema 1",
+      "desc": "El movimiento y el universo",
+      "link": ""
+    },
+    {
+      "sheet": "Fisica Trim2",
+      "row": 18,
+      "col": 1,
+      "head": "Física 2 - Tema 2",
+      "desc": "La materia y la temperatura",
+      "link": ""
+    },
+    {
+      "sheet": "Química Trim2",
+      "row": 1,
+      "col": 1,
+      "head": "Química 3 - Tema 1",
+      "desc": "La ciencia y la tecnología en el mundo actual",
+      "link": ""
+    },
+    {
+      "sheet": "Química Trim2",
+      "row": 18,
+      "col": 1,
+      "head": "Química 3 - Tema 2",
+      "desc": "Propiedades de la materia y las mezclas",
+      "link": ""
+    },
+    {
+      "sheet": "Química Trim2",
+      "row": 35,
+      "col": 1,
+      "head": "Química 3 - Tema 3",
+      "desc": "La concentración y la contaminación de mezclas",
+      "link": ""
+    },
+    {
+      "sheet": "Química Trim2",
+      "row": 52,
+      "col": 1,
+      "head": "Química 3 - Tema 4",
+      "desc": "Lavoisier y la conservación de la masa",
+      "link": ""
+    },
+    {
+      "sheet": "Química Trim2",
+      "row": 69,
+      "col": 1,
+      "head": "Química 3 - Tema 5",
+      "desc": "Mezclas y sustancias puras",
+      "link": ""
+    }
+  ],
+"spanishEscapeRooms": [
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 1",
+    "topic": "La entrevista"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 2",
+    "topic": "Monografía y exposición oral"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 3",
+    "topic": "Lectura y recreación de narraciones de diversos subgéneros"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 4",
+    "topic": "Lectura de poemas de diferentes épocas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 1",
+    "topic": "Narrativa contemporánea"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 2",
+    "topic": "Historietas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 3",
+    "topic": "Análisis de canciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 4",
+    "topic": "Leyendas populares en escena"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 1",
+    "topic": "Lectura dramatizada de una obra de teatro"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 2",
+    "topic": "Manifestaciones poéticas en un movimiento literario"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 3",
+    "topic": "Obras literarias del Renacimiento"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 4",
+    "topic": "Textos introductorios"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Español",
+    "theme": "Tema 5",
+    "topic": "Panel de discusión"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Probabilidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Estadística"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Porcentaje y proporcionalidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 4",
+    "topic": "Ecuaciones de primer grado con una incógnita"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Funciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Sucesiones y expresiones equivalentes"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Polígonos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Modelaje de funciones lineales y cuadráticas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Congruencia y semejanza de triángulos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Congruencia y semejanza en polígonos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 4",
+    "topic": "Simetría axial y central, traslación y rotación"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 5",
+    "topic": "Teorema de Pitágoras: análisis y aplicaciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 6",
+    "topic": "Funciones trigonométricas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 7",
+    "topic": "Interpretación y representación de fenómenos matemáticos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Geografía",
+    "theme": "Tema 1",
+    "topic": "Procesos naturales y biodiversidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Geografía",
+    "theme": "Tema 2",
+    "topic": "Recursos naturales y espacios económicos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Geografía",
+    "theme": "Tema 3",
+    "topic": "Interdependencia económica global y retos locales"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Geografía",
+    "theme": "Tema 4",
+    "topic": "Dinámica de la población y causas y consecuencias de la migración mundial"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 1",
+    "topic": "Interacciones de los organismos en el ecosistema"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 2",
+    "topic": "Biodiversidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 3",
+    "topic": "Genes y ADN: continuidad y ciclos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 4",
+    "topic": "Cambio de los seres vivos en el tiempo"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Historia del mundo",
+    "theme": "Tema 1",
+    "topic": "Las grandes guerras, guetos y campos de concentración y exterminio"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Historia del mundo",
+    "theme": "Tema 2",
+    "topic": "Panorama mundial contemporáneo, organismos para la paz y movimientos por la justicia"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Historia del mundo",
+    "theme": "Tema 3",
+    "topic": "Guerra Fría y conflicto de Medio Oriente"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Historia del mundo",
+    "theme": "Tema 4",
+    "topic": "Fin del sistema bipolar"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Historia de México 1",
+    "theme": "Tema 1",
+    "topic": "El mundo prehispánico"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Historia de México 1",
+    "theme": "Tema 2",
+    "topic": "La civilización mesoamericana"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Historia de México 1",
+    "theme": "Tema 3",
+    "topic": "Los reinos indígenas en vísperas de la conquista"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 1",
+    "topic": "Relación entre sociedad y naturaleza: consumo y producción"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 2",
+    "topic": "Influencia humana en el entorno: cambio del paisaje y desafíos ambientales"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 3",
+    "topic": "Diversidad biocultural, identidades, interculturalidad y patrimonio natural y cultural"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 1",
+    "topic": "Relación entre sociedad y naturaleza: consumo y producción"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 2",
+    "topic": "Influencia humana en el entorno: cambio del paisaje y desafíos ambientales"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 3",
+    "topic": "Diversidad biocultural, identidades, interculturalidad y patrimonio natural y cultural"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 1",
+    "topic": "Relación entre sociedad y naturaleza: consumo y producción"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 2",
+    "topic": "Influencia humana en el entorno: cambio del paisaje y desafíos ambientales"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Formación Cívica y Ética",
+    "theme": "Tema 3",
+    "topic": "Diversidad biocultural, identidades, interculturalidad y patrimonio natural y cultural"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 1",
+    "topic": "Fuerzas e interacciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 2",
+    "topic": "Energía"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 3",
+    "topic": "Sistemas del cuerpo humano y la salud"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 1",
+    "topic": "Estructura de los materiales y sus propiedades"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 2",
+    "topic": "Organización de los elementos químicos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 3",
+    "topic": "Enlace químico"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 4",
+    "topic": "Identificación de cambios químicos y lenguaje de la química"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 5",
+    "topic": "Calorías y tercera revolución de la química"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 1",
+    "topic": "Hacia la fundación de un nuevo Estado"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 2",
+    "topic": "Intervenciones extranjeras y despojo territorial"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 3",
+    "topic": "Liberales y conservadores"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 4",
+    "topic": "Restauración de la República, Porfiriato y Revolución"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 5",
+    "topic": "Revolución mexicana y reconstrucción"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Historia de México 2",
+    "theme": "Tema 6",
+    "topic": "De caudillos a presidentes"
+  }
+],
+"englishEscapeRooms": [
+  {
+    "creator": "Waldo",
+    "status": "Realizado",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Greek Culture is Still Alive in our Language, Art, and Cities"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Landforms and Natural Resources of Ecosystems"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Human Impact in the Environment"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Types of Correspondence"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Advertising"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Realizado",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Astronomy: The Map of the Stars and Constellations"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Modern Ships and Maritime Commerce between America and Europe"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Street Art or Vandalism?"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Main Properties of the Law of Gravity"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "The Industrial Revolution and Its Impact on Mass Production"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Realizado",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Reading 2 (No title displayed in Moodle)"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Analog and Digital Telecommunication"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "The Real Pirate in the Gulf of Mexico: Blackbeard"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Sources of Fresh Water"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "1",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Reading 2 (No title displayed in Moodle)"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Darwin’s Theory of Evolution"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Elements of Culture: Language"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Theater and Cinema"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Debates from Plato to Modern Day"
+  },
+  {
+    "creator": "Waldo",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Air Pollution: Respiratory Risks"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Body Language"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Innovations in Art: Abstract Art and Impressionism"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Social and Political Cartoons"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Hydraulic Design in Bridges: Tower Bridge"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Electricity in the Human Body"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Spanish Colonial Architecture in Mexico"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "The Chemistry of Digestion"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "The Evolution of Film from Black and White to 3-D"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "The Nobel Prize in Literature 1990: Octavio Paz"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "2",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Sod the Super Antioxidant"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "Main Capital Cities of the World"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "Poetry Is Painting That Speaks"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Casual Situations and Colloquial Expressions"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Obesity and Eating Disorders"
+  },
+  {
+    "creator": "Raúl",
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "1st",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Letter from Pedro Linares"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "An Interview with Djokovic"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "The World After WWII: the Birth of the UN and NATO"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "The Fall of the Berlin Wall: the End of the Cold War"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "Cyberspace: The Internet"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "2nd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "The Use of Metaphor in Everyday Language"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 1",
+    "topic": "“Blood, Toil, Tears, and Sweat”"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 2",
+    "topic": "World Reconstruction After World War II"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 3",
+    "topic": "Artificial Satellites"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 4",
+    "topic": "The Mexican Muralist Movement: Orozco, Siqueiros, and Rivera"
+  },
+  {
+    "creator": null,
+    "status": "Pendiente",
+    "level": "Junior High",
+    "grade": "3rd",
+    "trim": "3",
+    "subject": "English",
+    "chapter": "Chapter 5",
+    "topic": "Quotes from Teens to Teens"
+  }
+],
+"scienceActivities": [
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Probabilidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Estadística"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Porcentaje y proporcionalidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 4",
+    "topic": "Ecuaciones de primer grado con una incógnita"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Funciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Sucesiones y expresiones equivalentes"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Polígonos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Modelaje de funciones lineales y cuadráticas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 2",
+    "topic": "Congruencia y semejanza de triángulos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 3",
+    "topic": "Congruencia y semejanza en polígonos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 4",
+    "topic": "Simetría axial y central, traslación y rotación"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 5",
+    "topic": "Teorema de Pitágoras: análisis y aplicaciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 6",
+    "topic": "Funciones trigonométricas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 7",
+    "topic": "Interpretación y representación de fenómenos matemáticos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 1",
+    "topic": "Interacciones de los organismos en el ecosistema"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 2",
+    "topic": "Biodiversidad"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 3",
+    "topic": "Genes y ADN: continuidad y ciclos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 4",
+    "topic": "Cambio de los seres vivos en el tiempo"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 1",
+    "topic": "Fuerzas e interacciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 2",
+    "topic": "Energía"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 3",
+    "topic": "Sistemas del cuerpo humano y la salud"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 1",
+    "topic": "Estructura de los materiales y sus propiedades"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 2",
+    "topic": "Organización de los elementos químicos"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 3",
+    "topic": "Enlace químico"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 4",
+    "topic": "Identificación de cambios químicos y lenguaje de la química"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 5",
+    "topic": "Calorías y tercera revolución de la química"
+  }
+],
+"simulators": [
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 1",
+    "topic": "Modelaje de funciones lineales y cuadráticas"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Matemáticas",
+    "theme": "Tema 4",
+    "topic": "Simetría axial y central, traslación y rotación"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 1",
+    "topic": "Interacciones de los organismos en el ecosistema"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "1.º",
+    "trim": "2",
+    "subject": "Biología",
+    "theme": "Tema 4",
+    "topic": "Cambio de los seres vivos en el tiempo"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 1",
+    "topic": "Fuerzas e interacciones"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "2.º",
+    "trim": "2",
+    "subject": "Física",
+    "theme": "Tema 2",
+    "topic": "Energía"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 3",
+    "topic": "Enlace químico"
+  },
+  {
+    "level": "Secundaria",
+    "grade": "3.º",
+    "trim": "2",
+    "subject": "Química",
+    "theme": "Tema 4",
+    "topic": "Identificación de cambios químicos y lenguaje de la química"
+  }
+]
+}

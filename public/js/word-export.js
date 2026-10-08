@@ -208,6 +208,7 @@ function buildContentTypes() {
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
@@ -226,12 +227,43 @@ function buildRootRels() {
 </Relationships>`;
 }
 
-function buildDocumentRels() {
+function buildDocumentRels(images = []) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="${REL_NS}">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+  ${images.map(image => `<Relationship Id="${image.relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${image.filename}"/>`).join("")}
 </Relationships>`;
+}
+
+function embeddedImageRun(image) {
+  const cx = Math.round(Math.min(6, image.width / 96) * 914400);
+  const cy = Math.round(cx * image.height / image.width);
+  return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${image.id}" name="Imagen ${image.id}" descr="${escXml(image.alt)}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${image.id}" name="${escXml(image.filename)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+}
+
+function embeddedImagesFromHtml(html = "") {
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+  const images = [];
+  for (const element of doc.querySelectorAll('img[src^="data:image/"]')) {
+    const src = element.getAttribute("src") || "";
+    if (images.some(image => image.src === src)) continue;
+    const match = src.match(/^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=]+)$/i);
+    if (!match) continue;
+    const extension = /^png$/i.test(match[1]) ? "png" : "jpeg";
+    let width = 960, height = 540;
+    if (extension === "png") {
+      const header = atob(match[2].slice(0, 36));
+      if (header.startsWith("\x89PNG\r\n\x1a\n") && header.length >= 24) {
+        const read = offset => (header.charCodeAt(offset) * 16777216 + header.charCodeAt(offset + 1) * 65536 + header.charCodeAt(offset + 2) * 256 + header.charCodeAt(offset + 3)) >>> 0;
+        width = read(16) || width;
+        height = read(20) || height;
+      }
+    }
+    const id = images.length + 1;
+    images.push({ id, src, base64: match[2], width, height, alt: element.alt || "Imagen del artículo", filename: `image${id}.${extension}`, relId: `rId${id + 2}` });
+  }
+  return images;
 }
 
 function buildCoreXml(title = "Documento") {
@@ -482,6 +514,10 @@ function inlineRuns(node, style = {}, ctx = {}) {
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
   if (tag === "br") return makeBreakRun();
+  if (tag === "img") {
+    const image = ctx.images?.get(node.getAttribute("src"));
+    return image ? embeddedImageRun(image) : "";
+  }
   let nextStyle = style;
   const declaredChar = String(node.getAttribute?.("data-word-char-style") || "").trim();
   if (declaredChar) nextStyle = mergeStyle(nextStyle, { charStyle: declaredChar });
@@ -599,6 +635,10 @@ function blockNodeToXml(node, ctx = {}) {
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
+  if (tag === "img") {
+    const image = ctx.images?.get(node.getAttribute("src"));
+    return image ? paragraphXml(embeddedImageRun(image), ctx?.styleMap?.body || "CBBody") : "";
+  }
   if (tag === "table") return tableXml(node, ctx);
 
   if (tag === "div" || tag === "blockquote") {
@@ -669,14 +709,15 @@ function htmlToDocumentXml(html = "", options = {}) {
     styleMap,
     mode: options?.mode || "",
     useTemplateStyles: Boolean(options?.useTemplateStyles),
-    template: options?.template || null
+    template: options?.template || null,
+    images: options?.images || null
   };
   if (title) bodyXml += paragraphXml(makeTextRun(title), styleMap?.title || "CBTitle");
   if (subtitle) bodyXml += paragraphXml(makeTextRun(subtitle), styleMap?.subtitle || "CBSubtitle");
   bodyXml += blockNodesToXml(Array.from(doc.body.firstElementChild?.childNodes || doc.body.childNodes), ctx);
   const fallbackBodyStyle = styleMap?.body || "CBBody";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="${WORD_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:document xmlns:w="${WORD_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:body>
     ${bodyXml || paragraphXml("", fallbackBodyStyle)}
     ${buildSectPr(options?.sectPr || "")}
@@ -761,18 +802,21 @@ async function buildThumbnailBlob({ title = "Documento", subtitle = "", appTitle
   return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || null), "image/jpeg", 0.95));
 }
 
-export async function buildStyledDocxBlob({ html = "", title = "", subtitle = "", appTitle = "", styleDefinitions = null } = {}) {
+export async function buildStyledDocxBlob({ html = "", title = "", subtitle = "", appTitle = "", styleDefinitions = null, includeTitleInBody = true } = {}) {
   const JSZipCtor = pickZipCtor();
   if (!JSZipCtor) throw new Error("JSZip no está disponible.");
   const zip = new JSZipCtor();
+  const images = embeddedImagesFromHtml(html);
+  const imageMap = new Map(images.map(image => [image.src, image]));
   zip.file("[Content_Types].xml", buildContentTypes());
   zip.folder("_rels").file(".rels", buildRootRels());
   zip.folder("docProps").file("core.xml", buildCoreXml(title)).file("app.xml", buildAppXml());
   const word = zip.folder("word");
-  word.file("document.xml", htmlToDocumentXml(html, { title, subtitle }));
+  word.file("document.xml", htmlToDocumentXml(html, { title: includeTitleInBody ? title : "", subtitle: includeTitleInBody ? subtitle : "", images: imageMap }));
   word.file("styles.xml", buildStylesXml(styleDefinitions));
   word.file("numbering.xml", buildNumberingXml());
-  word.folder("_rels").file("document.xml.rels", buildDocumentRels());
+  word.folder("_rels").file("document.xml.rels", buildDocumentRels(images));
+  for (const image of images) word.folder("media").file(image.filename, image.base64, { base64: true });
   const thumb = await buildThumbnailBlob({ title, subtitle, appTitle });
   if (thumb) {
     zip.folder("docProps").file("thumbnail.jpeg", await thumb.arrayBuffer(), { binary: true });

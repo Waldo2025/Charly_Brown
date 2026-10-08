@@ -1,0 +1,346 @@
+{
+  "project": "charly-brown",
+  "start": "2026-09-28T00:00:00.000Z",
+  "end": "2026-10-05T00:00:00.000Z",
+  "billableInstanceSeconds": [
+    {
+      "service": "analizar-pdf-worker",
+      "total": 604820.9050949166
+    },
+    {
+      "service": "analizarpdfapi",
+      "total": 43.3
+    },
+    {
+      "service": "assetapi",
+      "total": 677.412680765329
+    },
+    {
+      "service": "charly-mcp-annex",
+      "total": 305.1910391151206
+    },
+    {
+      "service": "charly-mcp-cutout",
+      "total": 329.7958505822711
+    },
+    {
+      "service": "charly-mcp-video-script",
+      "total": 40.4
+    },
+    {
+      "service": "charly-mcp-worksheet",
+      "total": 165.39999999999998
+    },
+    {
+      "service": "dispatchcharlyproductiontask",
+      "total": 5237.351486941123
+    },
+    {
+      "service": "dispatchmarcieproductiontask",
+      "total": 43.29567289649378
+    },
+    {
+      "service": "dispatchmontagetask",
+      "total": 107.44849526238755
+    },
+    {
+      "service": "dispatchpigpengenerationtask",
+      "total": 59.3004435850181
+    },
+    {
+      "service": "dispatchscienceproductiontask",
+      "total": 48.43702810653097
+    },
+    {
+      "service": "dispatchveotask",
+      "total": 7735.382034787439
+    },
+    {
+      "service": "gemini-live-proxy",
+      "total": 605361.8678053928
+    },
+    {
+      "service": "geminiapi",
+      "total": 4933.362698919886
+    },
+    {
+      "service": "monitormarcieeditorialcalendar",
+      "total": 522.1795526433777
+    },
+    {
+      "service": "monitorstalepodcasterjobs",
+      "total": 696.6307145759529
+    },
+    {
+      "service": "pigpengenerationapi",
+      "total": 52.69032593641072
+    },
+    {
+      "service": "podcasterapi",
+      "total": 605065.9853826325
+    },
+    {
+      "service": "recordsavingsbilling",
+      "total": 10.916014907680697
+    },
+    {
+      "service": "recovercharlyproductions",
+      "total": 2394.0152078128976
+    },
+    {
+      "service": "recovermarcieproductions",
+      "total": 1099.4071286388833
+    },
+    {
+      "service": "recoverpigpengenerations",
+      "total": 1668.284008231481
+    },
+    {
+      "service": "recoverscienceproductions",
+      "total": 2844.7165078952494
+    },
+    {
+      "service": "refreshmarcieeditorialtrends",
+      "total": 1005.8245221386421
+    },
+    {
+      "service": "sally-browser",
+      "total": 875.5721985289999
+    },
+    {
+      "service": "scienceactivitiesapi",
+      "total": 37.30497758861632
+    },
+    {
+      "service": "veoapi",
+      "total": 404.35656148678663
+    }
+  ],
+  "requests": [
+    {
+      "service": "assetapi",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 1877
+    },
+    {
+      "service": "assetapi",
+      "labels": {
+        "response_code_class": "3xx"
+      },
+      "total": 1
+    },
+    {
+      "service": "assetapi",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 274
+    },
+    {
+      "service": "charly-mcp-annex",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 27
+    },
+    {
+      "service": "charly-mcp-annex",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 9
+    },
+    {
+      "service": "charly-mcp-cutout",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 30
+    },
+    {
+      "service": "charly-mcp-cutout",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 10
+    },
+    {
+      "service": "charly-mcp-video-script",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 6
+    },
+    {
+      "service": "charly-mcp-video-script",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 2
+    },
+    {
+      "service": "charly-mcp-worksheet",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 21
+    },
+    {
+      "service": "charly-mcp-worksheet",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 7
+    },
+    {
+      "service": "dispatchcharlyproductiontask",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 155
+    },
+    {
+      "service": "dispatchmontagetask",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 13
+    },
+    {
+      "service": "dispatchveotask",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 195
+    },
+    {
+      "service": "gemini-live-proxy",
+      "labels": {
+        "response_code_class": "1xx"
+      },
+      "total": 12
+    },
+    {
+      "service": "gemini-live-proxy",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 1
+    },
+    {
+      "service": "gemini-live-proxy",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 1
+    },
+    {
+      "service": "geminiapi",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 2889
+    },
+    {
+      "service": "geminiapi",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 16
+    },
+    {
+      "service": "monitormarcieeditorialcalendar",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 2013
+    },
+    {
+      "service": "monitorstalepodcasterjobs",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 2012
+    },
+    {
+      "service": "podcasterapi",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 2314
+    },
+    {
+      "service": "podcasterapi",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 18
+    },
+    {
+      "service": "recovercharlyproductions",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 10078
+    },
+    {
+      "service": "recovercharlyproductions",
+      "labels": {
+        "response_code_class": "5xx"
+      },
+      "total": 3
+    },
+    {
+      "service": "recovermarcieproductions",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 10080
+    },
+    {
+      "service": "recoverpigpengenerations",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 10076
+    },
+    {
+      "service": "recoverscienceproductions",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 10080
+    },
+    {
+      "service": "refreshmarcieeditorialtrends",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 72
+    },
+    {
+      "service": "refreshmarcieeditorialtrends",
+      "labels": {
+        "response_code_class": "5xx"
+      },
+      "total": 192
+    },
+    {
+      "service": "sally-browser",
+      "labels": {
+        "response_code_class": "4xx"
+      },
+      "total": 2
+    },
+    {
+      "service": "veoapi",
+      "labels": {
+        "response_code_class": "2xx"
+      },
+      "total": 2406
+    }
+  ],
+  "note": "Tiempo facturable y solicitudes por servicio. No es uso exacto de CPU ni importe de factura. Comparar volumen y tipo de trabajo antes de atribuir ahorro; revisar Sally por facturación por instancia."
+}

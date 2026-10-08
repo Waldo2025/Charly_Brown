@@ -1,4 +1,14 @@
 const DEFAULT_ANALIZAR_PDF_WORKER_BASE_URL = "https://analizar-pdf-worker-128488238449.us-central1.run.app";
+const identityClients = new Map();
+async function workerIdentityHeaders(baseUrl) {
+  if (!process.env.K_SERVICE && !process.env.FUNCTION_TARGET) return {};
+  const origin = new URL(baseUrl).origin;
+  if (!/^https:\/\/[^/]+\.run\.app$/.test(origin)) throw Object.assign(Error('invalid_pdf_worker_origin'),{status:503});
+  if (!identityClients.has(origin)) identityClients.set(origin,new (require('google-auth-library').GoogleAuth)().getIdTokenClient(origin).catch(error=>{identityClients.delete(origin);throw error;}));
+  const headers=await (await identityClients.get(origin)).getRequestHeaders(origin);
+  const authorization=headers.get?.('authorization') || headers.Authorization || headers.authorization;
+  return {'X-Serverless-Authorization':authorization};
+}
 const FORWARDED_REQUEST_HEADERS = Object.freeze([
   "authorization",
   "content-type",
@@ -44,18 +54,22 @@ function resolveWorkerRequestBody(req) {
   return undefined;
 }
 
-function registerAnalizarPdfWorkerProxyRoutes(app) {
+function registerAnalizarPdfWorkerProxyRoutes(app, { getIdentityHeaders = workerIdentityHeaders } = {}) {
   app.use("/api/analizar-pdf", async (req, res, next) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 110000);
+    const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+    res.once('close', disconnect);
     try {
       const baseUrl = resolveAnalizarPdfWorkerBaseUrl();
       if (!baseUrl) throw Object.assign(new Error("analizar_pdf_worker_base_url_missing"), { status: 503 });
       const requestPath = String(req.originalUrl || req.url || "");
       const response = await fetch(`${baseUrl}${requestPath}`, {
         method: req.method,
-        headers: buildWorkerHeaders(req),
+        headers: {...buildWorkerHeaders(req),...await getIdentityHeaders(baseUrl)},
         body: resolveWorkerRequestBody(req),
         redirect: "manual",
-        signal: AbortSignal.timeout(110000)
+        signal: controller.signal
       });
       FORWARDED_RESPONSE_HEADERS.forEach((name) => {
         const value = response.headers.get(name);
@@ -70,6 +84,7 @@ function registerAnalizarPdfWorkerProxyRoutes(app) {
       }
       return res.status(response.status).send(body);
     } catch (error) {
+      if (res.destroyed) return;
       if (error?.name === "AbortError" || error?.name === "TimeoutError") {
         return res.status(504).json({ error: "analizar_pdf_worker_timeout" });
       }
@@ -77,6 +92,9 @@ function registerAnalizarPdfWorkerProxyRoutes(app) {
         status: Number(error?.status || 502),
         cause: error
       }));
+    } finally {
+      clearTimeout(timeout);
+      res.removeListener("close", disconnect);
     }
   });
 }

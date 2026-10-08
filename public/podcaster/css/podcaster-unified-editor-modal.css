@@ -1,0 +1,290 @@
+.snoopy-unified-editor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--snoopy-text, var(--pod-text, #f1f5f9));
+}
+.snoopy-unified-editor-modal[hidden],
+.snoopy-unified-editor-modal [hidden] { display: none !important; }
+.snoopy-unified-editor-backdrop { position: absolute; inset: 0; background: rgb(2 6 23 / 72%); backdrop-filter: blur(10px); }
+.snoopy-unified-editor-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1540px, 98vw);
+  height: min(920px, calc(100dvh - 32px));
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--snoopy-border, var(--pod-border, #394150));
+  border-radius: 14px;
+  background: var(--snoopy-surface, var(--pod-surface, #202630));
+  box-shadow: 0 28px 90px rgb(0 0 0 / 42%);
+}
+.snoopy-unified-editor-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+  padding: 7px 12px 7px 18px;
+  border-bottom: 1px solid var(--snoopy-border, var(--pod-border, #394150));
+}
+.snoopy-unified-editor-header h2 { margin: 0; color: var(--snoopy-text, var(--pod-text, #f1f5f9)); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.snoopy-unified-editor-tabs { display: flex; align-items: stretch; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.snoopy-unified-editor-tabs [role="tab"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--snoopy-text-muted, var(--pod-muted, #aab4c2));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.snoopy-unified-editor-tabs [role="tab"] i { color: inherit; }
+.snoopy-unified-editor-tabs [role="tab"]:hover { background: var(--snoopy-surface-subtle, var(--pod-surface-2, #2c3440)); color: var(--snoopy-text, var(--pod-text, #f1f5f9)); }
+.snoopy-unified-editor-tabs [role="tab"][aria-selected="true"] { border-color: color-mix(in srgb, var(--snoopy-accent, var(--pod-accent, #60a5fa)) 30%, transparent); background: color-mix(in srgb, var(--snoopy-accent, var(--pod-accent, #60a5fa)) 12%, transparent); color: var(--snoopy-accent, var(--pod-accent, #60a5fa)); }
+.snoopy-unified-editor-tabs [role="tab"]:focus-visible,.snoopy-unified-editor-close:focus-visible { outline: 2px solid var(--snoopy-accent, var(--pod-accent, #60a5fa)); outline-offset: 2px; }
+.snoopy-unified-editor-close { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--snoopy-border, var(--pod-border, #394150)); border-radius: 8px; background: var(--snoopy-surface-subtle, var(--pod-surface-2, #2c3440)); color: var(--snoopy-text, var(--pod-text, #f1f5f9)); cursor: pointer; }
+.snoopy-unified-editor-content { min-width: 0; min-height: 0; height: auto; overflow: hidden; }
+.snoopy-unified-editor-pane { min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.snoopy-unified-editor-pane:not([hidden]) { display: block; }
+.snoopy-unified-editor-pane > #stylizedTextEditorModal,
+.snoopy-unified-editor-pane > .podcast-overlay-card-editor,
+.snoopy-unified-editor-pane > .podcast-scene-image-layers-editor,
+.snoopy-unified-editor-pane > .podcast-image-effects-editor {
+  position: relative !important;
+  inset: auto !important;
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit;
+}
+#snoopyUnifiedEditorModal .pme-modal-container,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal,
+#snoopyUnifiedEditorModal .scene-image-layers-modal,
+#snoopyUnifiedEditorModal .podcast-image-effects-modal {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-shell { height:100% !important; min-height:0 !important; max-height:100% !important; }
+#snoopyUnifiedEditorModal .pme-modal-header,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-backdrop,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-head,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > header,
+#snoopyUnifiedEditorModal .podcast-image-effects-header { display: none !important; }
+#snoopyUnifiedEditorModal .pme-modal-body,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-body,
+#snoopyUnifiedEditorModal .scene-image-layers-grid,
+#snoopyUnifiedEditorModal .podcast-image-effects-grid { min-height: 0; height: auto; max-height: none; }
+#snoopyUnifiedEditorModal .pme-modal-body { flex:1 1 auto; padding-top: 10px; }
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-shell { display:grid !important; grid-template-rows:minmax(0,1fr) !important; }
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-body,
+#snoopyUnifiedEditorModal .scene-image-layers-grid,
+#snoopyUnifiedEditorModal .podcast-image-effects-grid { padding-top: 12px; }
+
+/* Keep each editor's action row inside the shared dialog's visible area. */
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-shell,
+#snoopyUnifiedEditorModal .podcast-image-effects-modal,
+#snoopyUnifiedEditorModal .pme-modal-container,
+#snoopyUnifiedEditorModal .scene-image-layers-modal {
+  box-sizing: border-box !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-shell,
+#snoopyUnifiedEditorModal .podcast-image-effects-modal {
+  position: relative !important;
+}
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-body,
+#snoopyUnifiedEditorModal .podcast-image-effects-grid {
+  box-sizing: border-box;
+  height: 100% !important;
+  padding-bottom: 76px !important;
+}
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-shell > .podcast-overlay-card-modal-actions,
+#snoopyUnifiedEditorModal .podcast-image-effects-footer,
+#snoopyUnifiedEditorModal .pme-modal-footer,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > footer {
+  position: absolute !important;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  min-height: 58px;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border-top: 1px solid var(--snoopy-border, var(--pod-border, #394150));
+  background: var(--snoopy-surface, var(--pod-surface, #202630));
+}
+#snoopyUnifiedEditorModal .podcast-image-effects-footer,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-actions,
+#snoopyUnifiedEditorModal .pme-modal-footer,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#snoopyUnifiedEditorModal .podcast-image-effects-footer button,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-actions button,
+#snoopyUnifiedEditorModal .pme-modal-footer button,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > footer button {
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--snoopy-border, var(--pod-border, #394150));
+  border-radius: 8px;
+  background: var(--snoopy-surface-subtle, var(--pod-surface-2, #2c3440));
+  color: var(--snoopy-text, var(--pod-text, #f1f5f9));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+#snoopyUnifiedEditorModal .podcast-image-effects-footer button.is-primary,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-actions [data-action="overlay-card-save"],
+#snoopyUnifiedEditorModal .pme-modal-footer .pme-btn-primary,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > footer [data-layer-action="save"] {
+  border-color: var(--snoopy-accent, var(--pod-accent, #60a5fa));
+  background: var(--snoopy-accent, var(--pod-accent, #60a5fa));
+  color: #fff;
+}
+#snoopyUnifiedEditorModal .podcast-image-effects-footer button:hover,
+#snoopyUnifiedEditorModal .podcast-overlay-card-modal-actions button:hover,
+#snoopyUnifiedEditorModal .pme-modal-footer button:hover,
+#snoopyUnifiedEditorModal .scene-image-layers-modal > footer button:hover { filter: brightness(1.08); }
+@media (max-width: 760px) {
+  .snoopy-unified-editor-modal { padding: 0; }
+  .snoopy-unified-editor-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
+  .snoopy-unified-editor-header { grid-template-columns: 1fr auto; gap: 8px; padding: 7px 10px; }
+  .snoopy-unified-editor-header h2 { display: none; }
+  .snoopy-unified-editor-tabs { grid-column: 1; grid-row: 1; }
+  .snoopy-unified-editor-tabs [role="tab"] { min-height: 38px; padding-inline: 11px; }
+  .snoopy-unified-editor-close { grid-column: 2; grid-row: 1; }
+}
+
+/* The text editor's center column owns its vertical scroll area in the unified dialog. */
+#snoopyUnifiedEditorModal .pme-modal-body {
+  box-sizing: border-box;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+#snoopyUnifiedEditorModal .pme-preview-column {
+  box-sizing: border-box;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+/* Capas de escena: tres tracks explícitos; el inspector no debe caer en una
+   columna implícita dentro del área central del preview. */
+#snoopyUnifiedEditorModal .scene-image-layers-grid {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: minmax(260px, .82fr) minmax(420px, 1.42fr) minmax(340px, .96fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+#snoopyUnifiedEditorModal .scene-image-layers-tools { grid-column: 1 !important; grid-row: 1 !important; min-width: 0 !important; }
+#snoopyUnifiedEditorModal .scene-image-layers-preview-column {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+#snoopyUnifiedEditorModal .scene-image-layers-config {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+@media (max-width: 760px) {
+  #snoopyUnifiedEditorModal .pme-modal-body { height: 100% !important; }
+  #snoopyUnifiedEditorModal .pme-preview-column {
+    height: auto !important;
+    max-height: 42vh !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+  }
+}
+@media (max-width: 1100px) {
+  #snoopyUnifiedEditorModal .scene-image-layers-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) !important;
+    overflow-y: auto !important;
+  }
+  #snoopyUnifiedEditorModal .scene-image-layers-tools { grid-column: 1 !important; grid-row: 1 !important; }
+  #snoopyUnifiedEditorModal .scene-image-layers-preview-column { grid-column: 1 !important; grid-row: 2 !important; max-height: none !important; overflow: visible !important; }
+  #snoopyUnifiedEditorModal .scene-image-layers-config { grid-column: 1 !important; grid-row: 3 !important; max-height: none !important; overflow: visible !important; }
+}
+
+/* Keep the effects workspace bounded so its preview column can scroll independently. */
+#snoopyUnifiedEditorModal .podcast-image-effects-grid {
+  box-sizing: border-box !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+#snoopyUnifiedEditorModal .podcast-image-effects-preview-panel {
+  align-self: stretch !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+@media (max-width: 760px) {
+  #snoopyUnifiedEditorModal .podcast-image-effects-grid {
+    height: 100% !important;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+  }
+  #snoopyUnifiedEditorModal .podcast-image-effects-preview-panel {
+    grid-row: 1 !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+  }
+  #snoopyUnifiedEditorModal .podcast-image-effects-tools {
+    grid-row: 2 !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+  }
+}

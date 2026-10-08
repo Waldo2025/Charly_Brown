@@ -234,6 +234,10 @@ function registerSessionRoutes(app) {
     const { db, admin } = getAdminServices();
     const isAdmin = await hasAdminRoleWithProfile(authContext, db);
     const ref = db.collection("podcaster_sessions").doc(session.id);
+    const priorForSavings = await ref.get();
+    await require("./savings-policy.js").guardPodcasterSession(
+      db, authContext.uid, session, priorForSavings.exists ? priorForSavings.data()?.session || priorForSavings.data() : null
+    );
     let committedSession = session;
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
@@ -314,10 +318,13 @@ function registerSessionRoutes(app) {
     const merged = new Map();
     [...owned.docs, ...shared.docs].forEach((doc) => {
       const data = doc.data() || {};
+      const nested = data.session && typeof data.session === "object" ? data.session : {};
+      const workspaceType = text(nested.workspaceType || data.workspaceType, 80).toLowerCase();
+      if (requestedType === "soundlab" && workspaceType !== "schroeder-sound-lab") return;
+      if (!requestedType && workspaceType === "schroeder-sound-lab") return;
       if (requestedType === "video" && !isVideoSessionDocument(data)) return;
       if (archivedFilter === "true" && data.archived !== true) return;
       if (archivedFilter === "false" && data.archived === true) return;
-      const nested = data.session && typeof data.session === "object" ? data.session : {};
       const videoContentType = text(nested?.script?.videoContentType || nested.videoContentType, 80).toLowerCase();
       const academicMetadata = resolveSessionAcademicMetadata(data);
       merged.set(doc.id, {
@@ -329,6 +336,7 @@ function registerSessionRoutes(app) {
         ...academicMetadata,
         academicMetadata,
         podcastStudioUiState: nested.podcastStudioUiState && typeof nested.podcastStudioUiState === "object" ? nested.podcastStudioUiState : null,
+        workspaceType: workspaceType || null,
         videoContentType: videoContentType || null,
         isStub: true,
         script: { rows: [], videoContentType: videoContentType || null },

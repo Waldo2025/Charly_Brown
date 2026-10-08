@@ -1,5 +1,6 @@
 export const PODCASTER_VIDEO_MODEL_AUTO = "auto";
 export const PODCASTER_VIDEO_MODEL_OMNI = "gemini-omni-flash-preview";
+export const PODCASTER_VIDEO_MODEL_LOCAL = "local-wan-2.2";
 
 export const VERTEX_VEO_MODEL_FALLBACKS = Object.freeze([
   "veo-3.1-generate-001",
@@ -39,6 +40,10 @@ export function isVertexVeoModelId(value = "") {
     .test(normalizeVertexVeoModelId(value));
 }
 
+export function isLocalVideoModel(value = "") {
+  return String(value || "").trim() === PODCASTER_VIDEO_MODEL_LOCAL;
+}
+
 export function collectAvailablePodcasterVideoModels(records = []) {
   const discovered = (Array.isArray(records) ? records : [])
     .map((record) => normalizeVertexVeoModelId(
@@ -63,6 +68,7 @@ export function formatPodcasterVideoModelLabel(modelId = "") {
   const model = normalizeVertexVeoModelId(modelId);
   if (model === PODCASTER_VIDEO_MODEL_AUTO) return "Automático — Omni recomendado";
   if (model === PODCASTER_VIDEO_MODEL_OMNI) return "Gemini Omni Flash";
+  if (model === PODCASTER_VIDEO_MODEL_LOCAL) return "Wan 2.2 local (GPU del equipo) · gratis, sin costo";
   const match = model.match(/^veo-(\d+(?:\.\d+)+)(?:-(fast|lite))?-generate-(\d{3}|preview)$/i);
   if (!match) return model;
   const flavor = match[2] ? ` ${match[2][0].toUpperCase()}${match[2].slice(1)}` : " Standard";

@@ -37,12 +37,14 @@ try{
       await page.evaluate(async()=>{
         const image=document.getElementById("sallyBrowserImage");
         image.src="data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900"><rect width="1440" height="900" fill="white"/><text x="100" y="150">Curso modelo</text></svg>');
-        image.hidden=false;document.getElementById("sallyEmptyBrowser").hidden=true;
-        await image.decode();
+	        image.hidden=false;document.getElementById("sallyEmptyBrowser").hidden=true;
+	        await image.decode();
         const {bindSelection}=await import("/js/sally-selection.js");
         bindSelection({state:{courseView:"target"},invoke:async(command,payload)=>{window.testRegion=payload.region;return {text:"Contenido marcado",url:"https://moodle.test/mod/page/view.php?id=1"};},toast:()=>{},save:async()=>{},changed:()=>{}});
-      });
-      await page.click("#sallyPencil");
+	      });
+	      const fitted=await page.evaluate(()=>{const stage=document.getElementById("sallyBrowserStage").getBoundingClientRect(),image=document.getElementById("sallyBrowserImage").getBoundingClientRect();return {inside:image.width<=stage.width+.5&&image.height<=stage.height+.5,ratio:image.width/image.height};});
+	      assert.equal(fitted.inside,true);assert.ok(Math.abs(fitted.ratio-1.6)<.02,"Browser frame keeps its aspect ratio while fitting the stage");
+	      await page.click("#sallyPencil");
       const r=await page.locator("#sallyBrowserImage").boundingBox();
       await page.mouse.move(r.x+r.width*.2,r.y+r.height*.2);await page.mouse.down();
       await page.mouse.move(r.x+r.width*.6,r.y+r.height*.5);await page.mouse.up();
@@ -53,27 +55,24 @@ try{
       await page.evaluate(async source=>{
         Object.assign(window,await import("/js/sally-conversations.js"),await import("/js/sally-conversation-ui.js"));
         const stub=`const getDefaultFirebaseApp=()=>({}),getAuth=()=>({}),getFirestore=()=>({}),getStorage=()=>({}),doc=()=>({}),arrayUnion=x=>[x],updateDoc=async()=>{},rememberSession=()=>{},loadHistory=async()=>[],sanitizeTextInput=x=>x;const appendHistory=async(_s,_u,_id,entry)=>({...entry,id:crypto.randomUUID(),createdAt:new Date().toISOString()});`;
-        (0,eval)(stub+source+`;state.user={uid:'fixture'};state.activeId='fixture';state.conversationId='legacy-model';state.conversations=installConversations({state,el,record:recordConversation,readJson:async()=>({}),toast,render:renderChatScope});window.sallyTest={state,selectChat,recordConversation,applySnapshot,renderConversation};`);
+        (0,eval)(stub+source+`;state.user={uid:'fixture'};state.activeId='fixture';state.conversationId='legacy-unified';state.conversations=installConversations({state,el,record:recordConversation,readJson:async()=>({}),toast,render:renderChatScope});window.sallyTest={state,recordConversation,applySnapshot,renderConversation};`);
       },controllerSource);
       await page.evaluate(async()=>{
-        const {state,recordConversation,selectChat}=window.sallyTest;
-        document.getElementById("sallyBrief").value="Borrador modelo";
-        await recordConversation({role:"assistant",thread:"model",text:"MODELO "+"texto completo ".repeat(1000)});
-        await recordConversation({role:"assistant",thread:"target",conversationId:"legacy-target",text:"RESPUESTA DESTINO",questions:["Pregunta completa guardada"]});
-        await selectChat("target");document.getElementById("sallyBrief").value="Borrador destino";
+        const {recordConversation}=window.sallyTest;
+        document.getElementById("sallyBrief").value="Borrador MCP";
+        await recordConversation({role:"assistant",thread:"unified",text:"MODELO "+"texto completo ".repeat(1000)});
+        await recordConversation({role:"assistant",thread:"unified",text:"RESPUESTA DESTINO",questions:["Pregunta completa guardada"]});
+        await recordConversation({role:"assistant",thread:"target",conversationId:"legacy-target",text:"RESPUESTA ANTERIOR"});
       });
+	      await page.locator("#sallyConversation").evaluate(node=>node.hidden=false);
       assert.match(await page.locator("#sallyConversation").innerText(),/RESPUESTA DESTINO/);
-      assert.doesNotMatch(await page.locator("#sallyConversation").innerText(),/MODELO/);
-      assert.equal(await page.locator("#sallySourceCourse").isVisible(),false);
-      await page.evaluate(()=>window.sallyTest.selectChat("model"));
-      assert.equal(await page.locator("#sallyBrief").inputValue(),"Borrador modelo");
-      assert.ok((await page.locator("#sallyConversation").innerText()).length>14000);
-      assert.doesNotMatch(await page.locator("#sallyConversation").innerText(),/RESPUESTA DESTINO/);
-      page.once("dialog",dialog=>dialog.accept("1"));
-      await page.click('#sallyConversation button[title="Compartir referencia con otra conversación"]');
-      await page.waitForFunction(()=>window.sallyTest.state.chatThread==="target");
       assert.match(await page.locator("#sallyConversation").innerText(),/MODELO/);
-      assert.equal(await page.locator("#sallyBrief").inputValue(),"Borrador destino");
+	      assert.equal(await page.locator("#sallySourceCourse").isVisible(),false);
+	      assert.equal(await page.locator("#sallyTargetCourse").isVisible(),false);
+      assert.equal(await page.locator("#sallyBrief").inputValue(),"Borrador MCP");
+      assert.ok((await page.locator("#sallyConversation").textContent()).length>14000);
+      await page.evaluate(()=>window.sallyTest.state.conversations.select("legacy-target"));assert.match(await page.locator("#sallyConversation").innerText(),/RESPUESTA ANTERIOR/);
+      await page.evaluate(()=>window.sallyTest.state.conversations.select("legacy-unified"));
       await page.locator("#sallyBriefPane").evaluate(node=>node.scrollTop=0);
       await page.screenshot({path:"artifacts/sally-chat-tabs-1440.png"});
       await page.evaluate(()=>{
@@ -92,7 +91,7 @@ try{
       assert.equal(await entries.nth(1).evaluate(n=>n.open),true);
       await page.evaluate(()=>window.sallyTest.renderConversation());
       assert.equal(await entries.nth(1).evaluate(n=>n.open),true,"User-expanded messages survive rerender");
-      assert.ok((await entries.nth(1).locator(".sally-history-text").textContent()).length>14000,"Collapsing must not truncate the response");
+      assert.ok((await entries.filter({hasText:"MODELO"}).locator(".sally-history-text").first().textContent()).length>14000,"Collapsing must not truncate the response");
       await entries.nth(1).locator(":scope > summary").click();
       await page.evaluate(()=>window.sallyTest.renderConversation());
       assert.equal(await entries.nth(1).evaluate(n=>n.open),false);

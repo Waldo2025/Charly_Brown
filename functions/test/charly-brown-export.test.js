@@ -44,9 +44,9 @@ test("builds a styled DOCX package", async () => {
   const zip = await JSZip.loadAsync(artifact.buffer);
   const styles = await zip.file("word/styles.xml").async("string");
   const document = await zip.file("word/document.xml").async("string");
-  assert.match(styles, /Título/);
-  assert.match(styles, /Instrucción/);
-  assert.match(styles, /Superíndice/);
+  assert.match(styles, /T[IÍ]TULO/i);
+  assert.match(styles, /INSTRUCCI[OÓ]N/i);
+  assert.match(styles, /SUPER[IÍ]NDICE/i);
   assert.match(document, /Clasificar hojas/);
 });
 

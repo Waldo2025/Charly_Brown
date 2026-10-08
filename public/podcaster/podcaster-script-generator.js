@@ -2992,6 +2992,7 @@ function connectScriptSnapshotToPanel(scriptSnapshot = {}, options = {}) {
       videoMode: options?.videoMode === true,
       videoContentType: options?.videoMode === true ? "creative" : "none",
       script: nextScript,
+      rows: connectedRows,
       speakerVoiceMap: maps.voiceMap,
       speakerExpressionMap: maps.expressionMap,
       speakerNameMap: maps.nameMap,
@@ -3019,6 +3020,31 @@ function connectScriptSnapshotToPanel(scriptSnapshot = {}, options = {}) {
   resetPodcastStudioSessionUiState(updatedSession);
   renderPodcastVideoShell(getActiveSession());
   syncPodcastStudioInspector(getActiveSession());
+
+  if (Array.isArray(updatedSession?.pendingReferenceImages) && updatedSession.pendingReferenceImages.length > 0) {
+    const images = updatedSession.pendingReferenceImages;
+    const assignments = (updatedSession.script?.rows || []).map((row, idx) => {
+      const imgUrl = images[idx];
+      if (!imgUrl) return null;
+      return {
+        rowId: row.id,
+        reference: {
+          dataUrl: imgUrl,
+          downloadUrl: imgUrl,
+          mimeType: "image/png",
+          name: `Escena ${idx + 1}`
+        }
+      };
+    }).filter(Boolean);
+
+    if (assignments.length && typeof window.setRowReferenceImagesBulk === "function") {
+      window.setRowReferenceImagesBulk(assignments).catch((e) => {
+        console.warn("No se pudieron asociar todas las referencias importadas:", e);
+      });
+      upsertActiveSession((curr) => ({ ...curr, pendingReferenceImages: [] }), { render: false });
+    }
+  }
+
   if (options?.openSidepanel === true) {
     setSidepanelOpen(true);
   }

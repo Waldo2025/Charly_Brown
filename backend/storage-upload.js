@@ -10,6 +10,7 @@ async function uploadFileToBucketNonResumable({
   contentType = "",
   cacheControl = "",
   metadata = {},
+  useSignedUrl = false,
   fetchImpl = globalThis.fetch
 } = {}) {
   const targetBucket = bucket || null;
@@ -75,15 +76,8 @@ async function uploadFileToBucketNonResumable({
     }
     return file;
   };
-  try {
-    return await uploadViaSignedUrl();
-  } catch (signedUrlError) {
-    const fallbackAllowed = String(signedUrlError?.code || "").trim() !== "signed_url_upload_failed"
-      || Number(signedUrlError?.status || 0) >= 500
-      || Number(signedUrlError?.status || 0) === 0;
-    if (!fallbackAllowed) throw signedUrlError;
-  }
-  const writeStream = file.createWriteStream({
+  const writeWithSdk = async () => {
+    const writeStream = file.createWriteStream({
     resumable: false,
     ...(contentType ? { contentType } : {}),
     ...(cacheControl || (metadata && Object.keys(metadata).length)
@@ -95,8 +89,15 @@ async function uploadFileToBucketNonResumable({
       }
       : {})
   });
-  await pipeline(fs.createReadStream(sourcePath), writeStream);
-  return file;
+    await pipeline(fs.createReadStream(sourcePath), writeStream);
+    return file;
+  };
+  if (!useSignedUrl) return writeWithSdk();
+  try {
+    return await uploadViaSignedUrl();
+  } catch (signedUrlError) {
+    try { return await writeWithSdk(); } catch (_) { throw signedUrlError; }
+  }
 }
 
 module.exports = {

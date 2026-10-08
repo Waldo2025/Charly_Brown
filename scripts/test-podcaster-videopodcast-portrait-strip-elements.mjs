@@ -6,7 +6,7 @@ const htmlContent = readFileSync(
 );
 
 // 1. Verify that the footer container exists
-if (!htmlContent.includes('class="podcast-studio-footer"')) {
+if (!/class="[^"]*\bpodcast-studio-footer\b/.test(htmlContent)) {
   throw new Error("El archivo public/podcaster.html debe contener el contenedor de la clase 'podcast-studio-footer'.");
 }
 
@@ -20,8 +20,8 @@ if (!htmlContent.includes('class="podcast-portrait-strip"')) {
 }
 
 // 3. Verify that the note about main montage audio is present
-if (!htmlContent.includes("Audio principal del montaje: Gemini Live por escena.")) {
-  throw new Error("El archivo public/podcaster.html debe incluir la nota aclaratoria sobre Gemini Live en el footer.");
+if (!htmlContent.includes("Audio principal del montaje: voces generadas y guardadas por escena.")) {
+  throw new Error("El archivo public/podcaster.html debe aclarar que el montaje usa voces guardadas por escena.");
 }
 
 console.log("Podcaster video-podcast portrait-strip container verification test OK.");

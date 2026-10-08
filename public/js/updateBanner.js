@@ -89,37 +89,34 @@
       }
       #${LAUNCHER_ID}.update-banner-launcher {
         display: none;
-        margin-left: auto;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 9px;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: background-color 0.15s ease;
         text-decoration: none;
-        background: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 14%, transparent) !important;
+        background: transparent !important;
         color: var(--cb-header-text-color, #ffffff) !important;
-        border: 1px solid color-mix(in srgb, var(--cb-header-text-color, #ffffff) 30%, transparent) !important;
+        border: 0 !important;
       }
       #${LAUNCHER_ID}.update-banner-launcher:hover {
-        background: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 24%, transparent) !important;
-        border-color: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 50%, transparent) !important;
-        transform: translateY(-1px);
-      }
-      #${LAUNCHER_ID}.update-banner-launcher:active {
-        transform: translateY(0);
+        background: rgb(255 255 255 / 12%) !important;
       }
       #${LAUNCHER_ID}.update-banner-launcher.is-visible {
-        display: inline-flex;
+        display: grid;
       }
       #${LAUNCHER_ID}.update-banner-launcher.is-floating {
         position: fixed;
         top: 20px;
         right: 20px;
         z-index: 10001;
-        margin-left: 0;
       }
       #${LAUNCHER_ID} .update-banner-launcher-icon {
-        color: #facc15;
-        font-size: 11px;
+        color: inherit;
+        font-size: 16px;
         line-height: 1;
-        margin-right: 2px;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -173,7 +170,7 @@
   }
 
   function getHeaderContent() {
-    return document.querySelector('.main-header .header-content');
+    return document.getElementById('cbHeaderActions') || document.querySelector('.main-header .header-content');
   }
 
   function ensureLauncher() {
@@ -184,8 +181,8 @@
       btn = document.createElement('button');
       btn.id = LAUNCHER_ID;
       btn.type = 'button';
-      btn.className = 'update-banner-launcher header-user-email';
-      btn.innerHTML = '<span class="update-banner-launcher-icon" aria-hidden="true">⚠</span><span>Actualizar ahora</span>';
+      btn.className = 'update-banner-launcher';
+      btn.innerHTML = '<i class="fas fa-sync-alt update-banner-launcher-icon" aria-hidden="true"></i>';
       btn.setAttribute('aria-label', 'Actualizar ahora');
     }
 

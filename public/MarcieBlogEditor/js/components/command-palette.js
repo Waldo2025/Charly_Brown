@@ -2,8 +2,8 @@
  * Command Palette (⌘ K) y Atajos Globales para Marcie Blog Editor
  */
 
-import { showModal, showNewSessionModal, closeActiveModal, showToast } from "./modals.js";
-import { createMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
+import { showModal, showNewSessionModal, closeActiveModal, showToast } from "./modals.js?v=20260923r1";
+import { createMarcieSession } from "../services/marcie-session-store.js?v=20260923r4";
 
 function escapeHtml(value = "") {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({

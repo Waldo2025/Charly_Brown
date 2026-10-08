@@ -138,19 +138,34 @@ async function dispatchMontageToCloudRun({ jobId, taskName = "", jobsClient = ne
   }
   if (!claim.claimed) return claim;
   const request = buildRunJobRequest({ jobId });
+  let cloudRunAccepted = false;
   try {
     const [operation] = await jobsClient.runJob(request);
+    cloudRunAccepted = true;
     const executionName = String(operation?.name || "").trim();
     await db.collection("podcaster_export_jobs").doc(jobId).set({
       status: "running",
       stage: "worker_starting",
-      hint: "El motor de exportación está arrancando y enseguida comenzará con las escenas.",
+      hint: "Cloud Run aceptó la solicitud. Esperando confirmación de inicio del worker antes de comenzar las escenas.",
       executionName,
       heartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+    console.info("[montage-dispatch] cloud run execution accepted", {
+      jobId,
+      executionName,
+      taskName: String(taskName || ""),
+      attempt: claim.attempt
+    });
     return { claimed: true, executionName, attempt: claim.attempt };
   } catch (error) {
+    if (cloudRunAccepted) {
+      console.error("[montage-dispatch] Cloud Run accepted execution but status persistence failed; keeping dispatch lease to prevent duplicate execution", {
+        jobId,
+        message: String(error?.message || error).slice(0, 500)
+      });
+      throw error;
+    }
     await releaseMontageSlot({ db, admin, jobId }).catch(() => {});
     await db.collection("podcaster_export_jobs").doc(jobId).set({
       status: "retrying",

@@ -7,7 +7,7 @@ import {messagesFor,conversationsFrom,contextFor,reusableInventory} from "../pub
 
 const history=[{id:"old",thread:"model",role:"assistant",text:"Legado íntegro",createdAt:"2026-01-01"},{id:"new",conversationId:"a",thread:"model",role:"user",text:"A".repeat(60000),createdAt:"2026-02-01"},{id:"other",conversationId:"b",thread:"model",role:"user",text:"SECRETO_OTRA_CONVERSACION",createdAt:"2026-03-01"}];
 assert.equal(messagesFor(history,"legacy-model")[0].text,"Legado íntegro");
-assert.equal(conversationsFrom(history).length,2);
+assert.equal(conversationsFrom(history).length,3);
 const context=contextFor(history,"a");assert.ok(JSON.stringify(context).length<26000);assert.doesNotMatch(JSON.stringify(context),/SECRETO/);assert.match(context[0].text,/\[new\]/);assert.equal(history[1].text.length,60000);
 assert.equal(reusableInventory({url:"x",coverage:{complete:true}},"x","explica el tema"),true);
 assert.equal(reusableInventory({url:"x",stale:true},"x","explica"),false);
@@ -44,7 +44,7 @@ try{
  await page.getByText("Resultados anteriores de la conversación",{exact:true}).click();
  await page.locator("#sallyResultVersion").selectOption({index:1});assert.match(await page.locator("#sallyResultDetail").textContent(),/REPORTE COMPLETO/);
  await page.click("#sallyCloseResults");assert.equal(await page.locator("#sallyResultsPanel").isVisible(),false);
- await page.click("#sallyToggleResults");await page.keyboard.press("Escape");assert.equal(await page.locator("#sallyToggleResults").evaluate(n=>n===document.activeElement),true);
+	 await page.locator("#sallyConversationMenu").evaluate(n=>n.open=true);await page.click("#sallyToggleResults");await page.keyboard.press("Escape");assert.equal(await page.locator("#sallyToggleResults").evaluate(n=>n===document.activeElement),true);
  await page.evaluate(async()=>{await api.state.conversations.restore();});assert.equal(await page.locator("#sallyConversationSelect").inputValue(),"a");
  await page.evaluate(()=>{
    api.state.automation=true;api.state.inventory={url:"https://moodle.test/course/view.php?id=1",coverage:{complete:true},sections:[]};
@@ -59,11 +59,11 @@ try{
  await page.evaluate(()=>api.state.conversations.select("a"));assert.match(await page.locator("#sallyConversation").textContent(),/SEGUIMIENTO DE A/);
  await page.evaluate(async()=>{window.failSave=true;try{await api.recordConversation({kind:"message",text:"NO GUARDADO"});}catch{}window.failSave=false;});assert.doesNotMatch(await page.locator("#sallyConversation").textContent(),/NO GUARDADO/);
  const execution=await page.evaluate(async()=>{let called=false;api.state.remote={invoke:async()=>{called=true;}};api.state.plan=[{id:"x"}];api.state.planHash="hash";api.state.approvalBinding={conversationId:"b",target:"",plan:JSON.stringify(api.state.plan)};await api.executePlan();return called;});assert.equal(execution,false);
- page.once("dialog",d=>d.accept("Conversación creada"));await page.click("#sallyNewConversation");await page.waitForFunction(()=>document.getElementById("sallyConversationSelect").selectedOptions[0]?.textContent==="Conversación creada");
- page.once("dialog",d=>d.accept("Nombre cambiado"));await page.click("#sallyRenameConversation");await page.waitForFunction(()=>document.getElementById("sallyResultsTitle").textContent==="Nombre cambiado");
- await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>document.getElementById("sallyShowArchived").checked);
+	 page.once("dialog",d=>d.accept("Conversación creada"));await page.locator("#sallyConversationMenu").evaluate(n=>n.open=true);await page.click("#sallyNewConversation");await page.waitForFunction(()=>document.getElementById("sallyConversationSelect").selectedOptions[0]?.textContent==="Conversación creada");
+	 page.once("dialog",d=>d.accept("Nombre cambiado"));await page.locator("#sallyConversationMenu").evaluate(n=>n.open=true);await page.click("#sallyRenameConversation");await page.waitForFunction(()=>document.getElementById("sallyResultsTitle").textContent==="Nombre cambiado");
+	 await page.locator("#sallyConversationMenu").evaluate(n=>n.open=true);await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>document.getElementById("sallyShowArchived").checked);
  assert.equal(await page.locator("#sallyArchiveConversation").getAttribute("aria-label"),"Restaurar conversación");
- await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>!document.getElementById("sallyShowArchived").checked);
+	 await page.locator("#sallyConversationMenu").evaluate(n=>n.open=true);await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>!document.getElementById("sallyShowArchived").checked);
  await page.evaluate(()=>api.state.conversations.select("a"));
  await page.evaluate(()=>api.state.conversations.open());assert.equal(await page.locator("#sallyResultsPanel").isVisible(),true);await page.screenshot({path:"artifacts/sally-independent-conversations-desktop.png"});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:"artifacts/sally-independent-conversations-mobile.png"});

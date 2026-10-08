@@ -11,7 +11,9 @@ const { registerMarcieWordPressRoutes } = require("../functions/src/marcie-wordp
 const { registerMarcieEditorialResearchRoutes } = require("../functions/src/marcie-editorial-research.js");
 const { registerMarcieEditorialAgentRoutes } = require("../functions/src/marcie-editorial-agent.js");
 const { registerCharlyBrownMcpRoutes } = require("./charly-brown-mcp.js");
+const { registerImageCreatorMcpRoutes } = require("./image-creator-mcp.js");
 const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
+const { registerSavingsRoutes } = require("../functions/src/savings-policy.js");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
 const {
@@ -51,6 +53,8 @@ const {
 const {
   createMontageExportCancelController
 } = require("./montage-export/cancel-controller.js");
+const { normalizeImageWarp, hasImageWarpMotion, buildMontageImageWarpFilter } = require("./montage-export/image-warp-filter.js");
+const { normalizeSceneImageLayers, buildSceneImageLayerFilters } = require("./montage-export/scene-image-layers.js");
 const {
   PODCASTER_VIDEO_PROMPT_VERSION,
   buildDialogueVideoPromptBundle
@@ -103,6 +107,7 @@ const {
 const {
   resolveSceneMediaRenderSpec
 } = require(path.resolve(PUBLIC_ROOT, "podcaster", "podcaster-scene-media-render-spec.js"));
+const podcasterStopMotionModel = require(path.resolve(PUBLIC_ROOT, "podcaster", "podcaster-stop-motion.js"));
 const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
@@ -131,6 +136,8 @@ const {
   preflightMontageBrowserRenderer,
   renderMontageBrowserOverlayVideo
 } = require("./montage-browser-render.js");
+const { normalizeMotion: normalizeStylizedMotion, renderStylizedMotionFrames } = require("./montage-stylized-motion-render.js");
+const { isPremiumCard, renderCardMotionFrames } = require("./montage-card-motion-render.js");
 const {
   ANALIZAR_PDF_MAPPING_TOOL_NAME,
   buildResultSummary,
@@ -310,6 +317,12 @@ const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+// The free-tier routing lives in functions/src and this backend is the proxy PigPen's browser
+// talks to locally, so the dev server mounts the same gateway instead of restating it. Without
+// it the local page reads a catalog with no free offer and cannot select the model the author
+// sees in production.
+const geminiFreeTier = require("../functions/src/gemini-free-tier.js");
+const { createPigPenTextGateway } = require("../functions/src/pigpen-text-gateway.js");
 // Montage exports can carry sizable JSON payloads when they include cached
 // inline media or rendered text snapshots. Keep the global parser roomy enough
 // for those requests, and fail cleanly when a payload still exceeds the limit.
@@ -327,15 +340,14 @@ const MAX_MONTAGE_EXPORT_TOTAL_SEC = 10 * 60;
 const MONTAGE_EXPORT_MAX_CONCURRENT = Math.max(1, Number(process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 1) || 1);
 const DIALOGUE_VIDEO_MAX_CONCURRENT = Math.max(1, Number(process.env.DIALOGUE_VIDEO_MAX_CONCURRENT || 1) || 1);
 const DIALOGUE_VIDEO_JOB_TTL_MS = 30 * 60 * 1000;
-const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-3.1-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = OMNI_VIDEO_MODEL;
 const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_SIZE = "2K";
 const MOODLE_GRAPHIC_PROMPT_VERSION = "moodle_graphic_render_v1";
 const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
-  "gemini-3.1-flash-image-preview",
+  "gemini-3.1-flash-image",
   "gemini-3-pro-image-preview",
-  "gemini-2.5-flash-image",
   "gemini-2.0-flash-preview-image-generation"
 ]);
 const PODCASTER_VIDEO_MODEL_CANDIDATES = VIDEO_MODELS;
@@ -351,7 +363,22 @@ const GEMINI_TEXT_MODEL_ALIASES = Object.freeze({
   "gemini-flash-latest": DEFAULT_GEMINI_TEXT_MODEL,
   "gemini-3-pro-preview": "gemini-3.1-pro-preview"
 });
-const GEMINI_LIVE_ALLOWED_VOICE_NAMES = new Set([
+const GEMINI_IMAGE_MODEL_ALIASES = Object.freeze({
+  "gemini-3.1-flash-image": "gemini-3.1-flash-image",
+  "gemini-3-pro-image": "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image": "gemini-3.1-flash-image",
+  "gemini-2.0-flash-preview-image-generation": "gemini-2.0-flash-preview-image-generation"
+});
+// PigPen's free image provider. The id is virtual: no Gemini model answers it, this proxy
+// calls Cloudflare Workers AI instead and reshapes the answer into Gemini inlineData so the
+// browser parser, optimizer and Storage upload stay untouched. flux-1-schnell on the free
+// plan accepts only {prompt} (width/height/seed/image are rejected 5006), so reference-based
+// editing stays on the paid Gemini flows by design.
+const CLOUDFLARE_IMAGE_MODEL_ID = "cloudflare-flux-1-schnell";
+const CLOUDFLARE_AI_TOKEN = String(process.env.CLOUDFLARE_AI_TOKEN || "").trim();
+const CLOUDFLARE_ACCOUNT_ID = String(process.env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+const cloudflareImagesEnabled = () => Boolean(CLOUDFLARE_AI_TOKEN && CLOUDFLARE_ACCOUNT_ID);
+const GEMINI_TTS_ALLOWED_VOICE_NAMES = new Set([
   "Zephyr", "Kore", "Orus", "Autonoe", "Umbriel", "Erinome",
   "Laomedeia", "Schedar", "Achird", "Sadachbia", "Puck", "Fenrir",
   "Aoede", "Enceladus", "Algieba", "Algenib", "Achernar", "Gacrux",
@@ -380,6 +407,10 @@ const FFMPEG_DRAWTEXT_FONT_CANDIDATES = Object.freeze([
   "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
   "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
 ]);
+// Radiora uses pictograms for digits; review counters and scene numbers need a text font.
+const FFMPEG_REVIEW_FONT_FILE = path.resolve(
+  __dirname, "..", "public", "lecturasGame-mineblox", "runtime", "avantgarde", "AVGARDD_2.TTF"
+);
 const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
   return import("node-fetch").then(({ default: f }) => f(...args));
@@ -490,6 +521,7 @@ function escapeFfmpegConcatPath(value = "") {
 function buildFfmpegDuckVolumeExpr(segments = [], duckVolume = 0.46) {
   const list = Array.isArray(segments) ? segments : [];
   const windows = list
+    .filter((segment) => segment?.duckTrigger !== false)
     .map((segment) => {
       const startSec = Math.max(0, Number(segment?.startMs || 0) / 1000);
       const durationSec = Math.max(0.05, Number(segment?.durationMs || 0) / 1000);
@@ -971,7 +1003,7 @@ function buildMontageReviewVideoFilter(entries = [], options = {}) {
     const boxEnabled = options2?.boxEnabled === true;
     const boxColor = String(options2?.boxColor || "0x020617@0.480").trim();
     const boxBorderW = Math.max(0, Math.round(Number(options2?.boxBorderW ?? 0) || 0));
-    const fontFile = resolveFfmpegDrawtextFontFile();
+    const fontFile = fs.existsSync(FFMPEG_REVIEW_FONT_FILE) ? FFMPEG_REVIEW_FONT_FILE : "";
     const fontSource = fontFile
       ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
       : ":font='Sans'"; // Fallback for Linux if physical file not found
@@ -1167,6 +1199,15 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: MAX_BODY }));
+app.use(async (req, res, next) => {
+  if (!/^\/api\/(marcie|charly-brown)(?:\/|$)/.test(req.path) || req.method === 'GET') return next();
+  try {
+    const auth = await verifyFirebaseBearer(req), policy = require('../functions/src/research/budget.js');
+    const args=req.body?.method==='tools/call'?req.body.params?.arguments||{}:req.body||{};
+    const context = await policy.sessionContext({ db, uid: auth.uid, product: req.path.includes('charly-brown') ? 'charly' : 'marcie', sessionId: args.sessionId, unitId: args.targetUnitId });
+    policy.withResearchContext(context, next);
+  } catch (error) { next(error); }
+});
 
 function buildBackendHealthPayload() {
   const browserRenderer = getMontageBrowserRendererAvailability();
@@ -1181,7 +1222,10 @@ function buildBackendHealthPayload() {
     moodleShareUsersRoute: true,
     moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true,
+    podcasterTtsVoicesRoute: true,
+    podcasterTtsPreviewRoute: true,
     podcasterMusicGenerateRoute: true,
+    schroederAudioReferenceRoute: true,
     montageExportQueueAvailable: Boolean(montageExportQueue),
     montageExportQueueConfigured,
     montageExportQueueRequired: exportQueueRequired,
@@ -1245,20 +1289,93 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 const storageBucket = admin.storage().bucket();
+registerSavingsRoutes(app);
+const PIGPEN_SHEETS_SCOPES = [
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+  "https://www.googleapis.com/auth/drive.readonly"
+];
+let pigpenSheetsTokenClientPromise = null;
+let pigpenSheetsImpersonatedToken = null;
+
+async function getImpersonatedSheetsAccessToken(target) {
+  if (pigpenSheetsImpersonatedToken && pigpenSheetsImpersonatedToken.expiresAt - Date.now() > 60000) {
+    return pigpenSheetsImpersonatedToken.token;
+  }
+  const { GoogleAuth } = require("google-auth-library");
+  const credential = admin.app().options.credential;
+  const baseAuth = typeof credential?.clientEmail === "string" && credential.privateKey
+    ? new GoogleAuth({
+      credentials: { client_email: credential.clientEmail, private_key: String(credential.privateKey) },
+      scopes: ["https://www.googleapis.com/auth/iam"]
+    })
+    : new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  const baseToken = await (await baseAuth.getClient()).getAccessToken();
+  const bearer = String(typeof baseToken === "string" ? baseToken : baseToken?.token || "");
+  const endpoint = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(target)}:generateAccessToken`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ delegates: [], scope: PIGPEN_SHEETS_SCOPES })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.accessToken) {
+    const error = new Error(String(payload?.error?.message || `No se pudo obtener acceso como ${target}.`));
+    error.status = 502;
+    error.code = "PIGPEN_SHEETS_IMPERSONATION_DENIED";
+    throw error;
+  }
+  pigpenSheetsImpersonatedToken = {
+    token: String(payload.accessToken),
+    expiresAt: Date.parse(String(payload.expireTime || "")) || Date.now() + 3600000
+  };
+  return pigpenSheetsImpersonatedToken.token;
+}
+
+async function getPigpenSheetsAccessToken() {
+  const credential = admin.app().options.credential;
+  if (!credential) {
+    const error = new Error("La credencial del backend no puede acceder a Google Sheets.");
+    error.status = 503;
+    error.code = "PIGPEN_SHEETS_CREDENTIAL_UNAVAILABLE";
+    throw error;
+  }
+
+  // Las hojas se comparten con la cuenta de producción, así que en local se suplanta.
+  const impersonateTarget = String(process.env.PIGPEN_SHEETS_SERVICE_ACCOUNT || "").trim();
+  if (impersonateTarget) return getImpersonatedSheetsAccessToken(impersonateTarget);
+
+  // El token por defecto de firebase-admin no incluye scopes de Sheets, y Google lo
+  // rechaza con 403; se firma uno nuevo con la misma cuenta de servicio configurada.
+  if (typeof credential.clientEmail === "string" && credential.privateKey) {
+    if (!pigpenSheetsTokenClientPromise) {
+      pigpenSheetsTokenClientPromise = (async () => {
+        const { GoogleAuth } = require("google-auth-library");
+        return new GoogleAuth({
+          credentials: { client_email: credential.clientEmail, private_key: String(credential.privateKey) },
+          scopes: PIGPEN_SHEETS_SCOPES
+        }).getClient();
+      })();
+    }
+    const client = await pigpenSheetsTokenClientPromise;
+    const accessToken = await client.getAccessToken();
+    const scopedToken = String(typeof accessToken === "string" ? accessToken : accessToken?.token || "").trim();
+    if (scopedToken) return scopedToken;
+  }
+
+  if (typeof credential.getAccessToken !== "function") {
+    const error = new Error("La credencial del backend no puede acceder a Google Sheets.");
+    error.status = 503;
+    error.code = "PIGPEN_SHEETS_CREDENTIAL_UNAVAILABLE";
+    throw error;
+  }
+  const token = await credential.getAccessToken();
+  return String(token?.access_token || "").trim();
+}
+
 registerPigpenSheetsRoutes(app, {
   db,
   verifyFirebaseBearer,
-  getAccessToken: async () => {
-    const credential = admin.app().options.credential;
-    if (!credential || typeof credential.getAccessToken !== "function") {
-      const error = new Error("La credencial del backend no puede acceder a Google Sheets.");
-      error.status = 503;
-      error.code = "PIGPEN_SHEETS_CREDENTIAL_UNAVAILABLE";
-      throw error;
-    }
-    const token = await credential.getAccessToken();
-    return String(token?.access_token || "").trim();
-  }
+  getAccessToken: getPigpenSheetsAccessToken
 });
 registerMarcieWordPressRoutes(app, {
   resolveAuthContext: async (req) => {
@@ -1304,10 +1421,10 @@ registerMarcieEditorialAgentRoutes(app, {
       return res.status(status).json({ error: String(error?.code || error?.message || "marcie_agent_failed") });
     }
   },
-  client: GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null,
+  client: GEMINI_API_KEY ? require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY })) : null,
   generateText: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) => {
     if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
-    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
     const response = await client.models.generateContent({
       model: normalizeModel(model),
       contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
@@ -1316,27 +1433,82 @@ registerMarcieEditorialAgentRoutes(app, {
     return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
   }
 });
+function sanitizeGenAiConfig(config = {}) {
+  const clean = { ...config };
+  if (clean.thinkingConfig && typeof clean.thinkingConfig === "object") {
+    clean.thinkingConfig = { ...clean.thinkingConfig };
+    delete clean.thinkingConfig.thinkingBudget;
+    delete clean.thinkingConfig.thinking_budget;
+    if (!Object.keys(clean.thinkingConfig).length) delete clean.thinkingConfig;
+  }
+  return clean;
+}
+
+function sanitizeGemini3GenerationPayload(model = "", payload = {}) {
+  const id = String(model || "").trim().replace(/^models\//i, "").toLowerCase();
+  const isGemini36OrNewer = /^gemini-3\.(?:[6-9]|\d{2,})(?:-|$)/.test(id)
+    || /^gemini-(?:[4-9]|\d{2,})(?:\.|-|$)/.test(id);
+  const generationConfig = payload?.generationConfig;
+  if (!isGemini36OrNewer || !generationConfig || typeof generationConfig !== "object") return payload;
+
+  const clean = { ...payload, generationConfig: { ...generationConfig } };
+  for (const key of ["temperature", "topP", "topK", "top_p", "top_k"]) {
+    delete clean.generationConfig[key];
+  }
+  if (clean.generationConfig.thinkingConfig && typeof clean.generationConfig.thinkingConfig === "object") {
+    clean.generationConfig.thinkingConfig = { ...clean.generationConfig.thinkingConfig };
+    delete clean.generationConfig.thinkingConfig.thinkingBudget;
+    delete clean.generationConfig.thinkingConfig.thinking_budget;
+    if (!Object.keys(clean.generationConfig.thinkingConfig).length) delete clean.generationConfig.thinkingConfig;
+  }
+  delete clean.generationConfig.thinkingBudget;
+  delete clean.generationConfig.thinking_budget;
+  return clean;
+}
+
+require('../functions/src/research/routes.js').registerResearchRoutes(app, { db, resolveAuthContext: async req => { const decoded = await verifyFirebaseBearer(req); return { uid: decoded.uid, token: decoded.decoded || decoded }; } });
+require('./science-production.js').registerScienceBackend(app, { db, bucket: storageBucket, verifyFirebaseBearer, client: GEMINI_API_KEY ? require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY })) : undefined });
 registerCharlyBrownMcpRoutes(app, {
   db,
+  bucket: storageBucket,
   verifyFirebaseBearer,
   generateText: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) => {
     if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
-    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
+    const rawConfig = {
+      maxOutputTokens: 32768,
+      ...(json ? { responseMimeType: "application/json" } : {})
+    };
     const response = await client.models.generateContent({
       model: normalizeModel(model),
       contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-      config: {
-        maxOutputTokens: 32768,
-        thinkingConfig: { thinkingLevel },
-        ...(json ? { responseMimeType: "application/json" } : {})
-      }
+      config: sanitizeGenAiConfig(rawConfig)
     });
     return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
   },
   generateContent: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, contents = [], config = {} } = {}) => {
     if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
-    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    return client.models.generateContent({ model: normalizeModel(model), contents, config });
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
+    return client.models.generateContent({ model: normalizeModel(model), contents, config: sanitizeGenAiConfig(config) });
+  }
+});
+registerImageCreatorMcpRoutes(app, {
+  db,
+  bucket: storageBucket,
+  verifyFirebaseBearer,
+  generateText: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, prompt = "", json = false } = {}) => {
+    if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
+    const rawConfig = {
+      maxOutputTokens: 32768,
+      ...(json ? { responseMimeType: "application/json" } : {})
+    };
+    const response = await client.models.generateContent({
+      model: normalizeModel(model),
+      contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+      config: sanitizeGenAiConfig(rawConfig)
+    });
+    return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
   }
 });
 const EXPLICIT_STORAGE_BUCKET_NAME = String(
@@ -3070,10 +3242,15 @@ function normalizeModel(input = "") {
 function normalizeLiveVoiceName(input = "") {
   const raw = String(input || "").trim();
   if (!raw) return "";
-  for (const candidate of GEMINI_LIVE_ALLOWED_VOICE_NAMES) {
+  for (const candidate of GEMINI_TTS_ALLOWED_VOICE_NAMES) {
     if (candidate.toLowerCase() === raw.toLowerCase()) return candidate;
   }
   return "";
+}
+
+function normalizeGeminiCatalogVoiceId(input = "") {
+  const raw = String(input || "").trim();
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,119}$/.test(raw) ? raw : "";
 }
 
 function clampText(value = "", maxLen = 2000) {
@@ -3800,7 +3977,7 @@ function sanitizePodcasterSession(raw = {}) {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
       mimeType: clampText(clip?.mimeType || "audio/wav", 120) || "audio/wav",
-      model: clampText(clip?.model || "gemini-3.1-flash-tts-preview", 140) || "gemini-3.1-flash-tts-preview",
+      model: clampText(clip?.model || "gemini-3.8-flash-tts", 140) || "gemini-3.8-flash-tts",
       promptVersion: clampText(clip?.promptVersion || "podcaster_live_audio_v1", 80) || "podcaster_live_audio_v1",
       durationSec: clampNumber(clip?.durationSec, 0, 180, 0),
       playbackRate: Math.max(0.5, Math.min(10, Number(clip?.playbackRate || 1) || 1)),
@@ -4043,7 +4220,7 @@ function sanitizePodcasterSession(raw = {}) {
     allowLivePreviewWithoutStoredAudio: raw?.podcastVideoConfig?.allowLivePreviewWithoutStoredAudio === true,
     cheapVideoMode: raw?.podcastVideoConfig?.cheapVideoMode === true,
     transitionsByEdge,
-    audioMode: audioModeRaw === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene",
+    audioMode: audioModeRaw === "veo-native-audio" ? "veo-native-audio" : "gemini-tts-per-scene",
     masterVolume: clampNumber(raw?.podcastVideoConfig?.masterVolume, 0, 100, 100),
     clipVolume: clampNumber(raw?.podcastVideoConfig?.clipVolume, 0, 100, 0),
     timelineVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineVersion) || 1))),
@@ -4062,6 +4239,38 @@ function sanitizePodcasterSession(raw = {}) {
     videoModel: persistedVideoModel,
     onScreenTextTrack: sanitizeOnScreenTextTrack(raw?.podcastVideoConfig?.onScreenTextTrack || {}),
     geminiDialogueTrack: sanitizeGeminiDialogueTrack(raw?.podcastVideoConfig?.geminiDialogueTrack || {}),
+    freeVoiceTrack: (() => {
+      const rawTrack = raw?.podcastVideoConfig?.freeVoiceTrack || {};
+      const clips = Array.isArray(rawTrack.clips) ? rawTrack.clips.slice(0, 200).map((clip) => {
+        const id = clampText(clip?.id || "", 120);
+        const storagePath = clampText(clip?.storagePath || "", 900);
+        if (!id || !storagePath) return null;
+        const sourceDurationMs = clampNumber(clip?.sourceDurationMs, 100, 3600000, 100);
+        const trimInMs = clampNumber(clip?.trimInMs, 0, sourceDurationMs - 100, 0);
+        const trimOutMs = clampNumber(clip?.trimOutMs, trimInMs + 100, sourceDurationMs, sourceDurationMs);
+        return { id, name: clampText(clip?.name || "Voz", 180), storagePath,
+          downloadUrl: clampText(clip?.downloadUrl || "", 3200), mimeType: clampText(clip?.mimeType || "audio/mpeg", 120),
+          sourceDurationMs, startMs: clampNumber(clip?.startMs, 0, 3600000, 0), trimInMs, trimOutMs };
+      }).filter(Boolean) : [];
+      return { added: rawTrack.added === true || clips.length > 0, enabled: rawTrack.enabled !== false, volumePct: clampNumber(rawTrack.volumePct, 0, 100, 100), clips };
+    })(),
+    freeVideoTrack: (() => {
+      const rawTrack = raw?.podcastVideoConfig?.freeVideoTrack || {};
+      const clips = Array.isArray(rawTrack.clips) ? rawTrack.clips.slice(0, 200).map((clip) => {
+        const id = clampText(clip?.id || "", 120);
+        const storagePath = clampText(clip?.storagePath || "", 900);
+        if (!id || !storagePath) return null;
+        const sourceDurationMs = clampNumber(clip?.sourceDurationMs, 500, 3600000, 500);
+        const trimInMs = clampNumber(clip?.trimInMs, 0, sourceDurationMs - 500, 0);
+        const trimOutMs = clampNumber(clip?.trimOutMs, trimInMs + 500, sourceDurationMs, sourceDurationMs);
+        return { id, name: clampText(clip?.name || "Video", 180), storagePath,
+          downloadUrl: clampText(clip?.downloadUrl || "", 3200), mimeType: clampText(clip?.mimeType || "video/mp4", 120),
+          sourceDurationMs, startMs: clampNumber(clip?.startMs, 0, 3600000, 0), trimInMs, trimOutMs,
+          visualLayoutMode: clip?.visualLayoutMode === "blur-backdrop" ? "blur-backdrop" : "default",
+          mediaMotionPreset: ["none", "pan-left-right", "pan-right-left", "pan-up-down", "pan-down-up"].includes(clip?.mediaMotionPreset) ? clip.mediaMotionPreset : "none" };
+      }).filter(Boolean) : [];
+      return { added: rawTrack.added === true || clips.length > 0, enabled: rawTrack.enabled !== false, clips };
+    })(),
     geminiDialogueTrackIndex: Math.max(0, Math.min(999, Math.floor(Number(raw?.podcastVideoConfig?.geminiDialogueTrackIndex) || 0))),
     montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
     montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100),
@@ -4185,6 +4394,10 @@ function sanitizePodcasterSession(raw = {}) {
   return {
     id: clampText(raw?.id || "", 100),
     title: clampText(raw?.title || "Sesión sin título", 180) || "Sesión sin título",
+    workspaceType: String(raw?.workspaceType || "").trim() === "schroeder-sound-lab" ? "schroeder-sound-lab" : "",
+    soundLab: raw?.workspaceType === "schroeder-sound-lab" && raw?.soundLab && typeof raw.soundLab === "object"
+      ? JSON.parse(JSON.stringify(raw.soundLab))
+      : undefined,
     prompt: clampText(raw?.prompt || "", 5000),
     archived: raw?.archived === true,
     publicar: raw?.publicar === true,
@@ -5273,44 +5486,7 @@ function extractErrorText(value = null, fallback = "", seen = new Set()) {
   }
 }
 
-function buildGeminiLiveClient() {
-  const client = new GoogleGenAI({
-    apiKey: GEMINI_API_KEY,
-    httpOptions: { apiVersion: "v1alpha" }
-  });
-  if (!client?.authTokens || typeof client.authTokens.create !== "function") {
-    throw new Error("SDK @google/genai sin authTokens.create en backend local.");
-  }
-  return client;
-}
 
-function summarizeGeminiLiveError(error) {
-  const status = Number(
-    error?.status
-    || error?.code
-    || error?.cause?.status
-    || error?.cause?.response?.status
-    || 0
-  ) || 0;
-  const contentType = String(
-    error?.cause?.response?.headers?.get?.("content-type")
-    || error?.response?.headers?.get?.("content-type")
-    || ""
-  ).trim();
-  const bodySnippet = String(
-    error?.cause?.body
-    || error?.cause?.responseText
-    || error?.responseText
-    || error?.details
-    || error?.message
-    || ""
-  ).trim().slice(0, 500);
-  return {
-    status,
-    contentType,
-    bodySnippet,
-  };
-}
 
 function decodeDataUrl(dataUrl = "") {
   const decoded = decodeBase64DataUrl(dataUrl, SCREENSHOT_MAX_BYTES);
@@ -5389,11 +5565,37 @@ function sleep(ms = 0) {
 
 function sanitizePodcasterMusicModel(value = "") {
   const clean = String(value || "").trim();
-  return clean === "lyria-3-pro-preview" ? "lyria-3-pro-preview" : "lyria-3-clip-preview";
+  return new Set(["lyria-3.5", "lyria-3-pro-preview", "lyria-3-clip-preview"]).has(clean)
+    ? clean
+    : "lyria-3.5";
 }
 
-function buildPodcasterMusicPrompt(prompt = "", preset = "ambient") {
+const schroederGenerationJobs = new Map();
+const SCHROEDER_JOB_TTL_MS = 24 * 60 * 60 * 1000;
+
+function publicSchroederGenerationJob(job = {}) {
+  return {
+    ok: true,
+    jobId: String(job.jobId || ""),
+    status: String(job.status || "queued"),
+    progress: Math.max(0, Math.min(1, Number(job.progress || 0) || 0)),
+    hint: String(job.hint || "Generación en segundo plano"),
+    updatedAt: String(job.updatedAt || new Date().toISOString()),
+    ...(job.result && typeof job.result === "object" ? { result: job.result, ...job.result } : {}),
+    ...(job.error ? { error: job.error } : {})
+  };
+}
+
+function pruneSchroederGenerationJobs() {
+  const threshold = Date.now() - SCHROEDER_JOB_TTL_MS;
+  for (const [jobId, job] of schroederGenerationJobs) {
+    if (Date.parse(String(job.updatedAt || job.createdAt || "")) < threshold) schroederGenerationJobs.delete(jobId);
+  }
+}
+
+function buildPodcasterMusicPrompt(prompt = "", preset = "ambient", { soundLab = false } = {}) {
   const cleanPrompt = String(prompt || "").replace(/\s+/g, " ").trim().slice(0, 1200);
+  if (soundLab) return cleanPrompt || "Create an original polished song.";
   const cleanPreset = String(preset || "ambient").trim().toLowerCase();
   const styleHint = cleanPreset === "pulse"
     ? "Light electronic pulse, energetic but clean, modern rhythm section."
@@ -5411,18 +5613,120 @@ function buildPodcasterMusicPrompt(prompt = "", preset = "ambient") {
   ].filter(Boolean).join(" ");
 }
 
+function isMusicPolicyBlock(error) {
+  const status = Number(error?.status || error?.response?.status || error?.code || 0);
+  const details = [error?.message, error?.response?.data?.error?.message, error?.response?.data?.error?.status]
+    .filter(Boolean).join(" ").toLowerCase();
+  return status === 400 && /blocked|policy|prohibited|sensitive|safety|modify your input/.test(details);
+}
+
+function buildPolicySafeMusicPrompt(prompt = "") {
+  const source = String(prompt || "").replace(/\r/g, "");
+  const structural = source.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^(?:create (?:a |an )?|genre and blend:|\d{2,3}\s*bpm\b|key:|instrumental only|song with vocals in)/i.test(line))
+    .slice(0, 8);
+  const instruments = ["trumpet", "piano", "guitar", "bass", "drums", "violin", "cello", "saxophone", "flute", "synthesizer", "marimba", "percussion"]
+    .filter((name) => new RegExp(`\\b${name}\\b`, "i").test(source));
+  return [
+    "Create an original polished musical piece from a nonverbal melodic idea. Use a clear recurring melodic contour and rhythmic motif. Do not include copyrighted melodies or imitate a real performer.",
+    instruments.length ? `Featured instruments: ${instruments.join(", ")}.` : "Use an original balanced instrumental arrangement.",
+    ...structural
+  ].join("\n").slice(0, 5000);
+}
+
+async function analyzeGeneratedSongFingerprint({ client, audio, mimeType, model }) {
+  if (!audio?.length || audio.length > 18 * 1024 * 1024) return null;
+  const allowedModels = new Set(["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]);
+  const analysisModel = allowedModels.has(String(model || "")) ? String(model) : DEFAULT_GEMINI_TEXT_MODEL;
+  const response = await client.models.generateContent({
+    model: analysisModel,
+    contents: [{ role: "user", parts: [
+      { text: "Analyze this generated song as a reusable musical identity. Return JSON only with: key, bpm, timeSignature, overallHarmony, sections (array with name, timeRange, chordProgression, scaleMode, melodicContour, anchorNotes, rhythm), instrumentation, vocalProfile, recurringMotifs, productionFingerprint, reusePrompt. Estimate anchor notes and chords conservatively; use empty strings when uncertain. The reusePrompt must instruct a music model to preserve harmony, recurring motifs, section structure, tempo, key and melodic contour while allowing a different genre and arrangement." },
+      { inlineData: { mimeType, data: audio.toString("base64") } }
+    ] }],
+    config: { maxOutputTokens: 3000, responseMimeType: "application/json" }
+  });
+  const text = String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
+  return parseJsonObjectFromModelTextLocal(text);
+}
+
+const HUMMING_ANALYSIS_PROMPT = "Analyze this audio as a musical reference. It may contain humming, whistling, beatboxing, clicks, buzzing, breath sounds or another mouth-made sound rather than speech. Preserve its pitch contour, repeated motifs, rhythm, articulation, timbre envelope, estimated tempo, key or mode and phrase structure. Translate those traits into a concise English prompt for an original song or instrumental performance. When a target instrument is requested, make that instrument perform the recorded gesture recognizably. Do not identify the performer or infer personal traits. Return only the music-generation prompt.";
+const HUMMING_ANALYSIS_FALLBACK_PROMPT = "Analyze only the nonverbal musical features of this audio, including mouth-made sounds: pitch contour, repeated motifs, rhythm, articulation, timbre envelope, estimated tempo, key or mode and phrase structure. Return one concise English prompt for an original instrumental composition that reproduces those musical gestures. Do not transcribe speech or identify people. Return only the prompt.";
+const SONG_REVISION_ANALYSIS_PROMPT = "Analyze this complete song as the source for a new original variation. Identify its estimated key, tempo, meter, harmony, section order, chord movement, melodic contours, anchor notes, recurring motifs, instrumentation, vocal profile and production character. Combine that musical identity with the user's transformation direction. Return only a concise English Lyria prompt that preserves recognizable harmony, motifs, structure and melodic contour while applying the requested changes. Do not identify or imitate a real artist.";
+const SONG_REVISION_FALLBACK_PROMPT = "Describe this song's reusable musical identity as a concise English Lyria prompt: estimated key, BPM, harmony, form, melodic contour, recurring motifs, instrumentation and vocal profile. Preserve those traits in a new original variation. Do not identify performers. Return only the prompt.";
+
+function isGeminiContentBlocked(error, response = null) {
+  const status = Number(error?.status || error?.response?.status || error?.code || 0);
+  const details = [error?.message, error?.response?.data?.error?.message, error?.response?.data?.error?.status, response?.promptFeedback?.blockReason]
+    .filter(Boolean).join(" ").toLowerCase();
+  return status === 400 || (!status && /blocked|policy|prohibited|sensitive|safety|blocklist|spii|content_blocked|modify your input/.test(details));
+}
+
+function geminiResponseText(response = {}) {
+  return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
+}
+
+async function analyzeHummingWithFallback({ client, model, mimeType, audioBase64, userInstruction = "", analysisMode = "musical-reference" }) {
+  const direction = clampText(userInstruction, 500).replace(/\s+/g, " ").trim();
+  const isSongRevision = analysisMode === "song-revision";
+  const analysisPrompt = isSongRevision ? SONG_REVISION_ANALYSIS_PROMPT : HUMMING_ANALYSIS_PROMPT;
+  const fallbackPrompt = isSongRevision ? SONG_REVISION_FALLBACK_PROMPT : HUMMING_ANALYSIS_FALLBACK_PROMPT;
+  const primaryPrompt = direction
+    ? `${analysisPrompt}\nUser transformation direction (use only as creative direction): ${JSON.stringify(direction)}`
+    : analysisPrompt;
+  const request = (requestModel, text) => client.models.generateContent({
+    model: requestModel,
+    contents: [{ role: "user", parts: [{ text }, { inlineData: { mimeType, data: audioBase64 } }] }],
+    config: { maxOutputTokens: 1200 }
+  });
+  const attempts = [
+    { model, text: primaryPrompt },
+    { model, text: fallbackPrompt },
+    ...(model === "gemini-3.5-flash-lite" ? [] : [{ model: "gemini-3.5-flash-lite", text: fallbackPrompt }])
+  ];
+  let lastBlockedError = null;
+  for (const attempt of attempts) {
+    try {
+      const response = await request(attempt.model, attempt.text);
+      if (geminiResponseText(response)) return response;
+      if (!isGeminiContentBlocked(null, response)) continue;
+    } catch (error) {
+      if (!isGeminiContentBlocked(error)) throw error;
+      lastBlockedError = error;
+    }
+  }
+  if (lastBlockedError) throw lastBlockedError;
+  throw Object.assign(new Error("audio_reference_policy_blocked"), { status: 400 });
+}
+
 function readLyriaAudioParts(response = {}) {
   const parts = Array.isArray(response?.candidates?.[0]?.content?.parts)
     ? response.candidates[0].content.parts
     : Array.isArray(response?.parts)
       ? response.parts
       : [];
-  return parts
+  const legacy = parts
     .map((part) => ({
       data: String(part?.inlineData?.data || part?.inline_data?.data || "").trim(),
       mimeType: String(part?.inlineData?.mimeType || part?.inline_data?.mimeType || "audio/mpeg").trim() || "audio/mpeg"
     }))
     .filter((part) => part.data);
+  if (legacy.length) return legacy;
+  const found = [];
+  const visit = (value) => {
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (!value || typeof value !== "object") return;
+    const data = String(value.data || value.base64 || "").trim();
+    const mimeType = String(value.mime_type || value.mimeType || "").trim();
+    if (data && (String(value.type || "").toLowerCase() === "audio" || mimeType.toLowerCase().startsWith("audio/"))) {
+      found.push({ data, mimeType: mimeType || "audio/mpeg" });
+      return;
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(response);
+  return found;
 }
 
 function readGeminiAudioParts(responseBody = {}) {
@@ -6094,10 +6398,7 @@ async function buildDialogueVideoRegenerationAnalysis(options = {}) {
           role: "user",
           parts
         }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json"
-        }
+        generationConfig: { responseMimeType: "application/json" }
       })
     }
   );
@@ -6678,7 +6979,17 @@ app.post("/api/unidades/support-graphics/upload", async (req, res) => {
     if (!dataBase64) {
       return res.status(400).json({ error: "Falta dataBase64." });
     }
-    if (!storagePath.includes(`/${uid}/`)) {
+    // The browser writes the owner segment through the same lowercasing sanitizer the deployed
+    // route compares against (functions/src/uploads.js), and Firebase uids carry uppercase
+    // letters, so comparing the raw uid refused every hand-made upload.
+    const ownerSegment = String(uid || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100);
+    if (!ownerSegment || !storagePath.includes(`/${ownerSegment}/`)) {
       return res.status(403).json({ error: "La ruta no corresponde al usuario autenticado." });
     }
 
@@ -7553,6 +7864,460 @@ app.use("/api/podcaster", async (req, res, next) => {
   }
 });
 
+app.use("/api/schroeder", async (req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  try {
+    req.authContext = await verifyFirebaseBearer(req);
+    return next();
+  } catch (error) {
+    return res.status(Number(error?.status || 401)).json({ error: String(error?.message || "AUTH_REQUIRED") });
+  }
+});
+
+function isSchroederAdmin(req) {
+  const decoded = req.authContext?.decoded || {};
+  return decoded.admin === true || String(decoded.role || decoded.user_role || "").trim().toLowerCase() === "admin";
+}
+
+async function findSchroederStorageFile(storagePath) {
+  for (const bucket of getStorageBucketCandidates()) {
+    const file = bucket.file(storagePath);
+    // eslint-disable-next-line no-await-in-loop
+    const [exists] = await file.exists().catch(() => [false]);
+    if (exists) return { bucket, file };
+  }
+  return null;
+}
+
+async function cleanupExpiredSchroederPreviews(ownerId) {
+  const prefix = `schroeder-sound-lab/previews/${normalizeStorageSegment(ownerId, "user")}/`;
+  for (const bucket of getStorageBucketCandidates()) {
+    // eslint-disable-next-line no-await-in-loop
+    const [files] = await bucket.getFiles({ prefix, maxResults: 250 }).catch(() => [[]]);
+    for (const file of files) {
+      // eslint-disable-next-line no-await-in-loop
+      const [metadata] = await file.getMetadata().catch(() => [{}]);
+      const expiresAt = Date.parse(String(metadata?.metadata?.expiresAt || ""));
+      if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+        // eslint-disable-next-line no-await-in-loop
+        await file.delete({ ignoreNotFound: true }).catch(() => {});
+      }
+    }
+  }
+}
+
+function schroederTrackFromStorage(bucket, file, metadata = {}) {
+  const custom = metadata.metadata || {};
+  const token = String(custom.firebaseStorageDownloadTokens || "").trim();
+  return {
+    id: String(custom.audioId || path.basename(file.name).replace(/\.[^.]+$/, "")),
+    title: String(custom.title || "Audio aprobado"),
+    kind: String(custom.kind || "music"),
+    format: String(custom.format || "song"),
+    mimeType: String(metadata.contentType || custom.mimeType || "audio/mpeg"),
+    size: Number(metadata.size || 0),
+    model: String(custom.model || ""),
+    sessionId: String(custom.sessionId || ""),
+    createdAt: String(custom.createdAt || metadata.timeCreated || ""),
+    approvedAt: String(custom.approvedAt || metadata.updated || metadata.timeCreated || ""),
+    durationSec: Math.max(0, Number(custom.durationSec || 0) || 0),
+    prompt: String(custom.prompt || ""),
+    genre: String(custom.genre || ""),
+    bpm: Number(custom.bpm || 0) || 0,
+    key: String(custom.key || ""),
+    podcasterLibraryId: String(custom.podcasterLibraryId || ""),
+    storagePath: file.name,
+    downloadUrl: token
+      ? buildMontageExportFirebaseDownloadUrl(bucket, file.name, token)
+      : `/api/assets/proxy-media?storagePath=${encodeURIComponent(file.name)}`
+  };
+}
+
+app.post("/api/schroeder/library/approve", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const previewStoragePath = normalizeStorageFilePath(req.body?.previewStoragePath || "");
+    const previewPrefix = `schroeder-sound-lab/previews/${normalizeStorageSegment(uid, "user")}/`;
+    if (!previewStoragePath.startsWith(previewPrefix)) return res.status(403).json({ error: "Vista previa no autorizada." });
+    const source = await findSchroederStorageFile(previewStoragePath);
+    if (!source) return res.status(404).json({ error: "La vista previa ya no está disponible." });
+    const sessionId = normalizeStorageSegment(req.body?.sessionId || "session", "session");
+    const audioId = normalizeStorageSegment(req.body?.audioId || randomUUID(), "audio");
+    const ext = path.extname(previewStoragePath).replace(/^\./, "") || getAudioExtension(req.body?.mimeType || "audio/mpeg");
+    const approvedPath = `schroeder-sound-lab/approved/${normalizeStorageSegment(uid, "user")}/${sessionId}/${audioId}.${ext}`;
+    const approvedAt = new Date().toISOString();
+    const token = randomUUID();
+    const destination = source.bucket.file(approvedPath);
+    await source.file.copy(destination);
+    const [sourceMetadata] = await source.file.getMetadata().catch(() => [{}]);
+    const durationSec = Math.max(0, Number(req.body?.durationSec || sourceMetadata?.metadata?.durationSec || 0) || 0);
+    await destination.setMetadata({
+      contentType: String(sourceMetadata.contentType || req.body?.mimeType || "audio/mpeg"),
+      cacheControl: "private,max-age=3600",
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+        ownerId: uid,
+        sessionId,
+        audioId,
+        title: clampText(req.body?.title || "Audio aprobado", 180),
+        kind: clampText(req.body?.kind || "music", 30),
+        format: clampText(req.body?.format || "song", 30),
+        model: clampText(req.body?.model || "", 120),
+        durationSec: String(durationSec),
+        prompt: clampText(req.body?.prompt || "", 4000),
+        genre: clampText(req.body?.genre || "", 80),
+        bpm: String(req.body?.bpm || ""),
+        key: clampText(req.body?.key || "", 40),
+        createdAt: clampText(req.body?.createdAt || approvedAt, 64),
+        approvedAt
+      }
+    });
+    await source.file.delete({ ignoreNotFound: true });
+    const [metadata] = await destination.getMetadata();
+    return res.status(201).json({ ok: true, track: schroederTrackFromStorage(source.bucket, destination, metadata) });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo aprobar el audio.") });
+  }
+});
+
+app.post("/api/schroeder/previews/delete", async (req, res) => {
+  const uid = String(req.authContext?.uid || "").trim();
+  const storagePath = normalizeStorageFilePath(req.body?.storagePath || "");
+  const prefix = `schroeder-sound-lab/previews/${normalizeStorageSegment(uid, "user")}/`;
+  if (!storagePath.startsWith(prefix)) return res.status(403).json({ error: "Vista previa no autorizada." });
+  await deleteStoragePath(storagePath);
+  return res.status(200).json({ ok: true });
+});
+
+app.get("/api/schroeder/previews/list", async (req, res) => {
+  const uid = String(req.authContext?.uid || "").trim();
+  const sessionId = normalizeStorageSegment(req.query?.sessionId, "session");
+  const prefix = `schroeder-sound-lab/previews/${normalizeStorageSegment(uid, "user")}/${sessionId}/`;
+  const items = [];
+  const seen = new Set();
+  for (const bucket of getStorageBucketCandidates()) {
+    // eslint-disable-next-line no-await-in-loop
+    const [files] = await bucket.getFiles({ prefix, maxResults: 250 }).catch(() => [[]]);
+    for (const file of files) {
+      if (seen.has(file.name)) continue;
+      seen.add(file.name);
+      // eslint-disable-next-line no-await-in-loop
+      const [metadata] = await file.getMetadata().catch(() => [{}]);
+      const custom = metadata?.metadata || {};
+      const jobId = String(custom.jobId || file.name.match(/(?:ai-)?([0-9a-f-]{36})\.[^.]+$/i)?.[1] || "");
+      // eslint-disable-next-line no-await-in-loop
+      const jobSnapshot = jobId ? await db.collection("podcaster_ai_jobs").doc(jobId).get().catch(() => null) : null;
+      const job = jobSnapshot?.exists ? jobSnapshot.data() || {} : {};
+      const kind = String(custom.kind || job.type || (file.name.includes("/voice/") ? "voice" : "music")) === "music" ? "music" : "voice";
+      const prompt = String(job.input?.prompt || "");
+      const track = schroederTrackFromStorage(bucket, file, metadata);
+      const draft = kind === "music"
+        ? { kind: "music", title: "Canción recuperada", prompt, sourcePrompt: prompt, model: String(job.model || custom.model || "lyria-3.5"), musicType: /instrumental only|sin voz/i.test(prompt) ? "instrumental" : "vocal", durationSec: Number(prompt.match(/(\d+)\s*seconds?/i)?.[1] || 120), genre: String(job.input?.preset || ""), language: "Español", bpm: Number(prompt.match(/(\d+)\s*BPM/i)?.[1] || 100), key: String(prompt.match(/Key:\s*([^\.\n]+)/i)?.[1] || ""), lyrics: "", musicalFingerprint: job.result?.track?.musicalFingerprint || null }
+        : { kind: "voice", title: "Audio recuperado", prompt: String(job.input?.text || prompt), format: String(job.input?.format || custom.format || "phrase"), language: String(job.input?.speechLocale || custom.speechLocale || "Español"), voiceName: String(job.input?.voiceName || custom.voiceName || "Aoede"), style: String(job.input?.style || "natural y clara"), text: String(job.input?.text || "") };
+      items.push({ ...track, title: draft.title, kind, format: kind === "music" ? "song" : draft.format, model: draft.model || String(custom.model || ""), sessionId, createdAt: String(job.createdAt || track.createdAt || metadata.timeCreated || ""), draft, musicalFingerprint: draft.musicalFingerprint || null });
+    }
+  }
+  items.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  return res.status(200).json({ ok: true, items });
+});
+
+app.get("/api/schroeder/library/list", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const requestedOwnerId = clampText(req.query?.ownerId || "", 180);
+    if (requestedOwnerId && requestedOwnerId !== uid && !isSchroederAdmin(req)) {
+      return res.status(403).json({ error: "schroeder_admin_required" });
+    }
+    const ownerId = normalizeStorageSegment(requestedOwnerId || uid, "user");
+    const prefix = `schroeder-sound-lab/approved/${ownerId}/`;
+    const items = [];
+    const seen = new Set();
+    for (const bucket of getStorageBucketCandidates()) {
+      // eslint-disable-next-line no-await-in-loop
+      const [files] = await bucket.getFiles({ prefix, maxResults: 250 }).catch(() => [[]]);
+      for (const file of files) {
+        if (seen.has(file.name)) continue;
+        seen.add(file.name);
+        // eslint-disable-next-line no-await-in-loop
+        const [metadata] = await file.getMetadata().catch(() => [{}]);
+        items.push(schroederTrackFromStorage(bucket, file, metadata));
+      }
+    }
+    items.sort((a, b) => String(b.approvedAt || "").localeCompare(String(a.approvedAt || "")));
+    return res.status(200).json({ ok: true, items });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo leer la biblioteca.") });
+  }
+});
+
+app.post("/api/schroeder/library/rename", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const storagePath = normalizeStorageFilePath(req.body?.storagePath || "");
+    const ownPrefix = `schroeder-sound-lab/approved/${normalizeStorageSegment(uid, "user")}/`;
+    if (!storagePath.startsWith(ownPrefix)) return res.status(403).json({ error: "Audio no autorizado." });
+    const title = clampText(String(req.body?.title || "").replace(/\s+/g, " ").trim(), 180);
+    if (!title) return res.status(400).json({ error: "Escribe un título válido." });
+    const source = await findSchroederStorageFile(storagePath);
+    if (!source) return res.status(404).json({ error: "El audio aprobado ya no está disponible." });
+    const [metadata] = await source.file.getMetadata().catch(() => [{}]);
+    await source.file.setMetadata({
+      metadata: { ...(metadata.metadata || {}), title }
+    });
+    const [updatedMetadata] = await source.file.getMetadata();
+    return res.status(200).json({ ok: true, track: schroederTrackFromStorage(source.bucket, source.file, updatedMetadata) });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo cambiar el título.") });
+  }
+});
+
+app.post("/api/schroeder/library/delete", async (req, res) => {
+  const uid = String(req.authContext?.uid || "").trim();
+  const storagePath = normalizeStorageFilePath(req.body?.storagePath || "");
+  const prefix = `schroeder-sound-lab/approved/${normalizeStorageSegment(uid, "user")}/`;
+  if (!storagePath.startsWith(prefix) && !isSchroederAdmin(req)) return res.status(403).json({ error: "Audio no autorizado." });
+  await deleteStoragePath(storagePath);
+  return res.status(200).json({ ok: true });
+});
+
+app.post("/api/schroeder/library/add-to-podcaster", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const storagePath = normalizeStorageFilePath(req.body?.storagePath || "");
+    const ownPrefix = `schroeder-sound-lab/approved/${normalizeStorageSegment(uid, "user")}/`;
+    if (!storagePath.startsWith(ownPrefix)) return res.status(403).json({ error: "Canción no autorizada." });
+    const source = await findSchroederStorageFile(storagePath);
+    if (!source) return res.status(404).json({ error: "La canción aprobada ya no está disponible." });
+    const [sourceMetadata] = await source.file.getMetadata().catch(() => [{}]);
+    const audioId = normalizeStorageSegment(req.body?.audioId || sourceMetadata?.metadata?.audioId || randomUUID(), "audio");
+    const ownerSegment = normalizeStorageSegment(uid, "user");
+    const libraryId = `schroeder-${ownerSegment}-${audioId}`.slice(0, 180);
+    const ext = path.extname(storagePath).replace(/^\./, "") || "mp3";
+    const destinationPath = `podcaster/library/music/${libraryId}.${ext}`;
+    const destination = source.bucket.file(destinationPath);
+    const token = randomUUID();
+    await source.file.copy(destination);
+    const [metadata] = await destination.getMetadata();
+    const size = Math.max(0, Number(metadata?.size || sourceMetadata?.size || req.body?.size || 0));
+    let durationSec = Math.max(0, Number(req.body?.durationSec || sourceMetadata?.metadata?.durationSec || 0) || 0);
+    if (durationSec <= 0.05 && isFfmpegAvailable()) {
+      try {
+        const [downloadedBuffer] = await source.file.download();
+        const tempPath = path.join(os.tmpdir(), `probe-${randomUUID()}.${ext}`);
+        await fs.promises.writeFile(tempPath, downloadedBuffer);
+        const probeResult = await runFfmpegCommand(["-i", tempPath, "-f", "null", "-"], { timeoutMs: 5000 }).catch((e) => e);
+        await fs.promises.unlink(tempPath).catch(() => {});
+        const streamInfo = extractMediaStreamInfoFromFfmpegStderr(probeResult.stderr || "");
+        durationSec = parseFfmpegDurationSeconds(streamInfo.duration);
+      } catch (_) {}
+    }
+    if (durationSec <= 0.05 && size > 0) {
+      durationSec = Math.max(15, Math.round((size * 8) / 192000));
+    }
+    if (durationSec <= 0.05) {
+      durationSec = 120;
+    }
+    await destination.setMetadata({
+      contentType: String(sourceMetadata.contentType || req.body?.mimeType || "audio/mpeg"),
+      cacheControl: "private,max-age=3600",
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+        ownerId: uid,
+        sourceAudioId: audioId,
+        kind: "podcaster_music_library",
+        durationSec: String(durationSec),
+        title: clampText(req.body?.title || sourceMetadata?.metadata?.title || "Canción", 180),
+        model: clampText(req.body?.model || sourceMetadata?.metadata?.model || "", 120),
+        prompt: clampText(req.body?.prompt || sourceMetadata?.metadata?.prompt || "", 4000)
+      }
+    });
+    await source.file.setMetadata({
+      metadata: {
+        ...(sourceMetadata?.metadata || {}),
+        podcasterLibraryId: libraryId,
+        durationSec: String(durationSec)
+      }
+    }).catch(() => {});
+    const updatedAt = new Date().toISOString();
+    const track = {
+      libraryId,
+      name: clampText(req.body?.title || sourceMetadata?.metadata?.title || "Canción", 180),
+      mimeType: String(metadata.contentType || req.body?.mimeType || "audio/mpeg"),
+      size,
+      durationSec,
+      downloadUrl: buildMontageExportFirebaseDownloadUrl(source.bucket, destinationPath, token),
+      storagePath: destinationPath,
+      updatedAt,
+      ownerId: uid,
+      ownerEmail: clampText(req.authContext?.email || "", 180) || "Schroeder Sound Lab",
+      sourceAudioId: audioId,
+      model: clampText(req.body?.model || sourceMetadata?.metadata?.model || "lyria-3.5", 120),
+      prompt: clampText(req.body?.prompt || sourceMetadata?.metadata?.prompt || "", 4000),
+      bpm: clampNumber(req.body?.bpm, 0, 300, 0),
+      key: clampText(req.body?.key || "", 40),
+      genre: clampText(req.body?.genre || "", 80),
+      trimInMs: 0,
+      trimOutMs: Math.round(durationSec * 1000),
+      durationMeasuredWith: "audio-metadata"
+    };
+    await db.collection("podcaster_music_library").doc(libraryId).set(track, { merge: true });
+    return res.status(200).json({ ok: true, track });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo añadir la canción a Podcaster.") });
+  }
+});
+
+app.post("/api/schroeder/audio-reference/analyze", async (req, res) => {
+  try {
+    if (!hasGeminiKey()) return res.status(500).json({ error: "El servicio de creación no está configurado." });
+    const uid = String(req.authContext?.uid || "").trim();
+    const storagePath = normalizeStorageFilePath(req.body?.storagePath || "");
+    let mimeType = clampText(req.body?.mimeType || "audio/webm", 80).toLowerCase().split(";")[0].trim();
+    let audioBase64 = String(req.body?.audioBase64 || "").replace(/\s+/g, "");
+    if (storagePath) {
+      const ownerSegment = normalizeStorageSegment(uid, "user");
+      const allowedPrefixes = [`schroeder-sound-lab/previews/${ownerSegment}/`, `schroeder-sound-lab/approved/${ownerSegment}/`];
+      if (!allowedPrefixes.some((prefix) => storagePath.startsWith(prefix))) return res.status(403).json({ error: "Audio no autorizado." });
+      const source = await findSchroederStorageFile(storagePath);
+      if (!source) return res.status(404).json({ error: "El audio seleccionado ya no está disponible." });
+      const [metadata] = await source.file.getMetadata().catch(() => [{}]);
+      const [audio] = await source.file.download();
+      if (!audio?.length || audio.length > 18 * 1024 * 1024) return res.status(413).json({ error: "La canción es demasiado grande para analizarla." });
+      mimeType = clampText(metadata?.contentType || mimeType || "audio/mpeg", 80).toLowerCase().split(";")[0].trim();
+      audioBase64 = audio.toString("base64");
+    }
+    const allowed = new Set(["audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg"]);
+    if (!allowed.has(mimeType)) return res.status(400).json({ error: "Formato de grabación no compatible." });
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(audioBase64)) return res.status(400).json({ error: "Grabación no válida." });
+    const byteLength = Buffer.byteLength(audioBase64, "base64");
+    const maxBytes = storagePath ? 18 * 1024 * 1024 : 6 * 1024 * 1024;
+    if (!byteLength || byteLength > maxBytes) return res.status(413).json({ error: "La grabación es demasiado grande." });
+    const requestedModel = normalizeModel(req.body?.model || DEFAULT_GEMINI_TEXT_MODEL);
+    const allowedModels = new Set(["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]);
+    const model = allowedModels.has(requestedModel) ? requestedModel : DEFAULT_GEMINI_TEXT_MODEL;
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
+    let response;
+    try {
+      response = await analyzeHummingWithFallback({ client, model, mimeType, audioBase64, userInstruction: req.body?.userInstruction, analysisMode: req.body?.analysisMode });
+    } catch (error) {
+      if (isGeminiContentBlocked(error)) return res.status(422).json({ error: "No se pudo interpretar el sonido. Intenta grabarlo de nuevo sin ruido de fondo." });
+      throw error;
+    }
+    const prompt = geminiResponseText(response);
+    if (!prompt) return res.status(422).json({ error: "No se detectó un gesto musical claro. Graba el sonido un poco más cerca del micrófono." });
+    return res.status(200).json({ ok: true, prompt });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo interpretar el sonido musical.") });
+  }
+});
+
+function extractGeminiVoiceReplicationError(data, upstreamStatus = 502) {
+  const details = Array.isArray(data?.error?.details) ? data.error.details : [];
+  for (const item of details) {
+    const detailText = String(item?.detail || "");
+    const jsonMatch = detailText.match(/data:\s*"(\{.*?\})"/);
+    if (jsonMatch) {
+      try {
+        const unescaped = jsonMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+        const parsed = JSON.parse(unescaped);
+        const msg = parsed?.error?.message;
+        if (msg) return formatReplicationErrorMessage(msg);
+      } catch (_) {}
+    }
+    if (detailText.includes("The recorded phrase didn't match the text on screen")) {
+      return "La grabación de consentimiento no coincide con la frase requerida. Léela exactamente como se muestra en pantalla y sin ruidos de fondo.";
+    }
+    if (detailText.includes("Consent flow failed")) {
+      return "No se pudo verificar la grabación de consentimiento. Asegúrate de hablar claro y leer la frase exacta en un lugar silencioso.";
+    }
+    if (detailText.includes("Original error:")) {
+      const origMatch = detailText.match(/Original error:\s*([A-Z_]+:\s*([^[\n]+))/);
+      if (origMatch && origMatch[2]) {
+        return formatReplicationErrorMessage(origMatch[2].trim());
+      }
+    }
+  }
+
+  const rawMessage = String(data?.error?.message || data?.error || data?.message || "").trim();
+  if (rawMessage && rawMessage !== "Error translating server response to JSON") {
+    return formatReplicationErrorMessage(rawMessage);
+  }
+
+  return "No se pudo crear la voz en Gemini. Asegúrate de grabar en un entorno silencioso, usar el mismo micrófono para ambas muestras y leer la frase de consentimiento exacta.";
+}
+
+function formatReplicationErrorMessage(msg) {
+  const clean = String(msg || "").trim();
+  if (!clean) return "No se pudo crear la voz.";
+  if (/didn't match the text|phrase.*match|not match.*screen/i.test(clean)) {
+    return "La grabación de consentimiento no coincide con la frase requerida. Léela exactamente como se muestra en pantalla y sin ruidos de fondo.";
+  }
+  if (/Consent flow failed/i.test(clean)) {
+    return "No se pudo verificar la grabación de consentimiento. Asegúrate de hablar claro y leer la frase exacta en un lugar silencioso.";
+  }
+  if (/speaker similarity|not match.*speaker|different.*speaker/i.test(clean)) {
+    return "Las dos muestras no parecen ser de la misma persona. Graba ambas muestras con el mismo micrófono y en el mismo lugar.";
+  }
+  if (/duration|too short|too long|short.*audio/i.test(clean)) {
+    return "La muestra de voz debe durar entre 10 y 30 segundos.";
+  }
+  if (/quota|rate.*limit|resource.*exhausted/i.test(clean)) {
+    return "Se agotó la cuota del servicio de voces de Gemini. Intenta más tarde.";
+  }
+  if (clean === "Error translating server response to JSON") {
+    return "No se pudo verificar la voz. Asegúrate de hablar claro, en silencio y leer la frase de consentimiento exacta.";
+  }
+  return clean;
+}
+
+app.post("/api/schroeder/voices/replicate", async (req, res) => {
+  try {
+    if (!hasGeminiKey()) return res.status(500).json({ error: "El servicio de voz no está configurado." });
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    if (req.body?.adultOwnershipConfirmed !== true) return res.status(400).json({ error: "Debes confirmar que eres una persona adulta y propietaria de la voz." });
+    const normalizeAudio = (input, label) => {
+      const mimeType = clampText(input?.mimeType || "audio/wav", 80).toLowerCase().split(";")[0].trim();
+      const allowed = new Set(["audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp4", "audio/webm"]);
+      const data = String(input?.data || "").replace(/\s+/g, "");
+      const bytes = Buffer.byteLength(data, "base64");
+      if (!allowed.has(mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(data) || !bytes || bytes > 3 * 1024 * 1024) throw Object.assign(new Error(`${label} no es válido.`), { status: 400 });
+      return { mime_type: mimeType, data };
+    };
+    const displayName = clampText(req.body?.displayName || "Mi voz", 80) || "Mi voz";
+    const languageCode = clampText(req.body?.languageCode || "es-US", 16) || "es-US";
+    const payload = {
+      store: true,
+      voice: {
+        model: "gemini-3.8-flash-tts",
+        type: "replicated",
+        display_name: displayName,
+        language_code: languageCode,
+        replicated: {
+          source_audio: normalizeAudio(req.body?.sourceAudio, "La muestra de voz"),
+          consent_audio: normalizeAudio(req.body?.consentAudio, "La grabación de consentimiento")
+        }
+      }
+    };
+    const upstream = await fetchCompat(`${GEMINI_BASE}/voices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+      body: JSON.stringify(payload)
+    });
+    const data = await safeJson(upstream);
+    if (!upstream.ok) {
+      const cleanError = extractGeminiVoiceReplicationError(data, upstream.status);
+      return res.status(upstream.status >= 500 ? 502 : upstream.status).json({ error: cleanError });
+    }
+    const voiceId = clampText(data?.id || data?.voice?.id || "", 240);
+    if (!/^voice_[A-Za-z0-9_-]+$/.test(voiceId)) return res.status(502).json({ error: "No se recibió un identificador de voz válido." });
+    await db.collection("schroeder_voice_profiles").doc(voiceId).set({ id: voiceId, ownerId: uid, displayName, languageCode, type: "replicated", createdAt: new Date().toISOString(), expireTime: String(data?.expire_time || data?.expireTime || "") });
+    return res.status(201).json({ ok: true, voice: { id: voiceId, displayName, languageCode, expireTime: String(data?.expire_time || data?.expireTime || "") } });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo crear la voz.") });
+  }
+});
+
 app.post("/api/podcaster/scene-library/clone-video", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -7927,6 +8692,10 @@ app.post("/api/podcaster/sessions/save", async (req, res) => {
       return res.status(413).json({ error: "La sesión excede el tamaño permitido." });
     }
     const sessionRef = db.collection("podcaster_sessions").doc(sanitized.id);
+    const priorForSavings = await sessionRef.get();
+    await require("../functions/src/savings-policy.js").guardPodcasterSession(
+      db, uid, sanitized, priorForSavings.exists ? priorForSavings.data()?.session || priorForSavings.data() : null
+    );
     await db.runTransaction(async (tx) => {
       const existingSnap = await tx.get(sessionRef);
       const existing = existingSnap.exists ? (existingSnap.data() || {}) : null;
@@ -8013,17 +8782,46 @@ app.post("/api/podcaster/sessions/share", async (req, res) => {
   }
 });
 
+app.get("/api/podcaster/users/list", async (req, res) => {
+  try {
+    const decoded = req.authContext?.decoded || {};
+    const isAdmin = decoded.admin === true || String(decoded.role || decoded.user_role || "").toLowerCase() === "admin";
+    if (!isAdmin) return res.status(403).json({ error: "podcaster_admin_required" });
+    const snapshot = await db.collection("users").limit(250).get();
+    const users = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data() || {};
+      const uid = clampText(data.uid || data.userId || docSnap.id, 180);
+      const displayName = clampText(data.displayName || data.name || `${data.firstName || ""} ${data.lastName || ""}`, 180);
+      return { uid, displayName: displayName || clampText(data.email || "Usuario", 240), email: clampText(data.email || "", 240) };
+    }).filter((user) => user.uid && user.uid !== String(req.authContext?.uid || ""));
+    return res.status(200).json({ ok: true, users });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudieron listar usuarios.") });
+  }
+});
+
 app.get("/api/podcaster/sessions/list", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
+    const requestedOwnerId = clampText(req.query?.ownerId || "", 180);
+    const requestedType = clampText(req.query?.type || "", 40).toLowerCase();
+    const decoded = req.authContext?.decoded || {};
+    const isAdmin = decoded.admin === true || String(decoded.role || decoded.user_role || "").toLowerCase() === "admin";
+    if (requestedOwnerId && requestedOwnerId !== uid && !isAdmin) {
+      return res.status(403).json({ error: "podcaster_admin_required" });
+    }
+    const effectiveOwnerId = requestedOwnerId || uid;
     const [ownedSnap, sharedSnap] = await Promise.all([
-      db.collection("podcaster_sessions").where("ownerId", "==", uid).limit(80).get(),
-      db.collection("podcaster_sessions").where("sharedWithIds", "array-contains", uid).limit(80).get()
+      db.collection("podcaster_sessions").where("ownerId", "==", effectiveOwnerId).limit(80).get(),
+      requestedOwnerId ? Promise.resolve({ docs: [] }) : db.collection("podcaster_sessions").where("sharedWithIds", "array-contains", uid).limit(80).get()
     ]);
     const merged = new Map();
     [...ownedSnap.docs, ...sharedSnap.docs].forEach((docSnap) => {
       const data = docSnap.data() || {};
       const sessionData = data.session && typeof data.session === "object" ? data.session : null;
+      const workspaceType = String(sessionData?.workspaceType || data.workspaceType || "").trim().toLowerCase();
+      if (requestedType === "soundlab" && workspaceType !== "schroeder-sound-lab") return;
+      if (!requestedType && workspaceType === "schroeder-sound-lab") return;
       const sessionUiState = sessionData?.podcastStudioUiState && typeof sessionData.podcastStudioUiState === "object"
         ? sessionData.podcastStudioUiState
         : null;
@@ -8043,6 +8841,7 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
         ...academicMetadata,
         academicMetadata,
         podcastStudioUiState: sessionUiState,
+        workspaceType: workspaceType || null,
         videoContentType: sessionVideoContentType || null,
         isStub: true,
         script: {
@@ -8090,11 +8889,40 @@ function resolvePodcasterAcademicMetadataFromDocData(data = null) {
   };
 }
 
+function podcasterSceneRowSignature(row = null) {
+  const source = row && typeof row === "object" ? row : {};
+  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const scene = normalize(source.sceneDescription || source.scenePrompt);
+  const visual = normalize(source.visualNotes || source.visual);
+  const transition = normalize(source.transition);
+  return scene && visual ? `${scene}\u0000${visual}\u0000${transition}` : "";
+}
+
+function arePodcasterMirroredSceneRows(firstRows = [], secondRows = []) {
+  return firstRows.length >= 2 && firstRows.length === secondRows.length
+    && firstRows.every((row, index) => {
+      const signature = podcasterSceneRowSignature(row);
+      return signature && signature === podcasterSceneRowSignature(secondRows[index]);
+    });
+}
+
+function collapsePodcasterMirroredSceneBlock(rows = []) {
+  const source = Array.isArray(rows) ? rows : [];
+  if (source.length < 4 || source.length % 2 !== 0) return source;
+  const half = source.length / 2;
+  return arePodcasterMirroredSceneRows(source.slice(0, half), source.slice(half))
+    ? source.slice(0, half)
+    : source;
+}
+
 function mergePodcasterRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
   const primary = Array.isArray(primaryRows) ? primaryRows : [];
   const fallback = Array.isArray(fallbackRows) ? fallbackRows : [];
   if (!primary.length) return fallback.slice();
   if (!fallback.length) return primary.slice();
+  if (arePodcasterMirroredSceneRows(primary, fallback)) {
+    return primary.map((row, index) => ({ ...fallback[index], ...row }));
+  }
   const fallbackById = new Map(
     fallback
       .map((row) => [String(row?.id || "").trim(), row])
@@ -8109,7 +8937,7 @@ function mergePodcasterRowsPreservingFallback(primaryRows = [], fallbackRows = [
       : row;
   });
   fallbackById.forEach((row) => merged.push(row));
-  return merged;
+  return collapsePodcasterMirroredSceneBlock(merged);
 }
 
 function buildPodcasterSessionFromDocData(data = null, sessionId = "") {
@@ -8132,7 +8960,7 @@ function buildPodcasterSessionFromDocData(data = null, sessionId = "") {
     Array.isArray(topLevel?.script?.rows) ? topLevel.script.rows : [],
     Array.isArray(topLevel?.rows) ? topLevel.rows : []
   );
-  const rows = mergePodcasterRowsPreservingFallback(nestedRows, topRows);
+  const rows = collapsePodcasterMirroredSceneBlock(mergePodcasterRowsPreservingFallback(nestedRows, topRows));
   if (rows.length) {
     session.script = {
       ...(isPodcasterPlainRecord(topLevel.script) ? topLevel.script : {}),
@@ -8633,7 +9461,7 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
     const prompt = [
       "Genera una imagen fotorealista de un escenario de podcast profesional.",
       scenarioReference ? `La imagen adjunta es referencia visual del set y debe guiar arquitectura, composición, materiales y layout (${referenceImageName || "referencia del usuario"}).` : "",
-      `Escenario: ${title}.`,
+      `Escenario (tema visual; no escribas ni dibuje ninguna palabra, rótulo o cartel): ${title}.`,
       `Prompt base obligatorio: ${promptSource}`,
       "Debe ser un set vacío, sin personas.",
       "Debe verse como una cabina de grabación o estudio editorial premium para podcast/video podcast.",
@@ -8749,11 +9577,33 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
+    const { getPolicy, claimDaily, claimVeo } = require("../functions/src/savings-policy.js");
+    const savingsPolicy = await getPolicy(db);
+    if (savingsPolicy.limits.veoMinutes) {
+      const sessionId = clampText(req.body?.sessionId || "", 140);
+      const sessionDoc = await db.collection("podcaster_sessions").doc(sessionId).get();
+      if (!sessionDoc.exists) return res.status(404).json({ error: "podcaster_session_not_found" });
+      if (String(sessionDoc.data()?.ownerId || "") !== uid) return res.status(403).json({ error: "podcaster_session_forbidden" });
+      if (sessionDoc.exists) {
+        const existing = sessionDoc.data()?.session || sessionDoc.data() || {};
+        await require("../functions/src/savings-policy.js").guardPodcasterSession(db, uid, {
+          ...existing,
+          id: sessionId,
+          podcastStudioUiState: { ...(existing.podcastStudioUiState || {}), composerGenerationMode: "video" }
+        }, existing);
+      }
+      const rows = sessionDoc.data()?.session?.script?.rows || sessionDoc.data()?.script?.rows || [];
+      const sceneNumber = rows.findIndex((row) => String(row?.id || "") === String(req.body?.rowId || "")) + 1;
+      if (!sceneNumber) return res.status(409).json({ error: "savings_scene_not_saved" });
+      await claimDaily(db, uid, "videoSessions", sessionId, savingsPolicy.limits.videoSessions);
+      req.savingsVeoSceneNumber = sceneNumber;
+    }
     const activeDialogueVideoJobId = getActiveHeavyWorkJobId("dialogue_video");
     if (activeDialogueVideoJobId) {
       return res.status(503).json(buildBackendBusyJson("dialogue_video", activeDialogueVideoJobId));
     }
     const jobId = clampExportId(randomUUID());
+    if (savingsPolicy.limits.veoMinutes) await claimVeo(db, uid, jobId, savingsPolicy.limits.veoMinutes, req.savingsVeoSceneNumber, { blocked: savingsPolicy.level === "ultra" });
     const initial = upsertDialogueVideoJob(jobId, {
       status: "running",
       stage: "queued",
@@ -8847,10 +9697,25 @@ app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
 });
 
 app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(req.socket?.remoteAddress || ""))) {
+    return res.status(403).json({ error: "loopback_required" });
+  }
   if (!ensureVeoGenerationServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   const jobMeta = req.body?.__job && typeof req.body.__job === "object" ? req.body.__job : null;
   const jobId = clampExportId(jobMeta?.jobId || "") || clampExportId(randomUUID());
+  const { getPolicy, claimDaily, claimVeo } = require("../functions/src/savings-policy.js");
+  const savingsPolicy = await getPolicy(db);
+  if (savingsPolicy.limits.veoMinutes) {
+    const uid = String(req.authContext?.uid || "").trim();
+    const videoSessionId = clampText(req.body?.sessionId || "", 140);
+    const sessionDoc = await db.collection("podcaster_sessions").doc(videoSessionId).get();
+    const rows = sessionDoc.data()?.session?.script?.rows || sessionDoc.data()?.script?.rows || [];
+    const sceneNumber = rows.findIndex((row) => String(row?.id || "") === String(req.body?.rowId || "")) + 1;
+    if (!sceneNumber) return res.status(409).json({ error: "savings_scene_not_saved" });
+    await claimDaily(db, uid, "videoSessions", videoSessionId, savingsPolicy.limits.videoSessions);
+    await claimVeo(db, uid, jobId, savingsPolicy.limits.veoMinutes, sceneNumber, { blocked: savingsPolicy.level === "ultra" });
+  }
   const slot = tryAcquireHeavyWorkSlot("dialogue_video", jobId);
   if (!slot?.ok) {
     const busyError = slot?.error || buildHeavyWorkBusyError("dialogue_video", getActiveHeavyWorkJobId("dialogue_video"));
@@ -9536,7 +10401,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       model: requestedModel,
       promptVersion: PODCASTER_VIDEO_PROMPT_VERSION
     });
-    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const client = require('../functions/src/research/budget.js').guardClient(new GoogleGenAI({ apiKey: GEMINI_API_KEY }));
     const visualPromptNormalization = await normalizePodcasterVisualDirectionsToEnglish({
       client,
       visualOptions: {
@@ -10022,6 +10887,42 @@ function normalizeGeminiTtsDirectionConfig(input = {}) {
   };
 }
 
+function resolveGeminiTtsAccentInstruction(speechLocale = "", fallbackAccent = "") {
+  const locale = String(speechLocale || "").trim().toLowerCase();
+  const instructions = {
+    es: "Speak in natural Mexican Spanish (es-MX), with Mexican pronunciation and intonation. Do not use a Peninsular Spanish accent.",
+    "es-mx": "Speak in natural Mexican Spanish (es-MX), with Mexican pronunciation and intonation. Do not use a Peninsular Spanish accent.",
+    "es-es": "Speak in natural Peninsular Spanish (es-ES), with pronunciation and intonation from Spain. Do not use a Latin American accent.",
+    "es-419": "Speak in neutral Latin American Spanish (es-419), without a Peninsular accent or strongly regional slang."
+  };
+  const localeInstruction = instructions[locale] || "Speak in the selected language and regional variant.";
+  const sceneAccent = clampText(fallbackAccent || "", 180);
+  const conflictsWithLocale = (locale === "es-mx" || locale === "es")
+    ? /peninsular|spain|españa|espa[nñ]ol(?:a)?\s+de\s+espa[nñ]a|castilian|castellano/i.test(sceneAccent)
+    : locale === "es-es"
+      ? /mexican|latin american|latinoam[eé]rica|m[eé]xico|espa[nñ]ol\s+mexicano/i.test(sceneAccent)
+      : locale === "es-419"
+        ? /peninsular|spain|españa|castilian/i.test(sceneAccent)
+        : false;
+  return [localeInstruction, sceneAccent && !conflictsWithLocale
+    ? `Additional articulation direction, while preserving the selected regional variant: ${sceneAccent}`
+    : ""].filter(Boolean).join(" ");
+}
+
+function buildGeminiTtsStyle({ speechLocale = "", localeInstruction = "", expression = "Neutral", ttsDirection = {} } = {}) {
+  const direction = normalizeGeminiTtsDirectionConfig(ttsDirection || {});
+  const regionalDirection = resolveGeminiTtsAccentInstruction(speechLocale, direction.accentPrompt);
+  return [
+    regionalDirection,
+    buildGeminiTtsBaseStyle(expression),
+    direction.stylePrompt,
+    direction.pacingPrompt,
+    // Spanish variants above are explicit. For other selected languages, preserve the
+    // locale description supplied by the session rather than guessing from a generic code.
+    !String(speechLocale || "").toLowerCase().startsWith("es") ? clampText(localeInstruction, 180) : ""
+  ].filter(Boolean).join(" ").slice(0, 700);
+}
+
 function buildGeminiTtsBaseStyle(expression = "") {
   const clean = String(expression || "").trim();
   if (clean === "Enérgico") return "Enérgica y animada, pero natural y sin gritar.";
@@ -10044,14 +10945,15 @@ function buildGeminiTtsPrompt({
   disfluencyInstruction = "",
   notes = "",
   contentMode = "podcast",
-  ttsDirection = {}
+  ttsDirection = {},
+  speechLocale = ""
 } = {}) {
   const direction = normalizeGeminiTtsDirectionConfig(ttsDirection || {});
   const transcriptBase = clampText(targetSpeechLine || "", 2200);
   const transcript = [direction.audioTags, transcriptBase].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || transcriptBase;
   const styleLine = [buildGeminiTtsBaseStyle(expression), direction.stylePrompt].filter(Boolean).join(" ");
   const pacingLine = direction.pacingPrompt || "Conversacional, fluido y con pausas naturales.";
-  const accentLine = direction.accentPrompt || "Español latino neutro, dicción clara.";
+  const accentLine = resolveGeminiTtsAccentInstruction(speechLocale, direction.accentPrompt);
   const cleanTargetDurationSec = 0; // Math.max(0, Number(targetDurationSec || 0) || 0);
   const cleanSpeechRateHint = 1; // Math.max(0.5, Math.min(1.85, Number(speechRateHint || 1) || 1));
   const sceneLine = direction.scenePrompt || (String(contentMode || "").trim().toLowerCase() === "educational"
@@ -10084,6 +10986,118 @@ function buildGeminiTtsPrompt({
   ].filter(Boolean).join("\n");
 }
 
+const geminiTtsVoiceCatalogCache = new Map();
+app.get("/api/podcaster/tts/voices", async (req, res) => {
+  if (!ensureGeminiKey(res)) return;
+  const languageCode = clampText(req.query?.language_code || "", 24);
+  const gender = String(req.query?.gender || "").trim().toLowerCase();
+  if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(languageCode)) {
+    return res.status(400).json({ error: "Falta un código de idioma BCP-47 válido." });
+  }
+  if (gender && !["female", "male", "neutral"].includes(gender)) return res.status(400).json({ error: "Género de voz no válido." });
+  const locale = languageCode.toLowerCase();
+  const language = locale.split("-")[0];
+  const regionByLocale = { "es-mx": "MX", "es-es": "ES", "es-419": "419", es: "MX" };
+  const accentByLocale = { "es-mx": "Mexican", "es-es": "Castilian", "es-419": "Latin American", es: "Mexican" };
+  const regionCode = regionByLocale[locale] || "";
+  const accent = accentByLocale[locale] || "";
+  const cacheKey = `${locale}:${gender}`;
+  const cached = geminiTtsVoiceCatalogCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return res.json({ voices: cached.voices });
+  try {
+    const queryCatalog = async ({ exactLocale = false, includeAccent = true } = {}) => {
+      const url = new URL(`${GEMINI_BASE}/voices`);
+      url.searchParams.set("language_code", exactLocale ? languageCode : language);
+      if (regionCode) url.searchParams.set("region_code", regionCode);
+      if (includeAccent && accent) url.searchParams.set("accent", accent);
+      url.searchParams.set("page_size", "1000");
+      url.searchParams.set("type", "prebuilt");
+      if (gender) url.searchParams.set("gender", gender);
+      const upstream = await fetchCompat(url.toString(), { headers: { "x-goog-api-key": GEMINI_API_KEY } });
+      return { upstream, data: await safeJson(upstream) };
+    };
+    let { upstream, data } = await queryCatalog();
+    if (upstream.ok && !(Array.isArray(data?.voices) && data.voices.length)) {
+      ({ upstream, data } = await queryCatalog({ includeAccent: false }));
+    }
+    if (upstream.ok && !(Array.isArray(data?.voices) && data.voices.length) && locale !== language) {
+      ({ upstream, data } = await queryCatalog({ exactLocale: true, includeAccent: false }));
+    }
+    if (!upstream.ok) {
+      return res.status(Number(upstream.status || 502)).json({ error: String(data?.error?.message || "No se pudo cargar el catálogo de voces Gemini.") });
+    }
+    const voices = (Array.isArray(data?.voices) ? data.voices : []).map((voice) => ({
+      id: clampText(voice?.id || "", 120),
+      displayName: clampText(voice?.display_name || voice?.displayName || voice?.id || "", 100),
+      languageCode: clampText(voice?.language_code || voice?.languageCode || "", 24),
+      regionCode: clampText(voice?.region_code || voice?.regionCode || "", 12),
+      accent: clampText(voice?.accent || "", 80),
+      gender: clampText(voice?.gender || "", 24),
+      description: clampText(voice?.description || "", 280),
+      type: clampText(voice?.type || "prebuilt", 24)
+    })).filter((voice) => voice.id && normalizeGeminiCatalogVoiceId(voice.id));
+    geminiTtsVoiceCatalogCache.set(cacheKey, { voices, expiresAt: Date.now() + 30 * 60 * 1000 });
+    return res.json({ voices });
+  } catch (error) {
+    return res.status(502).json({ error: String(error?.message || "No se pudo consultar el catálogo de voces Gemini.") });
+  }
+});
+
+app.post("/api/podcaster/tts/preview", async (req, res) => {
+  if (!ensureGeminiKey(res)) return;
+  const voiceInput = clampText(req.body?.voiceName || "", 120);
+  const voiceName = normalizeLiveVoiceName(voiceInput) || normalizeGeminiCatalogVoiceId(voiceInput) || "Kore";
+  const speechLocale = clampText(req.body?.speechLocale || "es-MX", 24);
+  const localeInstruction = clampText(req.body?.localeInstruction || "", 220);
+  const expression = clampText(req.body?.expression || "Neutral", 80);
+  const direction = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || {});
+  const previewCustomVoice = /^voice_[A-Za-z0-9_-]+$/.test(voiceName);
+  let previewCustomOwned = false;
+  if (previewCustomVoice) {
+    const snapshot = await db.collection("schroeder_voice_profiles").doc(voiceName).get();
+    previewCustomOwned = snapshot.exists && String(snapshot.data()?.ownerId || "") === String(req.authContext?.uid || "");
+  }
+  if (voiceName !== "Kore" && !normalizeLiveVoiceName(voiceInput) && !previewCustomOwned) {
+    const locale = speechLocale.toLowerCase();
+    const listUrl = new URL(`${GEMINI_BASE}/voices`);
+    listUrl.searchParams.set("language_code", locale.split("-")[0]);
+    const region = ({ "es-mx": "MX", "es-es": "ES", "es-419": "419" })[locale];
+    if (region) listUrl.searchParams.set("region_code", region);
+    listUrl.searchParams.set("page_size", "1000");
+    listUrl.searchParams.set("type", "prebuilt");
+    const listed = await fetchCompat(listUrl.toString(), { headers: { "x-goog-api-key": GEMINI_API_KEY } });
+    const listedData = await safeJson(listed);
+    if (!listed.ok || !(Array.isArray(listedData?.voices) && listedData.voices.some((voice) => voice?.id === voiceName))) {
+      return res.status(400).json({ error: "La voz seleccionada no pertenece al catálogo regional disponible." });
+    }
+  }
+  try {
+    const style = buildGeminiTtsStyle({ speechLocale, localeInstruction, expression, ttsDirection: direction });
+    const upstream = await fetchCompat(`${GEMINI_BASE}/interactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+      body: JSON.stringify({
+        model: "gemini-3.8-flash-tts",
+        input: [{ type: "user_input", content: [{
+          type: "text",
+          text: "Hola, esta es una breve muestra de la voz seleccionada.",
+          annotations: [{ type: "speech_metadata", style }]
+        }] }],
+        response_format: { type: "audio" },
+        generation_config: { speech_config: [{ voice: voiceName }] }
+      })
+    });
+    const data = await safeJson(upstream);
+    const audio = readGeminiInteractionAudioParts(data)[0];
+    if (!upstream.ok || !audio?.data) {
+      return res.status(Number(upstream.status || 502)).json({ error: String(data?.error?.message || "Gemini no devolvió la muestra de voz.") });
+    }
+    return res.json({ audio: { data: audio.data, mimeType: audio.mimeType || "audio/wav" }, voiceName, speechLocale });
+  } catch (error) {
+    return res.status(502).json({ error: String(error?.message || "No se pudo generar la muestra de voz.") });
+  }
+});
+
 app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-audios/generate"], async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
@@ -10100,8 +11114,15 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     const rowId = clampText(req.body?.rowId || "", 120);
     const speakerLabel = clampText(req.body?.speakerLabel || "", 80);
     const speakerName = clampText(req.body?.speakerName || "", 120) || speakerLabel || "Locutor";
-    const voiceNameInput = clampText(req.body?.voiceName || "", 80);
-    const voiceName = normalizeLiveVoiceName(voiceNameInput);
+    const voiceNameInput = clampText(req.body?.voiceName || "", 240);
+    const requestedVoiceId = /^voice_[A-Za-z0-9_-]+$/.test(voiceNameInput) ? voiceNameInput : "";
+    let customVoiceName = "";
+    const voiceSampleAudio = String(req.body?.voiceSampleAudio || req.body?.replicatedVoiceConfig?.voiceSampleAudio || "").replace(/\s+/g, "");
+    const isReplicatedVoice = Boolean(voiceSampleAudio);
+    const providerCatalogVoiceId = normalizeGeminiCatalogVoiceId(voiceNameInput);
+    let voiceName = isReplicatedVoice ? "replicated" : normalizeLiveVoiceName(voiceNameInput);
+    if (providerCatalogVoiceId && !isReplicatedVoice && !voiceName) voiceName = providerCatalogVoiceId;
+    if (requestedVoiceId && !isReplicatedVoice) voiceName = requestedVoiceId;
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
     const text = clampText(req.body?.text || "", 2000);
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || text, 2200) || text;
@@ -10110,12 +11131,15 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     const originalText = clampText(req.body?.originalText || "", 2000);
     const disfluencyInstruction = clampText(req.body?.disfluencyInstruction || "", 1800);
     const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || req.body?.ttsDirectionConfig || {});
+    const speechLocale = clampText(req.body?.speechLocale || "", 24);
+    const localeInstruction = clampText(req.body?.localeInstruction || "", 220);
     const notes = clampText(req.body?.notes || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
     const educationalAudio = req.body?.videoMode === true || contentMode === "educational" || contentMode === "creative";
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
-    const model = normalizeModel(req.body?.model || "gemini-3.1-flash-tts-preview");
+    const model = normalizeModel(req.body?.model || "gemini-3.8-flash-tts");
+    const isSoundLab = String(req.body?.workspaceType || "").trim() === "schroeder-sound-lab";
 
     console.log(`[DialogueAudio] Generating for session ${sessionId}, row ${rowId}, regenerate: ${regenerate}, uid: ${uid.slice(0, 8)}..., previous: ${!!previousStoragePath}`);
 
@@ -10126,28 +11150,50 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     if (!/^gemini-[a-z0-9.-]+$/i.test(String(model || ""))) {
       return res.status(400).json({ error: "Modelo inválido para diálogo de audio." });
     }
-    if (voiceNameInput && !voiceName) {
-      return res.status(400).json({ error: `Voz no soportada para Gemini Live: ${voiceNameInput}` });
+    if (voiceNameInput && !voiceName && !isReplicatedVoice) {
+      return res.status(400).json({ error: `Voz no soportada para Gemini TTS: ${voiceNameInput}` });
+    }
+    if (providerCatalogVoiceId && !isReplicatedVoice && !normalizeLiveVoiceName(voiceNameInput)) {
+      const voiceSnapshot = requestedVoiceId
+        ? await db.collection("schroeder_voice_profiles").doc(requestedVoiceId).get()
+        : null;
+      if (voiceSnapshot?.exists) {
+        if (String(voiceSnapshot.data()?.ownerId || "") !== uid) {
+          return res.status(403).json({ error: "Esta voz personalizada no está disponible para tu cuenta." });
+        }
+        customVoiceName = requestedVoiceId;
+      } else {
+        // Prebuilt catalog voices must be verified through ListVoices; GetVoice only supports custom voices.
+        const locale = clampText(speechLocale || "es-MX", 24).toLowerCase();
+        const listUrl = new URL(`${GEMINI_BASE}/voices`);
+        listUrl.searchParams.set("language_code", locale.split("-")[0]);
+        const region = ({ "es-mx": "MX", "es-es": "ES", "es-419": "419" })[locale];
+        if (region) listUrl.searchParams.set("region_code", region);
+        listUrl.searchParams.set("page_size", "1000");
+        listUrl.searchParams.set("type", "prebuilt");
+        const listed = await fetchCompat(listUrl.toString(), { headers: { "x-goog-api-key": GEMINI_API_KEY } });
+        const listedData = await safeJson(listed);
+        if (!listed.ok || !(Array.isArray(listedData?.voices) && listedData.voices.some((voice) => voice?.id === providerCatalogVoiceId))) {
+          return res.status(400).json({ error: "La voz regional de Gemini ya no está disponible. Actualiza la selección de voz." });
+        }
+        customVoiceName = "provider-catalog";
+      }
     }
 
-    const prompt = buildGeminiTtsPrompt({
-      speakerName,
-      speakerLabel,
-      voiceName,
-      expression,
-      targetSpeechLine,
-      targetDurationSec,
-      speechRateHint,
-      originalText,
-      disfluencyInstruction,
-      notes,
-      contentMode: educationalAudio ? "educational" : "podcast",
-      ttsDirection
-    });
+    const ttsStyle = buildGeminiTtsStyle({ speechLocale, localeInstruction, expression, ttsDirection });
+    const transcript = [normalizeGeminiInlineAudioTags(ttsDirection.audioTags), targetSpeechLine]
+      .filter(Boolean).join(" ").replace(/\[[^\]]+\]/g, (tag) => `<${tag.slice(1, -1)}>`);
 
     const interactionPayload = {
       model,
-      input: prompt,
+      input: [{
+        type: "user_input",
+        content: [{
+          type: "text",
+          text: transcript,
+          annotations: [{ type: "speech_metadata", style: isSoundLab ? clampText(req.body?.style || expression, 240) : ttsStyle }]
+        }]
+      }],
       response_format: {
         type: "audio"
       },
@@ -10159,12 +11205,23 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     };
 
     const legacyPayload = {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts: [{
+        text: transcript,
+        speech_metadata: { style: isSoundLab ? clampText(req.body?.style || expression, 240) : ttsStyle }
+      }] }],
       generationConfig: {
         responseModalities: ["AUDIO"]
       }
     };
-    if (voiceName) {
+    if (isReplicatedVoice) {
+      legacyPayload.generationConfig.speechConfig = {
+        voiceConfig: {
+          replicatedVoiceConfig: {
+            voiceSampleAudio
+          }
+        }
+      };
+    } else if (voiceName && !customVoiceName) {
       legacyPayload.generationConfig.speechConfig = {
         voiceConfig: {
           prebuiltVoiceConfig: {
@@ -10175,6 +11232,23 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     }
 
     const requestGeminiAudio = async () => {
+      if (isReplicatedVoice) {
+        const legacyUpstream = await fetchCompat(
+          `${GEMINI_BASE}/models/${encodeURIComponent(model || "gemini-3.8-flash-tts")}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+            body: JSON.stringify(legacyPayload)
+          }
+        );
+        const legacyData = await safeJson(legacyUpstream);
+        const legacyAudioParts = readGeminiAudioParts(legacyData);
+        return {
+          upstream: legacyUpstream,
+          data: legacyData,
+          audioParts: legacyAudioParts
+        };
+      }
       const interactionUpstream = await fetchCompat(
         `${GEMINI_BASE}/interactions`,
         {
@@ -10191,6 +11265,13 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       const interactionStatus = Number(interactionUpstream.status || 0) || 0;
 
       if ((interactionUpstream.ok && interactionAudioParts.length) || interactionUpstream.status === 401 || interactionUpstream.status === 403) {
+        return {
+          upstream: interactionUpstream,
+          data: interactionData,
+          audioParts: interactionAudioParts
+        };
+      }
+      if (customVoiceName) {
         return {
           upstream: interactionUpstream,
           data: interactionData,
@@ -10291,7 +11372,9 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
     const rowSlug = normalizeStorageSegment(rowId, "row");
     const speakerSlug = normalizeStorageSegment(speakerLabel, "speaker");
-    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/audio/${rowSlug}-${speakerSlug}/${randomUUID()}.${ext}`;
+    const storagePath = isSoundLab
+      ? `schroeder-sound-lab/previews/${normalizeStorageSegment(uid, "user")}/${sessionSlug}/voice/${rowSlug}-${speakerSlug}-${randomUUID()}.${ext}`
+      : `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/audio/${rowSlug}-${speakerSlug}/${randomUUID()}.${ext}`;
     const asset = await uploadScreenshotAsset({
       path: storagePath,
       buffer: finalBuffer,
@@ -10304,6 +11387,8 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
         speakerName,
         voiceName: voiceName || null,
         model,
+        approvalState: isSoundLab ? "preview" : null,
+        expiresAt: null,
         targetDurationSec: targetDurationSec > 0 ? String(targetDurationSec) : null,
         naturalDurationSec: naturalDurationSec > 0 ? String(naturalDurationSec) : null,
         appliedSpeedRatio: Number(retimedAudio?.appliedSpeedRatio || 1).toFixed(5),
@@ -11041,10 +12126,11 @@ function normalizeMontageExportRequestBody(body = {}) {
     const localMediaCacheKey = clampText(String(segment?.localMediaCacheKey || "").trim(), 400);
     const rawStartMs = Number(segment?.startMs || 0);
     const startMs = Number.isFinite(rawStartMs) ? Math.round(rawStartMs) : 0;
-    const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+    const minDurationMs = segment?.kind === "free-voice" ? 100 : 500;
+    const durationMs = Math.max(minDurationMs, Math.round(Number(segment?.durationMs || 0) || 0));
     const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
     const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
-    const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
+    const trimOutMs = Math.max(trimInMs + minDurationMs, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
     const fadeInMs = Math.max(0, Math.min(durationMs, Math.round(Number(segment?.fadeInMs || 0) || 0)));
     const fadeOutMs = Math.max(0, Math.min(durationMs, Math.round(Number(segment?.fadeOutMs || 0) || 0)));
     const rawVolumePct = Number(segment?.volumePct ?? 100);
@@ -11076,6 +12162,7 @@ function normalizeMontageExportRequestBody(body = {}) {
       fadeInMs,
       fadeOutMs,
       duckingWhenGeminiPct,
+      duckTrigger: segment?.duckTrigger !== false,
       volumePct
     };
   };
@@ -11173,7 +12260,8 @@ function normalizeMontageExportRequestBody(body = {}) {
   const normalizeStylizedTextSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
     const dataUrl = clampText(String(segment?.dataUrl || "").trim(), 16_000_000);
-    if (!dataUrl.startsWith("data:image/")) return null;
+    const storagePath = normalizeStorageFilePath(String(segment?.storagePath || "").trim());
+    if (!dataUrl.startsWith("data:image/") && !storagePath) return null;
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
     return {
@@ -11185,7 +12273,10 @@ function normalizeMontageExportRequestBody(body = {}) {
       zIndex: Math.max(1, Math.round(Number(segment?.zIndex || idx + 20) || idx + 20)),
       sourceWidth: Math.max(1, Math.round(Number(segment?.sourceWidth || stylizedTextTimelineRaw?.sourceWidth || 1280) || 1280)),
       sourceHeight: Math.max(1, Math.round(Number(segment?.sourceHeight || stylizedTextTimelineRaw?.sourceHeight || 720) || 720)),
-      dataUrl
+      dataUrl,
+      storagePath,
+      mimeType: "image/png",
+      animation: segment?.animation && typeof segment.animation === "object" ? segment.animation : null
     };
   };
 
@@ -11906,7 +12997,9 @@ async function appendMontageSceneStylizedTextFilters({
   tmpDir = "",
   args = [],
   nextInputIndex = 2,
-  tempPaths = []
+  tempPaths = [],
+  downloadInput = null,
+  shouldAbort = null
 } = {}) {
   const sceneSegments = resolveMontageSceneStylizedTextSegments({
     input,
@@ -11914,7 +13007,7 @@ async function appendMontageSceneStylizedTextFilters({
     sceneIndex,
     sceneStartMs: sceneTimelineStartMs,
     sceneEndMs: sceneTimelineEndMs
-  }).filter((segment) => String(segment?.dataUrl || "").trim().startsWith("data:image/"));
+  }).filter((segment) => String(segment?.dataUrl || "").trim().startsWith("data:image/") || String(segment?.storagePath || "").trim());
   if (!sceneSegments.length) {
     return {
       videoFilterGraph,
@@ -11930,21 +13023,54 @@ async function appendMontageSceneStylizedTextFilters({
   for (let idx = 0; idx < sceneSegments.length; idx += 1) {
     const segment = sceneSegments[idx] || {};
     const dataUrl = String(segment?.dataUrl || "").trim();
-    if (!dataUrl.startsWith("data:image/")) continue;
-    const decoded = decodeInlineDataUrl(dataUrl, MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES);
-    if (!String(decoded.mimeType || "").startsWith("image/")) continue;
-    const ext = getScreenshotExtension(decoded.mimeType);
-    const overlayPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-stylized-${String(idx + 1).padStart(2, "0")}.${ext}`);
-    await fs.promises.writeFile(overlayPath, decoded.buffer);
-    tempPaths.push(overlayPath);
-    args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
+    let overlayPath = "";
+    if (String(segment.storagePath || "").trim() && typeof downloadInput === "function") {
+      overlayPath = await downloadInput({ storagePath: segment.storagePath, mimeType: "image/png", rowId: segment.rowId }, "image", sceneIndex * 100 + idx);
+    } else if (dataUrl.startsWith("data:image/")) {
+      const decoded = decodeInlineDataUrl(dataUrl, MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES);
+      if (!String(decoded.mimeType || "").startsWith("image/")) continue;
+      const ext = getScreenshotExtension(decoded.mimeType);
+      overlayPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-stylized-${String(idx + 1).padStart(2, "0")}.${ext}`);
+      await fs.promises.writeFile(overlayPath, decoded.buffer);
+      tempPaths.push(overlayPath);
+    }
+    if (!overlayPath) throw new Error(`stylized_text_asset_missing_scene_${sceneIndex}`);
     const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || sceneTimelineStartMs) || sceneTimelineStartMs));
     const segmentDurationMs = Math.max(1, Math.round(Number(segment?.durationMs || (sceneTimelineEndMs - sceneTimelineStartMs)) || (sceneTimelineEndMs - sceneTimelineStartMs)));
+    const motion = normalizeStylizedMotion(segment.animation);
+    const animated = motion.preset !== "none" || (segment.animation && motion.exit !== "none");
+    if (animated) {
+      let sequence = null;
+      try {
+        sequence = await renderStylizedMotionFrames({
+          imagePath: overlayPath,
+          animation: motion,
+          durationSec: segmentDurationMs / 1000,
+          outputDir: path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-stylized-motion-${idx + 1}`),
+          width: canvas.width,
+          height: canvas.height,
+          fps: 24,
+          shouldAbort
+        });
+      } catch (motionErr) {
+        console.warn("[backend][montage-export][stylized-motion-fallback]", {
+          sceneIndex,
+          error: String(motionErr?.message || motionErr)
+        });
+      }
+      if (sequence && sequence.pattern) {
+        args.push("-framerate", String(sequence.fps), "-start_number", "0", "-i", sequence.pattern);
+      } else {
+        args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
+      }
+    } else {
+      args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
+    }
     const startSec = Math.max(0, (segmentStartMs - sceneTimelineStartMs) / 1000);
     const endSec = Math.max(startSec + 0.001, (segmentStartMs + segmentDurationMs - sceneTimelineStartMs) / 1000);
     const imageLabel = `stylized_img_${sceneIndex}_${idx + 1}`;
     const outLabel = `stylized_out_${sceneIndex}_${idx + 1}`;
-    const filter = `[${inputIndex}:v]format=rgba,scale=${Math.max(2, canvas.width)}:${Math.max(2, canvas.height)}:flags=fast_bilinear[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=0:y=0:format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
+    const filter = `[${inputIndex}:v]format=rgba,scale=${Math.max(2, canvas.width)}:${Math.max(2, canvas.height)}:flags=fast_bilinear${animated ? `,setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB` : ""}[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=0:y=0:format=auto:eof_action=pass:repeatlast=0:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
     graph = graph ? `${graph};${filter}` : filter;
     currentLabel = `[${outLabel}]`;
     inputIndex += 1;
@@ -12239,7 +13365,7 @@ function normalizeMontageVisualEffects(raw = null) {
     ? source.effects.map((item) => String(item || "").trim()).filter((item) => allowed.includes(item))
     : [];
   const speed = Math.max(1, Math.min(10, Math.round(Number(source.speed || 5) || 5)));
-  return { effects, speed };
+  return { effects, speed, imageWarp: normalizeImageWarp(source.imageWarp), imageLayers: normalizeSceneImageLayers(source.imageLayers) };
 }
 
 function normalizeMontageTransition(raw = null) {
@@ -12282,16 +13408,25 @@ function normalizeMontageMediaMotionPreset(value = "") {
 
 function normalizeMontageOverlayCards(raw = null) {
   const source = raw && typeof raw === "object" ? raw : {};
-  const segmentsRaw = Array.isArray(source?.segments) ? source.segments : [];
+  const segmentsRaw = Array.isArray(source?.segments)
+    ? source.segments
+    : (Array.isArray(source) ? source : (Array.isArray(raw) ? raw : []));
   return segmentsRaw.slice(0, 120).map((card, idx) => {
     if (!card || typeof card !== "object") return null;
-    const textLines = Array.isArray(card.textLines)
+    let textLines = Array.isArray(card.textLines)
       ? card.textLines.map((line) => clampText(line || "", 180)).filter(Boolean).slice(0, 4)
       : [];
+    if (!textLines.length && Array.isArray(card.fields)) {
+      textLines = card.fields.map((f) => clampText(f?.value || "", 180)).filter(Boolean).slice(0, 4);
+    }
+    if (!textLines.length && Array.isArray(card.lines)) {
+      textLines = card.lines.map((l) => clampText(l || "", 180)).filter(Boolean).slice(0, 4);
+    }
     if (!textLines.length) return null;
     const position = card.position && typeof card.position === "object" ? card.position : {};
-      const widthPct = clampNumber(position.widthPct, 0.48, 0.9, 0.56);
-      const heightPct = clampNumber(position.heightPct, 0.18, 0.55, 0.2);
+    const premium = isPremiumCard(card);
+    const widthPct = clampNumber(position.widthPct, premium ? 0.22 : 0.48, 0.9, 0.56);
+    const heightPct = clampNumber(position.heightPct, premium ? 0.12 : 0.18, 0.55, 0.2);
     const enterAnimation = String(card.enterAnimation || "").trim().toLowerCase();
     const exitAnimation = String(card.exitAnimation || "").trim().toLowerCase();
     return {
@@ -12301,6 +13436,9 @@ function normalizeMontageOverlayCards(raw = null) {
       durationMs: Math.max(500, Math.round(Number(card.durationMs || 0) || 0)),
       exitDelayMs: Math.max(0, Math.round(Number(card.exitDelayMs ?? Math.max(0, (Number(card.durationMs || 0) || 0) - 520)) || 0)),
       preset: ["lower-third", "info-panel", "phone-cta"].includes(String(card.preset || "").trim().toLowerCase()) ? String(card.preset).trim().toLowerCase() : "lower-third",
+      styleModel: clampText(card.styleModel || "", 80),
+      animationPreset: clampText(card.animationPreset || "", 80),
+      renderVersion: Number(card.renderVersion || 1) >= 2 ? 2 : 1,
       textLines,
       position: {
         xPct: clampNumber(position.xPct, 0, Math.max(0, 1 - widthPct), 0.06),
@@ -12310,7 +13448,17 @@ function normalizeMontageOverlayCards(raw = null) {
       },
       enterAnimation: ["slide-left", "slide-right", "slide-up", "slide-down", "fade"].includes(enterAnimation) ? enterAnimation : "slide-left",
       exitAnimation: ["slide-left", "slide-right", "slide-up", "slide-down", "fade"].includes(exitAnimation) ? exitAnimation : "fade",
-      style: card.style && typeof card.style === "object" ? card.style : {},
+      style: (() => {
+        const source = card.style && typeof card.style === "object" ? card.style : {};
+        const color = (value, fallback) => /^#[0-9a-f]{3,8}$/i.test(String(value || "")) ? String(value) : fallback;
+        return {
+          accentColor: color(source.accentColor, "#7c5cff"),
+          backgroundColor: color(source.backgroundColor, "#0f172a"),
+          textColor: color(source.textColor, "#f8fafc"),
+          fontScale: clampNumber(source.fontScale, 0.65, 1.8, 1),
+          loopAnimation: clampText(source.loopAnimation || "none", 32)
+        };
+      })(),
       zIndex: Math.max(1, Math.min(999, Math.round(Number(card.zIndex || idx + 20) || idx + 20)))
     };
   }).filter(Boolean);
@@ -12441,10 +13589,13 @@ function resolveMontageKenBurnsEffect(rawEffects = null) {
 function hasMontageImageMotion(mediaMotionPreset = "none", visualEffects = null) {
   const preset = normalizeMontageMediaMotionPreset(mediaMotionPreset);
   const kenBurns = resolveMontageKenBurnsEffect(visualEffects);
-  return preset !== "none" || Boolean(kenBurns?.effect);
+  return preset !== "none" || Boolean(kenBurns?.effect) || hasImageWarpMotion(visualEffects?.imageWarp);
 }
 
 function resolveMontageImageMotionFrameRate(mediaMotionPreset = "none", visualEffects = null) {
+  if (hasImageWarpMotion(visualEffects?.imageWarp)
+    && normalizeMontageMediaMotionPreset(mediaMotionPreset) === "none"
+    && !resolveMontageKenBurnsEffect(visualEffects)?.effect) return 30;
   return hasMontageImageMotion(mediaMotionPreset, visualEffects)
     ? MONTAGE_IMAGE_MOTION_FRAME_RATE
     : 24;
@@ -12466,6 +13617,7 @@ function buildMontageFixedSurfaceImageZoomFilter({
   baseWidth = 1280,
   baseHeight = 720,
   durationSec = 1,
+  animationDurationSec = durationSec,
   zoomFrom = 1,
   zoomTo = 1.3,
   frameRate = 24
@@ -12477,7 +13629,7 @@ function buildMontageFixedSurfaceImageZoomFilter({
   const workHeight = Math.max(2, Math.ceil((safeBaseHeight * maxZoom) / 2) * 2);
   const safeDurationSec = Math.max(0.2, Number(durationSec || 1) || 1);
   const safeFrameRate = Math.max(1, Math.round(Number(frameRate || 24) || 24));
-  const lastOutputFrame = Math.max(1, Math.round(safeDurationSec * safeFrameRate) - 1);
+  const lastOutputFrame = Math.max(1, Math.round(Math.max(0.2, Number(animationDurationSec || safeDurationSec)) * safeFrameRate) - 1);
   const rawFrameProgress = `min(max(on/${lastOutputFrame}\\,0)\\,1)`;
   const smoothFrameProgress = `${rawFrameProgress}*${rawFrameProgress}*(3-2*${rawFrameProgress})`;
   const zoomExpr = `${Number(zoomFrom || 1).toFixed(5)}+(${Number(zoomTo || 1).toFixed(5)}-${Number(zoomFrom || 1).toFixed(5)})*(${smoothFrameProgress})`;
@@ -12514,10 +13666,37 @@ function buildSceneMediaPositionCropFilter({
   scaleFilter = "",
   cloneTail = false,
   backgroundLabel = "scene_bg",
-  transformedLabel = "scene_fg"
+  transformedLabel = "scene_fg",
+  highResolutionPass = false
 } = {}) {
   const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
   const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  if (mediaKind === "image" && !highResolutionPass && hasMontageImageMotion(mediaMotionPreset, visualEffects)) {
+    const highResolutionLabel = `${outputLabel}_high_resolution`;
+    const highResolutionFilter = buildSceneMediaPositionCropFilter({
+      inputLabel,
+      outputLabel: highResolutionLabel,
+      canvas: { width: width * 2, height: height * 2 },
+      sourceWidth,
+      sourceHeight,
+      durationSec,
+      visualLayoutMode,
+      reelMode,
+      mediaScale,
+      mediaOffsetXPct,
+      mediaOffsetYPct,
+      mediaMotionPreset,
+      visualEffects,
+      mediaKind,
+      frameRate,
+      scaleFilter,
+      cloneTail,
+      backgroundLabel,
+      transformedLabel,
+      highResolutionPass: true
+    });
+    return `${highResolutionFilter};[${highResolutionLabel}]scale=${width}:${height}:flags=${MONTAGE_IMAGE_SCALE_FLAGS},format=yuv420p[${outputLabel}]`;
+  }
   const spec = resolveSceneMediaRenderSpec({
     canvasWidth: width,
     canvasHeight: height,
@@ -12534,7 +13713,8 @@ function buildSceneMediaPositionCropFilter({
     durationSec
   });
   const progressExpr = buildSceneMediaMotionProgressExpr(durationSec);
-  const returnToAnchorExpr = `(4*(${progressExpr})*(1-(${progressExpr})))`;
+  const kenBurnsProgressExpr = buildSceneMediaMotionProgressExpr(spec.kenBurns.playbackDurationSec);
+  const returnToAnchorExpr = `(4*(${kenBurnsProgressExpr})*(1-(${kenBurnsProgressExpr})))`;
   const outputFrameRate = Math.max(1, Math.round(Number(frameRate || 24) || 24));
   let xExpr = `${spec.leftPx.toFixed(3)}`;
   let yExpr = `${spec.topPx.toFixed(3)}`;
@@ -12572,6 +13752,7 @@ function buildSceneMediaPositionCropFilter({
           baseWidth: spec.evenScaledSize.width,
           baseHeight: spec.evenScaledSize.height,
           durationSec,
+          animationDurationSec: spec.kenBurns.playbackDurationSec,
           zoomFrom,
           zoomTo,
           frameRate: outputFrameRate
@@ -12589,21 +13770,21 @@ function buildSceneMediaPositionCropFilter({
           ? spec.topPx
           : spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
         if (spec.kenBurns.effect === "pan-left") {
-          xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+          xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
           yExpr = `${baseTop.toFixed(3)}`;
         } else if (spec.kenBurns.effect === "pan-right") {
-          xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+          xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
           yExpr = `${baseTop.toFixed(3)}`;
         } else if (spec.kenBurns.effect === "pan-up") {
           xExpr = `${baseLeft.toFixed(3)}`;
           yExpr = topAlignedImageMotion
             ? `${baseTop.toFixed(3)}-(${panDistanceYPx.toFixed(3)}*(${returnToAnchorExpr}))`
-            : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+            : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
         } else if (spec.kenBurns.effect === "pan-down") {
           xExpr = `${baseLeft.toFixed(3)}`;
           yExpr = topAlignedImageMotion
-            ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${progressExpr}))`
-            : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+            ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${kenBurnsProgressExpr}))`
+            : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
         }
       }
     } else {
@@ -12613,14 +13794,14 @@ function buildSceneMediaPositionCropFilter({
     if (!transformedFilter) {
       transformedFilter = `${inputChain.join(",")},setsar=1[${transformedLabel}]`;
     }
-    const overlayXExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr;
-    const overlayYExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr;
+    const overlayXExpr = highResolutionPass ? `round(${xExpr})` : (mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr);
+    const overlayYExpr = highResolutionPass ? `round(${yExpr})` : (mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr);
 
     return [
       `${prepFilter}${prepLabel}split=2[vbg_src][vfg_src]`,
-      `[vbg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=24:8,eq=saturation=1.08[${backgroundLabel}]`,
+      `[vbg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=24:8,eq=saturation=1.08${highResolutionPass ? ",format=rgba" : ""}[${backgroundLabel}]`,
       transformedFilter,
-      `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+      `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1:format=${highResolutionPass ? "auto" : "yuv420p"}${highResolutionPass ? ",format=rgba" : ""}[${outputLabel}]`
     ].filter(Boolean).join(";");
   }
 
@@ -12644,6 +13825,7 @@ function buildSceneMediaPositionCropFilter({
         baseWidth: spec.evenScaledSize.width,
         baseHeight: spec.evenScaledSize.height,
         durationSec,
+        animationDurationSec: spec.kenBurns.playbackDurationSec,
         zoomFrom,
         zoomTo,
         frameRate: outputFrameRate
@@ -12661,21 +13843,21 @@ function buildSceneMediaPositionCropFilter({
         ? spec.topPx
         : spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
       if (spec.kenBurns.effect === "pan-left") {
-        xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+        xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
         yExpr = `${baseTop.toFixed(3)}`;
       } else if (spec.kenBurns.effect === "pan-right") {
-        xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+        xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
         yExpr = `${baseTop.toFixed(3)}`;
       } else if (spec.kenBurns.effect === "pan-up") {
         xExpr = `${baseLeft.toFixed(3)}`;
         yExpr = topAlignedImageMotion
           ? `${baseTop.toFixed(3)}-(${panDistanceYPx.toFixed(3)}*(${returnToAnchorExpr}))`
-          : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+          : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
       } else if (spec.kenBurns.effect === "pan-down") {
         xExpr = `${baseLeft.toFixed(3)}`;
         yExpr = topAlignedImageMotion
-          ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${progressExpr}))`
-          : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+          ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${kenBurnsProgressExpr}))`
+          : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${kenBurnsProgressExpr}))`;
       }
     }
   } else {
@@ -12684,13 +13866,84 @@ function buildSceneMediaPositionCropFilter({
   if (!transformedFilter) {
     transformedFilter = `${inputChain.join(",")},setsar=1[${transformedLabel}]`;
   }
-  const overlayXExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr;
-  const overlayYExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr;
+  const overlayXExpr = highResolutionPass ? `round(${xExpr})` : (mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr);
+  const overlayYExpr = highResolutionPass ? `round(${yExpr})` : (mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr);
   return [
-    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=${outputFrameRate}[${backgroundLabel}]`,
+    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=${outputFrameRate}${highResolutionPass ? ",format=rgba" : ""}[${backgroundLabel}]`,
     transformedFilter,
-    `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+    `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1:format=${highResolutionPass ? "auto" : "yuv420p"}${highResolutionPass ? ",format=rgba" : ""}[${outputLabel}]`
   ].join(";");
+}
+
+function resolveMontageStopMotionSequence(entry = null) {
+  const raw = entry?.video?.stopMotion || entry?.stopMotion || null;
+  const normalized = podcasterStopMotionModel?.normalizeStopMotion?.(raw) || null;
+  if (!normalized || !Array.isArray(normalized.frames) || normalized.frames.length < 2) return null;
+  return normalized;
+}
+
+function buildMontageStopMotionInputVideo({
+  normalized = null,
+  framePaths = [],
+  durationSec = 1,
+  frameRate = 24,
+  primaryInputIndex = 0,
+  deferredInputIndexBase = 3,
+  targetWidth = 0,
+  targetHeight = 0
+} = {}) {
+  if (!normalized || !Array.isArray(normalized.frames) || normalized.frames.length < 2) return null;
+  const totalDurationSec = Math.max(0.2, Number(durationSec || 0) || 0.2);
+  // The shared model folds beatPositions into frameWeights, so music-beat sequences
+  // keep the exact beat ratios while fit-scene cuts get a small ffmpeg floor.
+  const frameDurationsSec = normalized.timingMode === "music-beat"
+    ? normalized.frameWeights.map((weight) => Math.max(0.001, Number(weight) || 0) * totalDurationSec)
+    : normalized.frameWeights.map((weight) => Math.max(0.04, (Number(weight) || 0) * totalDurationSec));
+  const primaryInputArgs = [
+    "-loop", "1",
+    "-framerate", String(frameRate),
+    "-t", frameDurationsSec[0].toFixed(6),
+    "-i", String(framePaths[0] || "")
+  ];
+  const deferredInputArgs = [];
+  normalized.frames.forEach((frame, index) => {
+    if (index === 0) return;
+    deferredInputArgs.push(
+      "-loop", "1",
+      "-framerate", String(frameRate),
+      "-t", frameDurationsSec[index].toFixed(6),
+      "-i", String(framePaths[index] || "")
+    );
+  });
+  const concatInputLabels = [];
+  const normalizeFilters = [];
+  const concatWidth = Math.max(2, Math.round(Number(targetWidth || 0) || 0));
+  const concatHeight = Math.max(2, Math.round(Number(targetHeight || 0) || 0));
+  normalized.frames.forEach((frame, index) => {
+    const rawLabel = index === 0
+      ? `[${primaryInputIndex}:v]`
+      : `[${deferredInputIndexBase + index - 1}:v]`;
+    if (concatWidth > 1 && concatHeight > 1) {
+      // ffmpeg concat exige dimensiones idénticas: normaliza cada foto al tamaño del primer frame.
+      const scaledLabel = `stop_motion_s${index}`;
+      normalizeFilters.push(`${rawLabel}scale=${concatWidth}:${concatHeight}:flags=lanczos,setsar=1[${scaledLabel}]`);
+      concatInputLabels.push(`[${scaledLabel}]`);
+    } else {
+      concatInputLabels.push(rawLabel);
+    }
+  });
+  const concatFilter = [
+    ...normalizeFilters,
+    `${concatInputLabels.join("")}concat=n=${normalized.frames.length}:v=1:a=0[stop_motion_v]`
+  ].join(";");
+  return {
+    frameDurationsSec,
+    primaryInputArgs,
+    deferredInputArgs,
+    concatFilter,
+    outputLabel: "[stop_motion_v]",
+    extraInputCount: Math.max(0, normalized.frames.length - 1)
+  };
 }
 
 function buildMontageImageMotionVideoFilter({
@@ -12809,7 +14062,8 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
     .filter(Boolean)
     .slice()
     .sort((a, b) => (
-      Number(a?.timelineStartMs || 0) - Number(b?.timelineStartMs || 0)
+      Number(a?.freeVideoOverlay === true) - Number(b?.freeVideoOverlay === true)
+      || Number(a?.timelineStartMs || 0) - Number(b?.timelineStartMs || 0)
       || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
       || Number(a?.sceneIndex || 0) - Number(b?.sceneIndex || 0)
     ));
@@ -12826,7 +14080,7 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
     };
   });
   let hasOverlap = false;
-  let hasGaps = false;
+  let hasGaps = planned.length > 0 && planned[0].timelineStartMs > 0;
   for (let index = 1; index < planned.length; index += 1) {
     const previous = planned[index - 1];
     const current = planned[index];
@@ -13104,7 +14358,7 @@ async function renderMontageOverlapComposition({
     const chunkedEntries = [];
     for (let i = 0; i < entries.length; i += maxInputs) {
       const chunkEntries = entries.slice(i, i + maxInputs);
-      const chunkOffsetMs = chunkEntries[0].timelineStartMs;
+      const chunkOffsetMs = Math.min(...chunkEntries.map((entry) => entry.timelineStartMs));
       const shiftedEntries = chunkEntries.map((entry) => ({
         ...entry,
         timelineStartMs: Math.max(0, entry.timelineStartMs - chunkOffsetMs),
@@ -13119,6 +14373,7 @@ async function renderMontageOverlapComposition({
         rowId: `chunk_${i}_to_${i + chunkEntries.length - 1}`,
         intermediatePath: chunkOutPath,
         zIndex: 1,
+        freeVideoOverlay: chunkEntries.some((entry) => entry.freeVideoOverlay === true),
         durationSec: chunkDurationMs / 1000,
         durationMs: chunkDurationMs,
         timelineStartMs: chunkOffsetMs,
@@ -13217,13 +14472,14 @@ function buildMontageOverlayCardsFilter({
   cards = [],
   width = 1280,
   height = 720,
-  tmpDir = ""
+  tmpDir = "",
+  textFilePrefix = "overlay-card"
 } = {}) {
   const normalizedCards = Array.isArray(cards) ? cards.filter(Boolean) : [];
   if (!normalizedCards.length) return "";
   const canvasWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
   const canvasHeight = Math.max(2, Math.round(Number(height || 720) || 720));
-  const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "overlay-card");
+  const textFileResolver = createMontageReviewTextFileResolver(tmpDir, textFilePrefix);
   const fontFile = resolveFfmpegDrawtextFontFile();
   const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
   const filters = [];
@@ -14730,6 +15986,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       let isImageAsset = isImageAssetOriginal
         || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#&]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
         || /\/api\/assets\/proxy-image\?/i.test(videoAsset?.storagePath || videoAsset?.url || "");
+      const stopMotionSequence = resolveMontageStopMotionSequence(entry);
+      const hasStopMotionVisual = Boolean(stopMotionSequence);
+      if (hasStopMotionVisual) {
+        isImageAsset = true;
+      }
       if (hasCustomBg && !hasVideoAssetSource) {
         isImageAsset = true;
       }
@@ -14744,7 +16005,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         err.status = 400;
         throw err;
       }
-      if (!hasVideoAssetSource && !hasCustomBg) {
+      if (!hasVideoAssetSource && !hasCustomBg && !hasStopMotionVisual) {
         const err = new Error("missing_video_source");
         err.status = 422;
         err.code = "missing_video_source";
@@ -14832,7 +16093,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           fs.writeFileSync(inputVisualPath, ppmContent, "utf8");
           return inputVisualPath;
         };
-        if (hasCustomBg && !hasVideoAssetSource) {
+        let stopMotionFramePaths = [];
+        if (hasStopMotionVisual) {
+          currentSceneSubstage = "scene_download_stop_motion_frames";
+          for (let frameIndex = 0; frameIndex < stopMotionSequence.frames.length; frameIndex += 1) {
+            throwIfCancelled(`scene_${sceneIndex}_stop_motion_frame_${frameIndex}`);
+            const framePath = await downloadInput(stopMotionSequence.frames[frameIndex], "image", 2000 + sceneIndex * 64 + frameIndex);
+            stopMotionFramePaths.push(framePath);
+            sceneOverlayTempPaths.push(framePath);
+          }
+          inputVisualPath = stopMotionFramePaths[0];
+        } else if (hasCustomBg && !hasVideoAssetSource) {
           writeGeneratedSceneBackground();
         } else {
           try {
@@ -14942,7 +16213,20 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ? resolveMontageImageMotionFrameRate(mediaMotionPreset, visualEffects)
           : 24;
         const args = ["-y", "-hide_banner", "-loglevel", "warning"];
-        if (isImageAsset) {
+        let stopMotionInputPlan = null;
+        if (isImageAsset && hasStopMotionVisual) {
+          stopMotionInputPlan = buildMontageStopMotionInputVideo({
+            normalized: stopMotionSequence,
+            framePaths: stopMotionFramePaths,
+            durationSec: durSec,
+            frameRate: imageMotionFrameRate,
+            primaryInputIndex: 0,
+            deferredInputIndexBase: (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2,
+            targetWidth: Number(sourceDims?.width || 0) || 0,
+            targetHeight: Number(sourceDims?.height || 0) || 0
+          });
+          args.push(...stopMotionInputPlan.primaryInputArgs);
+        } else if (isImageAsset) {
           args.push("-loop", "1", "-framerate", String(imageMotionFrameRate), "-i", inputVisualPath);
         } else {
           args.push("-i", inputVisualPath);
@@ -14953,6 +16237,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
 
         if (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) {
           args.push("-i", inputAudioPath);
+        }
+
+        if (stopMotionInputPlan) {
+          args.push(...stopMotionInputPlan.deferredInputArgs);
         }
 
         const veoVolume = (veoVolumePct / 100).toFixed(3);
@@ -14986,13 +16274,26 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const previewRuntimeTimingSegments = normalizeMontagePreviewRuntimeTimingSegments(entry?.previewRuntime?.timingSegments || []);
         const hasPreviewRuntimeTiming = !isImageAsset && previewRuntimeTimingSegments.length > 0;
         const previewRuntimeInputLabel = hasPreviewRuntimeTiming ? "[preview_runtime_v]" : "[0:v]";
+        const imageWarpFilter = isImageAsset && !isGeneratedBackgroundVisual
+          ? buildMontageImageWarpFilter(visualEffects.imageWarp, {
+            durationSec: durSec,
+            sourceWidth: sourceDims?.width || canvas.width,
+            sourceHeight: sourceDims?.height || canvas.height,
+            inputLabel: stopMotionInputPlan ? stopMotionInputPlan.outputLabel : "[0:v]"
+          })
+          : "";
         let videoFilterGraph = hasPreviewRuntimeTiming
           ? buildMontagePreviewRuntimeTimingVideoFilter({
             inputLabel: "[0:v]",
             outputLabel: "preview_runtime_v",
             timingSegments: previewRuntimeTimingSegments
           })
-          : "";
+          : imageWarpFilter;
+        if (stopMotionInputPlan) {
+          videoFilterGraph = videoFilterGraph
+            ? `${stopMotionInputPlan.concatFilter};${videoFilterGraph}`
+            : stopMotionInputPlan.concatFilter;
+        }
         if (!isImageAsset && visualLayoutMode === "blur-backdrop") {
           const sceneFilter = buildMontageVideoSceneFilter({
             inputLabel: previewRuntimeInputLabel,
@@ -15018,7 +16319,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               canvas,
               durationSec: durSec
             }) : buildMontageImageMotionVideoFilter({
-              inputLabel: "[0:v]",
+              inputLabel: imageWarpFilter ? "[image_warp]" : (stopMotionInputPlan ? stopMotionInputPlan.outputLabel : "[0:v]"),
               outputLabel: "vout",
               canvas,
               sourceWidth: sourceDims?.width || canvas.width,
@@ -15052,6 +16353,27 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
 
         let finalVideoMapLabel = "[vout]";
         let nextOverlayInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
+        if (stopMotionInputPlan) {
+          nextOverlayInputIndex += stopMotionInputPlan.extraInputCount;
+        }
+        for (const [layerIndex, layer] of normalizeSceneImageLayers(visualEffects.imageLayers).entries()) {
+          if (layer.startSec >= durSec) continue;
+          const layerPath = await downloadInput(layer, "image", 1000 + sceneIndex * 24 + layerIndex);
+          sceneOverlayTempPaths.push(layerPath);
+          const dimensions = await probeImageDimensionsWithFfmpeg(layerPath, `montage_scene_layer_${sceneIndex}_${layerIndex}`);
+          args.push("-loop", "1", "-framerate", String(imageMotionFrameRate), "-i", layerPath);
+          const rendered = buildSceneImageLayerFilters(layer, {
+            index: layerIndex, inputIndex: nextOverlayInputIndex, baseLabel: finalVideoMapLabel,
+            canvas, durationSec: durSec,
+            sourceWidth: dimensions.width || canvas.width,
+            sourceHeight: dimensions.height || canvas.height
+          });
+          if (rendered.filters) {
+            videoFilterGraph = `${videoFilterGraph};${rendered.filters}`;
+            finalVideoMapLabel = rendered.outputLabel;
+          }
+          nextOverlayInputIndex += 1;
+        }
         if (shouldBurnSceneOnScreenText) {
           const renderedTextOverlayResult = await appendMontageSceneOnScreenTextRenderedFrameFilters({
             input,
@@ -15124,7 +16446,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           tmpDir,
           args,
           nextInputIndex: nextOverlayInputIndex,
-          tempPaths: sceneOverlayTempPaths
+          tempPaths: sceneOverlayTempPaths,
+          downloadInput,
+          shouldAbort
         });
         videoFilterGraph = stylizedOverlayResult.videoFilterGraph;
         finalVideoMapLabel = stylizedOverlayResult.finalVideoMapLabel;
@@ -15263,6 +16587,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           sceneIndex,
           rowId,
           intermediatePath,
+          freeVideoOverlay: entry?.freeVideoOverlay === true,
           syntheticVisualOnly: hasCustomBg && !hasVideoAssetSource,
           backgroundColor: hasCustomBg ? clampText(entry?.backgroundColor || "", 150) : "",
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
@@ -15639,23 +16964,61 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           globalCounterMode: "dynamic",
           textFileResolver: reviewTextFileResolver
         });
-      }
-
-      if (overlayCardSegments.length) {
-        emitStage("apply_overlay_cards", 0.9, "Aplicando cards animadas.");
-        const overlayCardsFilter = buildMontageOverlayCardsFilter({
-          cards: overlayCardSegments,
-          width: visualDims.width,
-          height: visualDims.height,
-          tmpDir
-        });
-        if (overlayCardsFilter) {
+        if (reviewFilter) {
           filterIndex += 1;
-          const outLabel = `[cards_${filterIndex}]`;
-          filterSegments.push(`${currentLabel}${overlayCardsFilter}${outLabel}`);
+          const outLabel = `[review_layout_${filterIndex}]`;
+          filterSegments.push(`${currentLabel}${reviewFilter}${outLabel}`);
           currentLabel = outLabel;
           useFilterComplexForVisual = true;
         }
+      }
+
+      const cardSequenceInputs = [];
+      for (const card of overlayCardSegments.slice().sort((a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0))) {
+        emitStage("apply_overlay_cards", 0.9, "Aplicando cards animadas.");
+        let sequence = null;
+        if (isPremiumCard(card)) {
+          throwIfCancelled("montage_card_frames");
+          const cardIndex = cardSequenceInputs.length;
+          const outputDir = path.join(tmpDir, `card-motion-${cardIndex}`);
+          try {
+            sequence = await renderCardMotionFrames({
+              card, outputDir, width: visualDims.width, height: visualDims.height,
+              fps: 24, shouldAbort: () => shouldAbort()
+            });
+          } catch (cardMotionErr) {
+            console.warn("[backend][montage-export][card-motion-fallback]", {
+              cardId: card.id,
+              error: String(cardMotionErr?.message || cardMotionErr)
+            });
+          }
+        }
+        if (!sequence) {
+          const legacyFilter = buildMontageOverlayCardsFilter({
+            cards: [card], width: visualDims.width, height: visualDims.height, tmpDir,
+            textFilePrefix: `overlay-card-${filterIndex + 1}`
+          });
+          if (legacyFilter) {
+            filterIndex += 1;
+            const outLabel = `[cards_${filterIndex}]`;
+            filterSegments.push(`${currentLabel}${legacyFilter}${outLabel}`);
+            currentLabel = outLabel;
+            useFilterComplexForVisual = true;
+          }
+          continue;
+        }
+        const cardIndex = cardSequenceInputs.length;
+        const inputIndex = cardIndex + 1;
+        const cardStartSec = Math.max(0, Number(card.startMs || 0) / 1000);
+        const cardEndSec = cardStartSec + Number(card.durationMs || 0) / 1000;
+        const overlayInputLabel = `[card_motion_${cardIndex}]`;
+        filterSegments.push(`[${inputIndex}:v]format=rgba,setpts=PTS-STARTPTS+${cardStartSec.toFixed(3)}/TB${overlayInputLabel}`);
+        filterIndex += 1;
+        const outLabel = `[card_out_${filterIndex}]`;
+        filterSegments.push(`${currentLabel}${overlayInputLabel}overlay=x=${sequence.cropX}:y=${sequence.cropY}:eof_action=pass:repeatlast=0:enable='between(t,${cardStartSec.toFixed(3)},${cardEndSec.toFixed(3)})'${outLabel}`);
+        currentLabel = outLabel;
+        useFilterComplexForVisual = true;
+        cardSequenceInputs.push(sequence);
       }
 
       if (hasBrandOverlay) {
@@ -15665,7 +17028,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           height: visualDims.height,
           reelModeEnabled: input.reelModeEnabled === true,
           baseInputLabel: currentLabel,
-          brandInputLabel: "[1:v]",
+          brandInputLabel: `[${cardSequenceInputs.length + 1}:v]`,
           outputLabel: `brand_out_${filterIndex + 1}`
         });
         if (brandFilterComplex) {
@@ -15691,15 +17054,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-y", "-hide_banner", "-loglevel", "warning",
           "-i", finalOutPath
         ];
-        const isReviewVisualPass = Boolean(reviewFilter && input.exportMode === "review");
-        if (!isReviewVisualPass && useFilterComplexForVisual && hasBrandOverlay) {
+        if (useFilterComplexForVisual) {
+          for (const sequence of cardSequenceInputs) {
+            finalVisualArgs.push("-framerate", String(sequence.fps), "-start_number", "0", "-i", sequence.pattern);
+          }
+        }
+        if (useFilterComplexForVisual && hasBrandOverlay) {
           finalVisualArgs.push("-loop", "1", "-i", resolvedBrandPath);
         }
-        const baseVideoChain = isReviewVisualPass
-          ? reviewFilter
-          : (visualFilters.join(",") || "format=rgba");
+        const baseVideoChain = visualFilters.join(",") || "format=rgba";
         let filterGraph = baseVideoChain;
-        if (!isReviewVisualPass && useFilterComplexForVisual) {
+        if (useFilterComplexForVisual) {
           finalVisualArgs.push("-filter_complex", baseVideoChain);
           finalVisualArgs.push("-map", "[vout]");
         } else {
@@ -16938,7 +18303,10 @@ app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: 
     const uid = String(req.authContext?.uid || "").trim();
     const sessionId = clampText(req.headers["x-session-id"] || "", 180);
     const rowId = clampText(req.headers["x-row-id"] || "", 180);
-    const originalFileName = clampText(req.headers["x-file-name"] || "scene-media", 220) || "scene-media";
+    const encodedFileName = String(req.headers["x-file-name"] || "scene-media");
+    let decodedFileName = encodedFileName;
+    try { decodedFileName = decodeURIComponent(encodedFileName); } catch (_) { /* Use the original header. */ }
+    const originalFileName = clampText(decodedFileName, 220) || "scene-media";
     const mimeType = clampText(req.headers["x-mime-type"] || req.headers["content-type"] || "application/octet-stream", 160) || "application/octet-stream";
     const previousStoragePath = clampText(req.headers["x-previous-storage-path"] || "", 700);
     const buffer = Buffer.isBuffer(req.body) ? Buffer.from(req.body) : Buffer.alloc(0);
@@ -16948,17 +18316,22 @@ app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: 
     if (!buffer.length) return res.status(400).json({ error: "No se recibió archivo." });
 
     const isImage = mimeType.startsWith("image/");
-    const maxBytes = isImage ? MAX_SPEAKER_PORTRAIT_BYTES : MAX_DIALOGUE_VIDEO_BYTES;
+    const isAudio = mimeType.startsWith("audio/");
+    if (!isImage && !isAudio && !mimeType.startsWith("video/")) return res.status(400).json({ error: "Tipo de archivo no compatible." });
+    if (isAudio && !new Set(["audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg", "audio/webm"]).has(mimeType)) return res.status(400).json({ error: "Formato de audio no compatible." });
+    const maxBytes = isImage ? MAX_SPEAKER_PORTRAIT_BYTES : isAudio ? 24 * 1024 * 1024 : MAX_DIALOGUE_VIDEO_BYTES;
     if (buffer.length > maxBytes) {
-      return res.status(413).json({ error: isImage ? "La imagen excede el tamaño permitido." : "El video excede el tamaño permitido." });
+      return res.status(413).json({ error: isImage ? "La imagen excede el tamaño permitido." : isAudio ? "El audio excede el tamaño permitido." : "El video excede el tamaño permitido." });
     }
 
-    const ext = isImage ? getImageExtension(mimeType || "image/png") : getVideoExtension(mimeType || "video/mp4");
+    const ext = isImage ? getImageExtension(mimeType || "image/png") : isAudio
+      ? ({ "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/webm": "webm" }[mimeType] || "bin")
+      : getVideoExtension(mimeType || "video/mp4");
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
     const rowSlug = normalizeStorageSegment(rowId, "row");
     const fileBaseName = String(originalFileName || "").replace(/\.[^.]+$/, "");
     const fileSlug = normalizeStorageSegment(fileBaseName, "media");
-    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/videos/${rowSlug}_${Date.now()}_${fileSlug}.${ext}`;
+    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/${isAudio ? "audio" : "videos"}/${rowSlug}_${Date.now()}_${fileSlug}.${ext}`;
 
     const asset = await uploadScreenshotAsset({
       path: storagePath,
@@ -16969,11 +18342,20 @@ app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: 
         sessionId,
         rowId,
         fileName: originalFileName,
-        kind: isImage ? "scene_image_replacement" : "scene_video_replacement"
+        kind: isImage ? "scene_image_replacement" : isAudio ? "scene_audio_replacement" : "scene_video_replacement"
       }
     });
-    if (previousStoragePath && previousStoragePath !== storagePath) {
-      await deleteStoragePath(previousStoragePath).catch(() => {});
+    // Paridad con functions/src/uploads.js: sólo se elimina la ruta que pertenece
+    // a la sesión que sube el archivo. Sin este filtro, una cabecera
+    // x-previous-storage-path arbitraria borraría recursos de otra sesión o de
+    // otro usuario, y un frame de stop motion se borraba con la subida siguiente.
+    const replaceableStoragePath = (() => {
+      const clean = String(previousStoragePath || "").trim().replace(/^\/+/, "");
+      if (!clean || clean.includes("..") || !clean.startsWith("podcaster/")) return "";
+      return clean.startsWith(`podcaster/sessions/${sessionSlug}/`) ? clean : "";
+    })();
+    if (replaceableStoragePath && replaceableStoragePath !== storagePath) {
+      await deleteStoragePath(replaceableStoragePath).catch(() => {});
     }
     return res.status(200).json({
       ok: true,
@@ -16981,7 +18363,7 @@ app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: 
         name: originalFileName,
         mimeType,
         size: buffer.length,
-        type: isImage ? "image" : "video",
+        type: isImage ? "image" : isAudio ? "audio" : "video",
         downloadUrl: asset.downloadUrl,
         storagePath: asset.path,
         updatedAt: new Date().toISOString()
@@ -16989,6 +18371,32 @@ app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: 
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir media de escena.") });
+  }
+});
+
+// El video generado en la GPU local del equipo no consume cuota remota; este endpoint
+// solo registra el ahorro diario (videoSessions) y nunca reclama minutos de Veo.
+app.post("/api/podcaster/local-video/accounting", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    const sessionId = clampText(req.body?.sessionId || "", 140);
+    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
+    const sessionDoc = await db.collection("podcaster_sessions").doc(sessionId).get();
+    if (!sessionDoc.exists) return res.status(404).json({ error: "podcaster_session_not_found" });
+    if (String(sessionDoc.data()?.ownerId || "") !== uid) return res.status(403).json({ error: "podcaster_session_forbidden" });
+    const { getPolicy, claimDaily } = require("../functions/src/savings-policy.js");
+    const savingsPolicy = await getPolicy(db);
+    let recorded = true;
+    try {
+      await claimDaily(db, uid, "videoSessions", sessionId, savingsPolicy.limits.videoSessions);
+    } catch (error) {
+      if (Number(error?.status) === 429) recorded = false;
+      else throw error;
+    }
+    return res.status(200).json({ ok: true, recorded, generator: "local" });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo registrar el ahorro local.") });
   }
 });
 
@@ -17406,17 +18814,25 @@ app.get("/api/podcaster/music/library/list", async (req, res) => {
     const snap = await db.collection("podcaster_music_library").orderBy("updatedAt", "desc").limit(250).get();
     const tracks = snap.docs.map((docSnap) => {
       const data = docSnap.data() || {};
+      const durationSec = clampNumber(data.durationSec, 0, 1800, 0);
       return {
         libraryId: docSnap.id,
         name: clampText(data.name || "Audio", 180) || "Audio",
         mimeType: clampText(data.mimeType || "audio/mpeg", 120) || "audio/mpeg",
         size: Math.max(0, Number(data.size || 0) || 0),
-        durationSec: clampNumber(data.durationSec, 0, 1800, 0),
+        durationSec,
         downloadUrl: clampText(data.downloadUrl || "", 3000),
         storagePath: clampText(data.storagePath || "", 700),
         updatedAt: clampText(data.updatedAt || "", 64),
         ownerId: clampText(data.ownerId || "", 140),
-        ownerEmail: clampText(data.ownerEmail || "", 180)
+        ownerEmail: clampText(data.ownerEmail || "", 180),
+        model: clampText(data.model || "", 120),
+        prompt: clampText(data.prompt || "", 4000),
+        bpm: clampNumber(data.bpm, 0, 300, 0),
+        key: clampText(data.key || "", 40),
+        genre: clampText(data.genre || "", 80),
+        trimInMs: clampNumber(data.trimInMs, 0, 1800000, 0),
+        trimOutMs: clampNumber(data.trimOutMs, 0, 1800000, Math.round(durationSec * 1000))
       };
     });
     return res.status(200).json({ ok: true, tracks });
@@ -17516,21 +18932,27 @@ app.post("/api/podcaster/music/generate", async (req, res) => {
     const sessionId = clampText(req.body?.sessionId || "", 140);
     const preset = clampText(req.body?.preset || "ambient", 40) || "ambient";
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
-    const prompt = buildPodcasterMusicPrompt(req.body?.prompt || "", preset);
-    const model = sanitizePodcasterMusicModel(req.body?.model || "lyria-3-clip-preview");
+    const isSoundLab = String(req.body?.workspaceType || "").trim() === "schroeder-sound-lab";
+    const prompt = buildPodcasterMusicPrompt(req.body?.prompt || "", preset, { soundLab: isSoundLab });
+    const model = sanitizePodcasterMusicModel(req.body?.model || "lyria-3.5");
     if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
     if (!hasGeminiKey()) return res.status(500).json({ error: "Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend." });
 
     const client = new GoogleGenAI({
       apiKey: GEMINI_API_KEY
     });
-    const response = await client.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseModalities: ["AUDIO", "TEXT"]
+    let response;
+    try {
+      response = await client.interactions.create({ model, input: prompt, response_format: { type: "audio" } });
+    } catch (error) {
+      if (!isMusicPolicyBlock(error)) throw error;
+      try {
+        response = await client.interactions.create({ model, input: buildPolicySafeMusicPrompt(prompt), response_format: { type: "audio" } });
+      } catch (retryError) {
+        if (isMusicPolicyBlock(retryError)) return res.status(422).json({ error: "No se pudo generar esta versión. La grabación y el brief siguen disponibles para intentarlo de nuevo." });
+        throw retryError;
       }
-    });
+    }
     const audioParts = readLyriaAudioParts(response);
     const firstAudio = audioParts[0] || null;
     if (!firstAudio?.data) {
@@ -17543,7 +18965,9 @@ app.post("/api/podcaster/music/generate", async (req, res) => {
     }
     const ext = getAudioExtension(mimeType);
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
-    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/music/ai-${randomUUID()}.${ext}`;
+    const storagePath = isSoundLab
+      ? `schroeder-sound-lab/previews/${normalizeStorageSegment(uid, "user")}/${sessionSlug}/music/ai-${randomUUID()}.${ext}`
+      : `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/music/ai-${randomUUID()}.${ext}`;
     const asset = await uploadScreenshotAsset({
       path: storagePath,
       buffer,
@@ -17552,13 +18976,21 @@ app.post("/api/podcaster/music/generate", async (req, res) => {
         uid,
         sessionId,
         kind: "panel_music_ai",
-        model
+        model,
+        approvalState: isSoundLab ? "preview" : null,
+        expiresAt: null
       }
     });
     if (previousStoragePath && previousStoragePath !== storagePath) {
       await deleteStoragePath(previousStoragePath).catch(() => {});
     }
     await sleep(120);
+    const musicalFingerprint = await analyzeGeneratedSongFingerprint({
+      client,
+      audio: buffer,
+      mimeType,
+      model: req.body?.agentModel
+    }).catch(() => null);
     return res.status(200).json({
       ok: true,
       track: {
@@ -17568,12 +19000,80 @@ app.post("/api/podcaster/music/generate", async (req, res) => {
         downloadUrl: asset.downloadUrl,
         storagePath: asset.path,
         updatedAt: new Date().toISOString(),
-        model
+        model,
+        musicalFingerprint
       }
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar música con IA.") });
   }
+});
+
+function startLocalSchroederGeneration({ ownerId, requestId, kind, body, authorization }) {
+  pruneSchroederGenerationJobs();
+  const duplicate = [...schroederGenerationJobs.values()].find((job) => job.ownerId === ownerId && job.requestId === requestId);
+  if (duplicate) return duplicate;
+  const jobId = `schroeder_${randomUUID()}`;
+  const now = new Date().toISOString();
+  const job = {
+    jobId, requestId, ownerId, kind, status: "queued", progress: 0.04,
+    hint: kind === "music" ? "Preparando la composición" : "Preparando el audio",
+    createdAt: now, updatedAt: now, result: null, error: null
+  };
+  schroederGenerationJobs.set(jobId, job);
+  const targetPath = kind === "music" ? "/api/podcaster/music/generate" : "/api/podcaster/dialogue-audio/generate";
+  void (async () => {
+    try {
+      Object.assign(job, { status: "running", progress: 0.16, hint: kind === "music" ? "Componiendo en segundo plano" : "Creando audio en segundo plano", updatedAt: new Date().toISOString() });
+      const upstream = await fetchCompat(`http://127.0.0.1:${PORT}${targetPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authorization },
+        body: JSON.stringify(body || {})
+      });
+      const data = await safeJson(upstream);
+      if (!upstream.ok) throw Object.assign(new Error(String(data?.error || `No se pudo completar la generación (${upstream.status}).`)), { status: upstream.status });
+      if (job.status === "cancelled") {
+        const storagePath = String(data?.track?.storagePath || data?.dialogueAudio?.storagePath || "").trim();
+        if (storagePath.startsWith("schroeder-sound-lab/previews/")) await deleteStoragePath(storagePath).catch(() => {});
+        return;
+      }
+      Object.assign(job, { status: "ready", progress: 1, hint: "Audio listo para revisar", result: data, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      if (job.status === "cancelled") return;
+      Object.assign(job, { status: "error", progress: 0, hint: "La generación no pudo completarse", error: { message: String(error?.message || error).slice(0, 600) }, updatedAt: new Date().toISOString() });
+    }
+  })();
+  return job;
+}
+
+app.post("/api/schroeder/music/generate", (req, res) => {
+  const ownerId = String(req.authContext?.uid || "").trim();
+  const requestId = clampText(req.body?.requestId || randomUUID(), 160);
+  const job = startLocalSchroederGeneration({ ownerId, requestId, kind: "music", body: req.body, authorization: String(req.headers.authorization || "") });
+  return res.status(202).json(publicSchroederGenerationJob(job));
+});
+
+app.post("/api/schroeder/voice/generate", (req, res) => {
+  const ownerId = String(req.authContext?.uid || "").trim();
+  const requestId = clampText(req.body?.requestId || randomUUID(), 160);
+  const job = startLocalSchroederGeneration({ ownerId, requestId, kind: "voice", body: req.body, authorization: String(req.headers.authorization || "") });
+  return res.status(202).json(publicSchroederGenerationJob(job));
+});
+
+app.get("/api/schroeder/jobs/:jobId", (req, res) => {
+  pruneSchroederGenerationJobs();
+  const job = schroederGenerationJobs.get(String(req.params.jobId || ""));
+  if (!job) return res.status(404).json({ error: "generation_not_found" });
+  if (job.ownerId !== String(req.authContext?.uid || "").trim()) return res.status(403).json({ error: "generation_forbidden" });
+  return res.status(200).json(publicSchroederGenerationJob(job));
+});
+
+app.post("/api/schroeder/jobs/:jobId/cancel", (req, res) => {
+  const job = schroederGenerationJobs.get(String(req.params.jobId || ""));
+  if (!job) return res.status(404).json({ error: "generation_not_found" });
+  if (job.ownerId !== String(req.authContext?.uid || "").trim()) return res.status(403).json({ error: "generation_forbidden" });
+  Object.assign(job, { status: "cancelled", progress: 0, hint: "Generación cancelada", result: null, updatedAt: new Date().toISOString() });
+  return res.status(200).json(publicSchroederGenerationJob(job));
 });
 
 app.post("/api/mineblox/screenshots/upload", async (req, res) => {
@@ -17702,10 +19202,7 @@ app.post("/api/moodle/module-graphics/analyze-element", async (req, res) => {
               { inline_data: { mime_type: image.mimeType, data: image.buffer.toString("base64") } }
             ]
           }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: "application/json"
-          }
+          generationConfig: { responseMimeType: "application/json" }
         })
       }
     );
@@ -17768,6 +19265,16 @@ function sanitizeGeminiRestSchema(schema) {
   ]);
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedKeywords.has(key)) continue;
+    // Gemini exige enums de texto; un enum numérico (type:"integer", enum:[1]) devuelve 400
+    // TYPE_STRING. Se descarta el enum en tipos no-string (el type fija el valor) y se
+    // normalizan a texto los enums de tipo string.
+    if (key === "enum") {
+      if (!Array.isArray(value)) continue;
+      const stringType = schema.type === undefined || String(schema.type).toLowerCase() === "string";
+      if (!stringType) continue;
+      sanitized[key] = value.map((entry) => (typeof entry === "string" ? entry : String(entry)));
+      continue;
+    }
     if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
       const sanitizedProps = {};
       for (const [propKey, propVal] of Object.entries(value)) {
@@ -17783,9 +19290,185 @@ function sanitizeGeminiRestSchema(schema) {
   return sanitized;
 }
 
+// Mounted with use() before the paid route, exactly as geminiApi does: only the two profiles
+// the PigPen browser tags are answered here, and anything else — image turns, podcaster
+// headlines — falls through to the handler below unchanged.
+app.use(createPigPenTextGateway({
+  services: () => ({ db }),
+  resolveAuth: verifyFirebaseBearer
+}));
+
+function cloudflareImageOffer() {
+  return { enabled: cloudflareImagesEnabled(), model: CLOUDFLARE_IMAGE_MODEL_ID };
+}
+
+// flux-1-schnell rechaza (/prompt must be <= 2048) los prompts largos que PigPen arma con el
+// contrato de estilo completo. No se recorta aquí: condenseCloudflarePrompt necesita ver el
+// documento completo (el prompt del acertijo va al final) y la ruta aplica los límites abajo.
+const CLOUDFLARE_PROMPT_LIMIT = 2048;
+function clampCloudflarePrompt(text) {
+  const value = String(text || "");
+  if (value.length <= CLOUDFLARE_PROMPT_LIMIT) return value;
+  const cut = value.slice(0, CLOUDFLARE_PROMPT_LIMIT);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 1200 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+// Espejo de functions/src/cloudflare-images.js#condenseCloudflarePrompt.
+// flux-1-schnell solo lee sus primeras ~60-100 palabras e ignora negaciones e instrucciones
+// meta; el contrato de PigPen (~2,500 caracteres) diluye el acertijo, así que se condensa a
+// un pie de foto afirmativo de ~320 caracteres con el prompt específico del acertijo primero.
+const CLOUDFLARE_CAPTION_LIMIT = 320;
+const CLOUDFLARE_DROP_PREFIXES = [
+  "TEXTO MÍNIMO EN IMAGEN:",
+  "REGLA NO NEGOCIABLE:",
+  "REGLA ESTRICTA:",
+  "Idioma del contenido pedagógico",
+  "Escena funcional para",
+  "Pregunta interna:",
+  "Sin texto legible"
+];
+const CLOUDFLARE_LABEL_PREFIXES = [
+  "La imagen debe apoyar el briefing y su introducción a los ejercicios:",
+  "La imagen debe apoyar el reto:",
+  "Dirección visual:",
+  "Tema principal:",
+  "Tema:",
+  "Ambientación:"
+];
+function dropLeadingNegativeSentences(text) {
+  return text
+    .split(/(?<=\.)\s+/)
+    .filter((sentence) => !/^(evita|no |sin |nunca|bajo ninguna|under no)/i.test(sentence.trim()))
+    .join(" ")
+    .trim();
+}
+function condenseCloudflarePrompt(document) {
+  const value = String(document || "").trim();
+  if (!value || value.length <= CLOUDFLARE_CAPTION_LIMIT) return value;
+  const content = [];
+  let captionLine = "";
+  let textLine = "";
+  for (const rawLine of value.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (CLOUDFLARE_DROP_PREFIXES.some((prefix) => line.startsWith(prefix))) continue;
+    if (line.startsWith("TEXTO VISIBLE OBLIGATORIO")) { textLine = line; continue; }
+    if (line.startsWith("CORRECCIÓN VISUAL:")) { captionLine = line.slice("CORRECCIÓN VISUAL:".length).trim(); continue; }
+    content.push(line);
+  }
+  const subject = content.length ? content.pop() : "";
+  const challenge = [];
+  const decor = [];
+  for (const line of content) {
+    const label = CLOUDFLARE_LABEL_PREFIXES.find((prefix) => line.startsWith(prefix));
+    const text = label ? line.slice(label.length) : line;
+    const cleaned = dropLeadingNegativeSentences(text);
+    if (!cleaned) continue;
+    (label && label.startsWith("La imagen debe apoyar") ? challenge : decor).push(cleaned);
+  }
+  const caption = [subject, captionLine, ...challenge, ...decor, textLine]
+    .filter(Boolean)
+    .map((part) => part.replace(/[.\s]+$/g, ""))
+    .join(". ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!caption) return clampCloudflarePrompt(value).slice(0, CLOUDFLARE_CAPTION_LIMIT);
+  if (caption.length <= CLOUDFLARE_CAPTION_LIMIT) return caption;
+  const cut = caption.slice(0, CLOUDFLARE_CAPTION_LIMIT);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 200 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+function extractCloudflareImagePrompt(payload = {}) {
+  const contents = Array.isArray(payload?.contents) ? payload.contents : [];
+  const lines = [];
+  for (const content of contents) {
+    for (const part of (Array.isArray(content?.parts) ? content.parts : [])) {
+      const text = String(part?.text || "").trim();
+      if (text) lines.push(text);
+    }
+  }
+  return lines.join("\n");
+}
+
+// Reshapes Cloudflare's {result:{image:base64}} into the exact Gemini REST shape the PigPen
+// browser parser reads (candidates[].content.parts[].inlineData), so extractGeminiImageData,
+// the WebP optimizer and the Storage upload run on a free image with zero browser changes.
+function buildGeminiShapeFromCloudflare(data = {}) {
+  const base64 = String(data?.result?.image || "");
+  return {
+    candidates: [{
+      content: { parts: [{ inlineData: { mimeType: "image/jpeg", data: base64 } }] },
+      finishReason: "STOP"
+    }],
+    usageMetadata: {
+      promptTokenCount: 0,
+      candidatesTokenCount: Math.round(Number(data?.result?.usage?.neurons || 0) * 100),
+      totalTokenCount: 0
+    }
+  };
+}
+
 app.post("/api/gemini/generate", async (req, res) => {
+  const requestedRawModel = String(req.body?.model || "").trim().replace(/^models\//i, "");
+  if (requestedRawModel === CLOUDFLARE_IMAGE_MODEL_ID) {
+    try {
+      await verifyFirebaseBearer(req);
+      if (!cloudflareImagesEnabled()) {
+        return res.status(503).json({
+          error: "cloudflare_image_disabled",
+          message: "El proveedor gratuito de imágenes (Cloudflare) no está configurado en este servidor.",
+          freeImage: true
+        });
+      }
+      const prompt = clampCloudflarePrompt(condenseCloudflarePrompt(extractCloudflareImagePrompt(req.body?.payload)));
+      if (!prompt) {
+        return res.status(400).json({ error: "cloudflare_image_prompt_missing", message: "El prompt de imagen llegó vacío.", freeImage: true });
+      }
+      const upstream = await fetchCompat(`https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUDFLARE_AI_TOKEN}` },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await safeJson(upstream).catch(() => ({}));
+      if (!upstream.ok || !data?.result?.image) {
+        const quota = upstream.status === 429
+          || /quota|limit|exceed|credit|insufficient|per-day/i.test(JSON.stringify(data?.errors || ""));
+        console.warn(`[CLOUDFLARE][image] HTTP ${upstream.status}:`, JSON.stringify(data?.errors || data).slice(0, 300));
+        return res.status(quota ? 429 : 502).json({
+          error: quota ? "cloudflare_quota_exhausted" : "cloudflare_image_failed",
+          message: quota
+            ? "La bolsa diaria gratuita de Cloudflare se agotó. Vuelve mañana o cambia el modelo de imagen."
+            : "Cloudflare no devolvió una imagen válida.",
+          freeImage: true
+        });
+      }
+      return res.status(200).json(buildGeminiShapeFromCloudflare(data));
+    } catch (error) {
+      return res.status(error?.status || 500).json({ error: String(error?.message || "Error generando imagen con Cloudflare.") });
+    }
+  }
   if (!ensureGeminiKey(res)) return;
   try {
+    const geminiAuth = await verifyFirebaseBearer(req);
+    if (req.body?.generationProfile === "imagecreator") {
+      const savings = require("../functions/src/savings-policy.js");
+      const policy = await savings.getPolicy(db);
+      const uid = String(geminiAuth?.uid || "").trim();
+      const kind = String(req.body?.savingsContext?.kind || "");
+      const objectId = String(req.body?.savingsContext?.objectId || "");
+      const modalities = req.body?.payload?.generationConfig?.responseModalities;
+      if (!Array.isArray(modalities) || !modalities.includes("IMAGE")) return res.status(400).json({ error: "savings_image_payload_required" });
+      if (kind === "script") {
+        if (policy.level !== "off") await savings.claimScript(db, uid, objectId);
+      } else if (kind === "photo") {
+        await savings.claimDaily(db, uid, "imagePhotos", objectId, policy.level === "off" ? null : 10, { completed: false });
+        res.on("finish", () => void (res.statusCode < 300
+          ? savings.completeDaily(db, uid, "imagePhotos", objectId)
+          : savings.releaseDaily(db, uid, "imagePhotos", objectId)).catch((error) => console.error("savings_image_settle_failed", error)));
+      } else return res.status(400).json({ error: "savings_image_kind_required" });
+    }
     const requestedModel = normalizeModel(req.body?.model);
     const rawPayload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
     const taskProfile = clampText(
@@ -17803,7 +19486,20 @@ app.post("/api/gemini/generate", async (req, res) => {
     }
     const isHeadlineTask = taskProfile === "podcaster_headline_copy_v2";
     const isCreativeVideoTask = taskProfile === "podcaster_creative_video_script_v2";
-    const model = isHeadlineTask ? DEFAULT_GEMINI_TEXT_MODEL : requestedModel;
+    const isImageRequest = (Array.isArray(rawPayload?.generationConfig?.responseModalities)
+      && rawPayload.generationConfig.responseModalities.includes("IMAGE"))
+      || Boolean(rawPayload?.generationConfig?.imageConfig);
+
+    let model = requestedModel;
+    if (isImageRequest) {
+      const rawModel = String(req.body?.model || "").trim().replace(/^models\//i, "");
+      const mappedImageModel = GEMINI_IMAGE_MODEL_ALIASES[rawModel] || rawModel;
+      model = (mappedImageModel && mappedImageModel !== DEFAULT_GEMINI_TEXT_MODEL)
+        ? mappedImageModel
+        : DEFAULT_PODCASTER_IMAGE_MODEL;
+    } else if (isHeadlineTask) {
+      model = DEFAULT_GEMINI_TEXT_MODEL;
+    }
 
     const isCreativeVideoPayload = (payload = {}) => {
       void payload;
@@ -17849,6 +19545,9 @@ app.post("/api/gemini/generate", async (req, res) => {
 
     const shouldAugmentCreative = isCreativeVideoPayload(originalPayload);
     let payload = shouldAugmentCreative ? augmentCreativeVideoPayload(originalPayload) : originalPayload;
+    if (require('../functions/src/research/budget.js').hasSearch(payload.tools)) {
+      return res.status(409).json({ error: 'research_gateway_required', message: 'Usa la ruta de investigación con presupuesto compartido.' });
+    }
     if (Array.isArray(payload.tools)) {
       payload.tools = payload.tools.map((tool) => ({
         ...(tool || {}),
@@ -17869,6 +19568,8 @@ app.post("/api/gemini/generate", async (req, res) => {
       payload.generationConfig.temperature = 0.25;
     }
 
+    payload = sanitizeGemini3GenerationPayload(model, payload);
+
     if (payload?.generationConfig && typeof payload.generationConfig === "object") {
       const rawSchema = payload.generationConfig.responseSchema || payload.generationConfig.responseJsonSchema;
       if (rawSchema) {
@@ -17878,7 +19579,10 @@ app.post("/api/gemini/generate", async (req, res) => {
     }
 
     const serialized = JSON.stringify(payload || {});
-    if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
+    const maxGeminiPayloadBytes = taskProfile === "podcaster_scene_image_generation"
+      ? 9 * 1024 * 1024
+      : MAX_PAYLOAD_BYTES;
+    if (Buffer.byteLength(serialized, "utf8") > maxGeminiPayloadBytes) {
       return res.status(413).json({ error: "Payload demasiado grande para Gemini." });
     }
 
@@ -17921,6 +19625,32 @@ app.post("/api/gemini/generate", async (req, res) => {
     });
     if (!upstream.ok) {
       console.error(`[GEMINI] HTTP ${upstream.status}:`, JSON.stringify(data, null, 2));
+      if (isImageRequest) {
+        const errMsg = String(data?.error?.message || "");
+        if (errMsg.includes("Aspect ratio") || errMsg.includes("not enabled") || upstream.status === 400 || upstream.status === 404) {
+          console.warn(`[GEMINI] Image generation failed on ${model} (${errMsg}), retrying with fallback image model...`);
+          const fallbackModel = DEFAULT_PODCASTER_IMAGE_MODEL;
+          const retryPayload = JSON.parse(JSON.stringify(payload || {}));
+          if (errMsg.includes("Aspect ratio") && retryPayload?.generationConfig?.imageConfig?.aspectRatio) {
+            delete retryPayload.generationConfig.imageConfig.aspectRatio;
+          }
+          const fallbackEndpoint = `${GEMINI_BASE}/models/${encodeURIComponent(fallbackModel)}:generateContent`;
+          try {
+            const retryUpstream = await fetchCompat(fallbackEndpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+              body: JSON.stringify(retryPayload)
+            });
+            const retryData = await safeJson(retryUpstream);
+            if (retryUpstream.ok) {
+              upstream = retryUpstream;
+              data = retryData;
+            }
+          } catch (retryErr) {
+            console.error(`[GEMINI] Image retry error:`, retryErr.message);
+          }
+        }
+      }
     }
     if (shouldAugmentCreative) {
       const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
@@ -17974,117 +19704,70 @@ app.post("/api/gemini/generate", async (req, res) => {
 app.get("/api/gemini/models", async (_req, res) => {
   if (!ensureGeminiGenerativeServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
+  // The list is only the paid half of the answer. When it fails, the page still has to learn
+  // that text can go to the free tier, so the failure rides along in a 200 instead of hiding
+  // the offer behind the browser's catch path — same contract as geminiApi.
+  const freeTier = geminiFreeTier.describeFreeTierOffer();
+  const freeImage = cloudflareImageOffer();
+  const withCatalogError = (reason) => res.status(200).json({
+    models: [],
+    freeTier,
+    freeImage,
+    catalogError: String(reason || "catalog_unavailable").slice(0, 300)
+  });
   try {
     const upstream = await fetchCompat(`${GEMINI_BASE}/models`, {
       method: "GET",
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY }
     });
     const data = await safeJson(upstream);
-    return res.status(upstream.status).json(data);
+    if (!upstream.ok) return withCatalogError(data?.error?.message || `HTTP ${upstream.status}`);
+    return res.status(200).json({ ...data, freeTier, freeImage });
   } catch (error) {
-    return res.status(500).json({ error: String(error?.message || "Error interno listando modelos Gemini.") });
+    return withCatalogError(error?.message || error);
   }
 });
 
-app.post("/api/gemini/live-token", async (req, res) => {
+app.post("/api/gemini/live-token", (_req, res) => {
+  return res.status(410).json({ error: "gemini_live_retired" });
+});
+
+app.get("/api/assets/signed-url", async (req, res) => {
   try {
-    const requestedVoiceName = String(req.body?.voiceName || "").trim();
-    const voiceName = normalizeLiveVoiceName(requestedVoiceName) || "Aoede";
-    if (requestedVoiceName && !normalizeLiveVoiceName(requestedVoiceName)) {
-      return res.status(400).json({
-        error: `Voz no soportada para Gemini Live: ${requestedVoiceName}`
-      });
+    applyAssetCorsHeaders(req, res);
+    const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
+    if (!storagePath) {
+      return res.status(400).json({ error: "missing_storage_path" });
     }
-
-    const systemInstruction = String(
-      req.body?.systemInstruction || "Eres un asistente pedagógico útil y amable."
-    ).trim().slice(0, 12000);
-
-    const modelInput = normalizeModel(req.body?.model || "gemini-2.5-flash-native-audio-preview-12-2025");
-    const liveModel = "gemini-live-2.5-flash-native-audio";
-
-    let uid = "";
-    try {
-      const authHeader = String(req.headers.authorization || "");
-      const tokenMatch = authHeader.match(/^\s*Bearer\s+(.+)$/i);
-      if (tokenMatch && tokenMatch[1]) {
-        const decoded = await admin.auth().verifyIdToken(tokenMatch[1].trim()).catch(() => null);
-        if (decoded?.uid) uid = decoded.uid;
-      }
-    } catch (_) {}
-
-    const proxyBaseUrl = String(process.env.GEMINI_LIVE_PROXY_URL || "https://gemini-live-proxy-128488238449.us-central1.run.app").trim().replace(/\/+$/, "");
-    const ticket = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
-
-    await db.collection("gemini_live_tickets").doc(ticket).set({
-      ownerId: uid || "local-dev",
-      model: liveModel,
-      voiceName,
-      systemInstruction,
-      status: "issued",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
-    });
-
-    let ephemeralToken = "";
-    let expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    let newSessionExpireTime = new Date(Date.now() + 60 * 1000).toISOString();
-    try {
-      if (process.env.GEMINI_API_KEY) {
-        const ai = buildGeminiLiveClient();
-        const data = await ai.authTokens.create({
-          config: {
-            uses: 1,
-            expireTime,
-            newSessionExpireTime,
-            liveConnectConstraints: {
-              model: modelInput,
-              config: {
-                responseModalities: ["AUDIO"],
-                systemInstruction,
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName }
-                  }
-                }
-              }
-            },
-            lockAdditionalFields: []
-          }
-        });
-        if (data?.name) {
-          ephemeralToken = data.name;
-          if (data.expireTime) expireTime = data.expireTime;
-          if (data.newSessionExpireTime) newSessionExpireTime = data.newSessionExpireTime;
+    const buckets = getStorageBucketCandidatesForOptions();
+    const expiresAt = Date.now() + 60 * 60 * 1000;
+    for (const bucket of buckets) {
+      if (!bucket) continue;
+      try {
+        const file = bucket.file(storagePath);
+        const [exists] = await file.exists();
+        if (exists) {
+          const [url] = await file.getSignedUrl({
+            version: "v4",
+            action: "read",
+            expires: expiresAt
+          });
+          res.setHeader("Cache-Control", "private, no-store");
+          return res.status(200).json({ ok: true, storagePath, url, expiresAt });
         }
-      }
-    } catch (e) {
-      console.warn("[GEMINI_LIVE_TOKEN] Ephemeral token creation fallback warning:", e?.message);
+      } catch (_) {}
     }
 
-    return res.status(201).json({
-      websocketUrl: `${proxyBaseUrl.replace(/^http/i, "ws")}/live`,
-      ticket,
-      expiresAt: expiresAt.toISOString(),
-      model: liveModel,
-      voiceName,
-      requestedVoiceName: requestedVoiceName || voiceName,
-      token: ephemeralToken || ticket,
-      expireTime,
-      newSessionExpireTime
+    // Fallback: si no se pudo firmar con clave v4, devolver la ruta local de proxy
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.status(200).json({
+      ok: true,
+      storagePath,
+      url: `/api/assets/proxy-image?storagePath=${encodeURIComponent(storagePath)}`,
+      expiresAt
     });
-  } catch (error) {
-    const summary = summarizeGeminiLiveError(error);
-    console.error("[GEMINI_LIVE_TOKEN] Upstream error", {
-      status: summary.status || null,
-      contentType: summary.contentType || null,
-      bodySnippet: summary.bodySnippet || null
-    });
-    return res.status(summary.status >= 400 ? summary.status : 502).json({
-      error: "UPSTREAM_GEMINI_LIVE_TOKEN_FAILED",
-      detail: summary.bodySnippet || error?.message || "No se pudo crear token efímero para Gemini Live."
-    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || "signed_url_error" });
   }
 });
 
@@ -18316,15 +19999,39 @@ app.get("/api/assets/montage-download", async (req, res) => {
 
 async function assertProxyMediaStorageAccess(req, storagePath = "") {
   const cleanStoragePath = String(storagePath || "").trim().replace(/^\/+/, "");
-  if (!cleanStoragePath || /^podcaster\/library\//i.test(cleanStoragePath)) return null;
+  if (!cleanStoragePath || /^podcaster\/library\//i.test(cleanStoragePath) || /^schroeder-sound-lab\/approved\//i.test(cleanStoragePath)) return null;
 
   const authContext = await verifyFirebaseBearer(req);
+  const sallyMatch = cleanStoragePath.match(/^sallyBrown\/[^/]+\/([^/]+)\//i);
+  if (sallyMatch) {
+    const sessionId = String(sallyMatch[1] || "").trim();
+    const sessionSnapshot = await admin.firestore().collection("SallyBrownSessions").doc(sessionId).get();
+    if (!sessionSnapshot.exists) {
+      const error = new Error("sally_session_not_found");
+      error.status = 404;
+      throw error;
+    }
+    const session = sessionSnapshot.data() || {};
+    const collaborators = Array.isArray(session.collaborators) ? session.collaborators.map(String) : [];
+    if (String(session.ownerId || "") !== authContext.uid && !collaborators.includes(authContext.uid)) {
+      const error = new Error("asset_forbidden");
+      error.status = 403;
+      throw error;
+    }
+    return authContext;
+  }
   const sessionMatch = cleanStoragePath.match(/^podcaster\/sessions\/([^/]+)\//i);
   if (!sessionMatch) return authContext;
 
   const sessionId = String(sessionMatch[1] || "").trim();
   const sessionSnapshot = await admin.firestore().collection("podcaster_sessions").doc(sessionId).get();
   if (!sessionSnapshot.exists) {
+    // Older/local-first sessions can still have their own generated assets in
+    // Storage before their Firestore document is synchronized. Permit access
+    // only when the path is inside this authenticated user's owner namespace.
+    const ownerMatch = cleanStoragePath.match(/\/owners\/([^/]+)\//i);
+    const ownOwnerSlug = normalizeStorageSegment(authContext.uid, "anon");
+    if (ownerMatch && String(ownerMatch[1] || "") === ownOwnerSlug) return authContext;
     const error = new Error("podcaster_session_not_found");
     error.status = 404;
     throw error;
@@ -18363,7 +20070,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     });
 
     if (storagePath) {
-      await assertProxyMediaStorageAccess(req, storagePath);
+      const authContext = await assertProxyMediaStorageAccess(req, storagePath);
       console.info("[backend][proxy-media] attempting storage stream", {
         requestId,
         storagePath,
@@ -18372,6 +20079,27 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       const storageResult = await streamStorageObjectToResponse(req, res, storagePath, rangeHeader, {
         bucketFromUrl: storageBucketFromReference
       });
+      if (storageResult?.status === 404 && authContext) {
+        // Older direct-generation routes stored the owner segment without
+        // case, while newer jobs preserve Firebase's case-sensitive UID. Try
+        // the authenticated UID spelling for this user's own asset path.
+        const ownerMatch = storagePath.match(/^(podcaster\/sessions\/[^/]+\/owners\/)([^/]+)(\/.*)$/i);
+        const ownOwnerSlug = normalizeStorageSegment(authContext.uid, "anon");
+        if (ownerMatch && ownerMatch[2] === ownOwnerSlug && ownerMatch[2] !== authContext.uid) {
+          const alternatePath = `${ownerMatch[1]}${authContext.uid}${ownerMatch[3]}`;
+          const alternateResult = await streamStorageObjectToResponse(req, res, alternatePath, rangeHeader, {
+            bucketFromUrl: storageBucketFromReference
+          });
+          if (alternateResult?.streamed || alternateResult?.aborted) return;
+          if (alternateResult?.status && alternateResult.status !== 404) {
+            return res.status(alternateResult.status).json({
+              error: "No se pudo leer el archivo en Storage.",
+              code: alternateResult.code || undefined,
+              detail: alternateResult.detail || { storagePath: alternatePath }
+            });
+          }
+        }
+      }
       console.info("[backend][proxy-media][storage-result]", {
         requestId,
         storagePath,
@@ -18433,7 +20161,8 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
     const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
     const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
-    if (isPodcasterAsset && objectPath) {
+    const isSchroederAsset = /^schroeder-sound-lab\//i.test(String(objectPath || "").trim());
+    if ((isPodcasterAsset || isSchroederAsset) && objectPath) {
       await assertProxyMediaStorageAccess(req, objectPath);
       console.info("[backend][proxy-media] attempting admin storage stream", {
         requestId,
@@ -18587,7 +20316,7 @@ app.use((error, req, res, next) => {
 });
 
 if (IS_MAIN_MODULE) {
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     const healthPayload = buildBackendHealthPayload();
     console.log("[backend] startup signature", {
       file: "backend/server.js",
@@ -18606,6 +20335,10 @@ if (IS_MAIN_MODULE) {
     });
     console.log(`[${BACKEND_SERVICE_ROLE || "backend"}-backend] listening on http://${HOST}:${PORT}`);
   });
+  server.timeout = 600000;
+  server.headersTimeout = 610000;
+  server.requestTimeout = 600000;
+  server.keepAliveTimeout = 65000;
 }
 
 module.exports = {

@@ -1,4 +1,7 @@
 import { resolveGeminiAudioTimelineDurationMs } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
+import { normalizeFreeVoiceTrack } from "./podcaster-free-voice-track.js?v=2026-10-05.gemini-inspector-1";
+import { buildFreeVoiceWaveformPath } from "./podcaster-free-voice-waveform.js?v=2026-10-05.gemini-inspector-1";
+import { normalizeFreeVideoTrack } from "./podcaster-free-video-track.js";
 import {
   resolveTimelineEntryAtMs,
   TIMELINE_LOOKUP_TOLERANCE_MS
@@ -14,6 +17,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     podcastAudioTrackUiState,
     updateTimelineClipSourceDurationIfGreater,
     getActiveSession,
+    getRowReferenceImageListMap,
     getSessionRows,
     formatTrackHeadPlayheadTime,
     getTimelineViewMode,
@@ -32,6 +36,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     getStudioTimelinePixelsPerSec,
     getTimelineTotalDurationMs,
     getStudioTimelineZoom,
+    getStoredPodcastTrackLabelWidth,
     ensureTimelineTracks,
     isEducationalVideoMode,
     isEducationalVisibleSceneTrack,
@@ -134,6 +139,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     els.podcastTimelineRuler.scrollLeft = 0;
     if (rulerInner) {
       rulerInner.style.transform = `translate3d(${-scrollLeft}px, 0, 0)`;
+      rulerInner.style.setProperty("--podcast-ruler-scroll-left", `${scrollLeft}px`);
     }
   }
 
@@ -231,6 +237,10 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     };
     const syncScroll = () => {
       markManualScrollIntent();
+      // El menú del clip está anclado al chip; al mover el timeline se despega, así que se cierra.
+      if (document.getElementById("podcastTimelineClipMenuPortal")?.dataset?.openRowId) {
+        closePodcastTimelineClipMenu();
+      }
       if (podcastTimelineScrollRafId) return;
       podcastTimelineScrollRafId = requestAnimationFrame(() => {
         podcastTimelineScrollRafId = 0;
@@ -455,6 +465,25 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     return offsetPx;
   }
 
+  function getTimelineCanvasWidthPx(session = null, mode = "tracks", labelWidthPx = null) {
+    const activeSession = session || getActiveSession();
+    const durationWidthPx = Math.round(timelineMsToPx(getTimelineTotalDurationMs(activeSession), activeSession));
+    const minCanvasWidthPx = Math.max(360, Math.round(860 * Math.max(0.35, getStudioTimelineZoom(activeSession))));
+    const laneOffsetPx = mode === "tracks"
+      ? Math.max(0, Number(labelWidthPx ?? getStoredPodcastTrackLabelWidth?.() ?? PODCAST_TIMELINE_RULER_OFFSET_PX) || 0)
+      : 0;
+    return Math.max(minCanvasWidthPx, durationWidthPx + laneOffsetPx);
+  }
+
+  function syncTimelineCanvasWidth(session = null, labelWidthPx = null) {
+    const canvas = els.podcastVideoTimeline?.querySelector(".podcast-video-timeline-canvas");
+    if (!canvas) return;
+    const widthPx = getTimelineCanvasWidthPx(session, getTimelineViewMode(session || getActiveSession()), labelWidthPx);
+    canvas.style.width = `${widthPx}px`;
+    const rulerInner = els.podcastTimelineRuler?.querySelector(".podcast-timeline-ruler-inner");
+    if (rulerInner) rulerInner.style.width = `${widthPx}px`;
+  }
+
 
   function resolveTimelineRulerStepSec(pixelsPerSec = 0) {
     const pxPerSec = Math.max(0, Number(pixelsPerSec || 0) || 0);
@@ -468,10 +497,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
   }
 
   function getPodcastTimelineClipMenuPortal() {
-    if (els.podcastVideoTimeline) {
-      const layer = els.podcastVideoTimeline.querySelector("#podcastTimelineMenuLayer");
-      if (layer) return layer;
-    }
+    // El menú vive en un portal de <body> porque renderPodcastVideoTimeline() reescribe
+    // el innerHTML del timeline: si viviera dentro del canvas, cualquier re-renderizado
+    // (muy frecuente al cargar la sesión) borraría el menú recién abierto.
     let portal = document.getElementById("podcastTimelineClipMenuPortal");
     if (portal) return portal;
     portal = document.createElement("div");
@@ -558,7 +586,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       cachedLaneOffsetPx = null;
       lastLaneOffsetCheckTime = 0;
     }
-    const forceStructure = options.force === true && !isLightweightReason;
+    const forceStructure = (options.force === true || options.forceStructure === true) && !isLightweightReason;
     const preserveExistingGeometry = new Set([
       "selection",
       "ephemeral",
@@ -648,6 +676,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     };
 
     const dialogueMap = getDialogueVideoMap(activeSession);
+    const referenceImageListMap = getRowReferenceImageListMap(activeSession);
 
     if (requestLightweight && els.podcastVideoTimeline) {
       const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
@@ -779,7 +808,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     if (!els.podcastVideoTimeline) return;
     closePodcastTimelineClipMenu();
     syncTimelineModeButtons(activeSession);
-    if (!rows.length) {
+    if (!rows.length && mode !== "tracks") {
       els.podcastVideoTimeline.innerHTML = "";
       if (els.podcastTimelineRuler) els.podcastTimelineRuler.innerHTML = "";
       podcastTimelineScrollSyncCleanup?.();
@@ -790,6 +819,28 @@ export function createPodcasterTimelineUiApi(deps = {}) {
 
     const clipMap = ensureTimelineClipsByRowId(activeSession);
     const videoCfg = getPodcastVideoConfig(activeSession);
+    const cardSceneIds = new Set();
+    const cardIdBySceneRowId = new Map();
+    const addCardForScene = (sceneRowId, cardId) => {
+      const key = String(sceneRowId || "").trim();
+      const id = String(cardId || "").trim();
+      if (!key) return;
+      cardSceneIds.add(key);
+      if (id && !cardIdBySceneRowId.has(key)) cardIdBySceneRowId.set(key, id);
+    };
+    Object.entries(videoCfg?.timelineOverlayCardsById || {}).forEach(([storedCardId, card]) => {
+      const cardRowId = String(card?.rowId || "").trim();
+      const cardId = String(card?.id || storedCardId || "").trim();
+      if (cardRowId) addCardForScene(cardRowId, cardId);
+      const cardStartMs = Number(card?.startMs);
+      const cardEndMs = cardStartMs + Number(card?.durationMs || 0);
+      if (!Number.isFinite(cardStartMs) || !Number.isFinite(cardEndMs) || cardEndMs <= cardStartMs) return;
+      Object.entries(clipMap).forEach(([sceneRowId, clip]) => {
+        const sceneStartMs = Number(clip?.startMs || 0);
+        const sceneEndMs = sceneStartMs + Math.max(0, Number(clip?.trimOutMs || 0) - Number(clip?.trimInMs || 0) || Number(clip?.durationMs || 0));
+        if (cardStartMs < sceneEndMs && cardEndMs > sceneStartMs) addCardForScene(sceneRowId, cardId);
+      });
+    });
     const pxPerSec = getStudioTimelinePixelsPerSec(activeSession);
     const minClipPx = getStudioTimelineMinClipPx(activeSession);
     const configuredTimelineLaneHeightsById = videoCfg?.timelineTrackHeightsById && typeof videoCfg.timelineTrackHeightsById === "object"
@@ -799,10 +850,26 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       ...configuredTimelineLaneHeightsById,
       ...getStoredTimelineRowHeights(activeSession)
     };
+    // Si un render asíncrono ocurre en medio de un arrastre de altura, conservar la altura actual
+    // (y persistirla) para que la capa no "colapse" sola al reconstruir el timeline.
+    const activeLaneResize = podcastVideoState.timelineDrag?.mode === "resize-track-lane"
+      ? podcastVideoState.timelineDrag
+      : null;
+    if (activeLaneResize?.trackId && Number.isFinite(Number(activeLaneResize.currentHeightPx))) {
+      timelineLaneHeightsById[activeLaneResize.trackId] = Math.round(
+        Math.max(56, Math.min(520, Number(activeLaneResize.currentHeightPx)))
+      );
+      setStoredTimelineRowHeight(activeSession, activeLaneResize.trackId, timelineLaneHeightsById[activeLaneResize.trackId]);
+    }
+    const resolveLaneHeightAttr = (trackId) => {
+      const laneHeightRaw = toFiniteNumber(timelineLaneHeightsById?.[trackId], Number.NaN);
+      return Number.isFinite(laneHeightRaw)
+        ? ` style="height:${laneHeightRaw}px;min-height:${laneHeightRaw}px"`
+        : "";
+    };
     const isBulkRegenAll = podcastVideoState.bulkVideoGenerationActive && podcastVideoState.bulkVideoGenerationMode === "all";
     const timelineDurationMs = getTimelineTotalDurationMs(activeSession);
-    const minCanvasWidthPx = Math.max(360, Math.round(860 * Math.max(0.35, getStudioTimelineZoom(activeSession))));
-    const canvasWidthPx = Math.max(minCanvasWidthPx, Math.round((timelineDurationMs / 1000) * pxPerSec) + 172);
+    const canvasWidthPx = getTimelineCanvasWidthPx(activeSession, mode);
     const trackRows = ensureTimelineTracks(activeSession, { persist: false });
     if (isEducationalVideoMode(activeSession) && mode === "tracks") {
       logPodcastRenderDebug("timeline-educational-visible-tracks", {
@@ -884,7 +951,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         marks.push(`<div class="podcast-timeline-ruler-mark" style="left:${leftPx + offsetPx}px"><span>${escapeHtml(secondsToClock(sec))}</span></div>`);
       }
       els.podcastTimelineRuler.innerHTML = `
-        <div class="podcast-timeline-ruler-inner" style="width:${canvasWidthPx}px">${marks.join("")}<button id="podcastTimelineRulerPlayhead" class="podcast-timeline-ruler-playhead" type="button" data-action="timeline-drag-ruler-playhead" aria-label="Mover marcador de tiempo"></button></div>
+        <div class="podcast-timeline-ruler-inner" style="width:${canvasWidthPx}px">${marks.join("")}<div class="podcast-timeline-add-track"><button class="row-icon-btn podcast-timeline-add-track-button" type="button" data-action="timeline-add-track-menu" aria-label="Añadir track" aria-haspopup="menu" aria-expanded="false" title="Añadir track"><i class="fas fa-plus" aria-hidden="true"></i></button><button class="row-icon-btn podcast-timeline-audio-mix-button" type="button" data-action="open-montage-scene-mix" aria-label="Mezcla de audio" title="Mezcla de audio"><i class="fas fa-sliders-h" aria-hidden="true"></i></button><div class="podcast-timeline-add-track-menu" role="menu" hidden><button type="button" role="menuitem" data-action="timeline-add-free-voice"><i class="fas fa-volume-up" aria-hidden="true"></i> Añadir track de audio</button><button type="button" role="menuitem" data-action="timeline-add-free-video"><i class="fas fa-film" aria-hidden="true"></i> Añadir track de video</button></div></div><button id="podcastTimelineRulerPlayhead" class="podcast-timeline-ruler-playhead" type="button" data-action="timeline-drag-ruler-playhead" aria-label="Mover marcador de tiempo"></button></div>
       `.trim();
     }
 
@@ -992,6 +1059,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const generationLabel = String(generationStatus?.hint || generationStatus?.stage || "Generando video...").trim() || "Generando video...";
         const audioReady = hasStoredMediaSource(resolveDialogueAudioForRow(activeSession, rowId));
         const hasStylizedText = Boolean(String(activeSession?.stylizedTextMap?.[rowId] || "").trim());
+        const hasOverlayCard = cardSceneIds.has(rowId);
+        const hasImageWarp = String(activeSession?.visualEffectsMap?.[rowId]?.imageWarp?.type || "none") !== "none";
         const speakerName = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
         const transition = nextRowId
           ? getTransitionForEdge(activeSession, rowId, nextRowId)
@@ -1023,6 +1092,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                     </span>`
                   : ""}
                 ${hasStylizedText ? `<span class="podcast-scene-stylized-text-badge" aria-label="Contiene texto estilizado" title="Contiene texto estilizado">T</span>` : ""}
+                ${hasOverlayCard ? `<span class="podcast-scene-card-badge" aria-label="Contiene card animada" title="Contiene card animada"><i class="fas fa-id-card" aria-hidden="true"></i></span>` : ""}
+                ${hasImageWarp ? `<span class="podcast-scene-image-effect-badge${hasOverlayCard ? " is-offset" : ""}" aria-label="Contiene efecto de imagen" title="Contiene efecto de imagen"><i class="fas fa-water" aria-hidden="true"></i></span>` : ""}
               </button>
               <div class="podcast-video-scene-meta">
                 <strong>Escena ${index + 1} · ${escapeHtml(speakerName)}</strong>
@@ -1069,7 +1140,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const timelineTrackBlocks = [];
     const composerVideoMode = typeof isComposerVideoMode === "function" && isComposerVideoMode(activeSession) === true;
     const audioOnlyPodcastMode = isPodcastMode(activeSession) && !composerVideoMode && !isEducationalVideoMode(activeSession) && !isVideoPodcastMode(activeSession);
-    const showMontageAudioSubtracks = true;
+    const showMontageAudioSubtracks = podcastVideoState?.showMontageAudioSubtracks !== false;
     const onScreenTextTrackSettings = getOnScreenTextTrackSettings(activeSession);
     const onScreenTextClipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
     const montageGeminiTrack = normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
@@ -1146,13 +1217,17 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         ? ` style="height:${laneHeightPx}px;min-height:${laneHeightPx}px"`
         : "";
       const geminiTrackVolumePct = Math.max(0, Math.min(100, Number(montageGeminiTrack?.volumePct ?? 100)));
+      const isGeminiTrackEnabled = montageGeminiTrack?.enabled === true;
       return `
-        <section class="podcast-video-track-row podcast-montage-audio-subtrack-row" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
+        <section class="podcast-video-track-row podcast-montage-audio-subtrack-row${isGeminiTrackEnabled ? "" : " is-track-disabled"}" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
           <div class="podcast-video-track-label is-subtrack">
             <div class="podcast-track-label-main">
               <span class="podcast-track-label-text">Voz en off</span>
             </div>
             <div class="podcast-track-label-actions">
+              <button class="row-icon-btn" type="button" data-action="timeline-toggle-gemini-track-enabled" title="${isGeminiTrackEnabled ? "Desactivar track Gemini" : "Activar track Gemini"}" aria-label="${isGeminiTrackEnabled ? "Desactivar clips de audio Gemini" : "Activar clips de audio Gemini"}" aria-pressed="${isGeminiTrackEnabled ? "true" : "false"}">
+                <i class="fas ${isGeminiTrackEnabled ? "fa-eye" : "fa-eye-slash"}" aria-hidden="true"></i>
+              </button>
               <button class="row-icon-btn" type="button" data-action="timeline-set-gemini-track-volume" title="${escapeHtml(`Volumen general Gemini: ${Math.round(geminiTrackVolumePct)}%`)}" aria-label="${escapeHtml(`Volumen general Gemini ${Math.round(geminiTrackVolumePct)} por ciento`)}">
                 <i class="fas fa-volume-up" aria-hidden="true"></i>
               </button>
@@ -1270,7 +1345,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (!timelineClip || String(timelineClip.trackId || "").trim() !== trackId) return null;
         const clipLeftPx = timelineMsToPx(Number(runtimeEntry?.startMs ?? timelineClip?.startMs ?? 0), activeSession);
         const clipWidthPx = Math.max(minClipPx, timelineMsToPx(Number(runtimeEntry?.effectiveDurationMs || getTimelineClipEffectiveDurationMs(timelineClip)), activeSession));
-        return { row, rowId, index: Number(rowIndexById.get(rowId) || 0), timelineClip, clipLeftPx, clipWidthPx, clipEndPx: clipLeftPx + clipWidthPx };
+        return { row, rowId, index: Number(rowIndexById.get(rowId) || 0), timelineClip, runtimeEntry, clipLeftPx, clipWidthPx, clipEndPx: clipLeftPx + clipWidthPx };
       }).filter(Boolean).sort((a, b) => Number(a.clipLeftPx || 0) - Number(b.clipLeftPx || 0) || a.index - b.index);
       const overlapFadeByRowId = new Map();
       for (let i = 1; i < trackItems.length; i += 1) {
@@ -1305,16 +1380,17 @@ export function createPodcasterTimelineUiApi(deps = {}) {
             <div class="podcast-track-label-main">
               <span class="podcast-track-label-text">Video</span>
             </div>
-            ${isVisibleVideoSceneTrack
-              ? `<div class="podcast-track-label-actions">
-                    <button class="row-icon-btn" type="button" data-action="open-montage-scene-mix" title="Volúmenes globales (Veo + Gemini)" aria-label="Volúmenes globales">
-                      <i class="fas fa-sliders-h" aria-hidden="true"></i>
-                    </button>
-                  </div>`
-              : ""}
+            <div class="podcast-track-label-actions">
+              ${isVisibleVideoSceneTrack ? `<button class="row-icon-btn" type="button" data-action="open-montage-scene-mix" title="Mezcla de audio (Consola DAW)" aria-label="Mezcla de audio">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+              </button>` : ""}
+              <button class="row-icon-btn" type="button" data-action="timeline-delete-track" data-track-id="${escapeHtml(trackId)}" title="Eliminar track" aria-label="Eliminar track de video">
+                <i class="fas fa-trash" aria-hidden="true"></i>
+              </button>
+            </div>
           </div>
           <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}"${laneHeightAttr}>
-            ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
+            ${trackItems.map(({ row, rowId, index, timelineClip, runtimeEntry, clipLeftPx, clipWidthPx }) => {
               const generatedClip = dialogueMap[rowId] || null;
               const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
               const inSceneText = String(row?.inSceneText || row?.inVideoText || row?.embeddedText || row?.sceneText || "").replace(/\s+/g, " ").trim();
@@ -1352,13 +1428,42 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               const resolved = Array.isArray(row?.visualNotesResolvedProposals) ? row.visualNotesResolvedProposals.map((p) => String(p || "").trim()).filter(Boolean) : [];
               const activeProposal = String(row?.visualNotesProposal || "").trim();
               const hasStylizedText = Boolean(String(activeSession?.stylizedTextMap?.[rowId] || "").trim());
+              const hasOverlayCard = cardSceneIds.has(rowId);
+              const hasImageWarp = String(activeSession?.visualEffectsMap?.[rowId]?.imageWarp?.type || "none") !== "none";
+              const hasImageLayers = Array.isArray(activeSession?.visualEffectsMap?.[rowId]?.imageLayers) && activeSession.visualEffectsMap[rowId].imageLayers.length > 0;
+              const hasReferenceImage = (referenceImageListMap[rowId] || []).length > 0;
+              const stopMotionModel = globalThis.PodcasterStopMotion || null;
+              const stopMotionSequence = stopMotionModel?.normalizeStopMotion?.(dialogueMap[rowId]?.stopMotion || null) || null;
+              const hasStopMotionSequence = Boolean(stopMotionSequence && stopMotionSequence.frames.length >= 2);
+              // La tira debe usar la misma duración efectiva con la que se
+              // dimensiona el chip y el reproductor (incluye pausas/velocidad).
+              const clipEffectiveDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(runtimeEntry?.effectiveDurationMs || getTimelineClipEffectiveDurationMs(timelineClip) || 0) || 0));
+              let stopMotionStripHtml = "";
+              if (hasStopMotionSequence) {
+                const stopMotionWeights = stopMotionSequence.frameWeights;
+                const stopMotionTotalWeight = stopMotionWeights.reduce((sum, weight) => sum + weight, 0) || 1;
+                const stopMotionParts = [];
+                let stopMotionCursorPct = 0;
+                stopMotionWeights.forEach((weight, frameIndex) => {
+                  const widthPct = Math.max(0, Math.min(100, (weight / stopMotionTotalWeight) * 100));
+                  // El chip muestra solo las divisiones: las miniaturas por foto
+                  // obligarían a hidratar N recursos privados en cada refresco del
+                  // timeline y no aportan información de edición.
+                  stopMotionParts.push(`<div class="podcast-stop-motion-segment" data-stop-motion-segment data-row-id="${escapeHtml(rowId)}" data-frame-index="${frameIndex}" style="left:${stopMotionCursorPct.toFixed(4)}%;width:${widthPct.toFixed(4)}%" title="Foto ${frameIndex + 1}: arrastra para reordenar"></div>`);
+                  stopMotionCursorPct += widthPct;
+                  if (frameIndex < stopMotionWeights.length - 1) {
+                    stopMotionParts.push(`<div class="podcast-stop-motion-resize" data-stop-motion-resize data-row-id="${escapeHtml(rowId)}" data-frame-index="${frameIndex}" style="left:${stopMotionCursorPct.toFixed(4)}%" title="Arrastra para alargar la foto ${frameIndex + 1} (acorta la ${frameIndex + 2})"></div>`);
+                  }
+                });
+                stopMotionStripHtml = `<div class="podcast-stop-motion-segments" data-row-id="${escapeHtml(rowId)}" data-scene-duration-ms="${clipEffectiveDurationMs}">${stopMotionParts.join("")}</div>`;
+              }
               const allUniqueProposals = Array.from(new Set([...proposals, activeProposal])).filter(Boolean);
               const hasProposals = allUniqueProposals.length > 0;
               const allRealized = hasProposals && allUniqueProposals.every((p) => resolved.includes(p));
               const hasPending = hasProposals && !allRealized;
               const statusLabel = isGenerating ? generationLabel : (videoSrc ? "Listo" : "no hay video");
               return `
-                <article class="podcast-video-timeline-clip${videoSrc ? " has-video" : ""}${isActive ? " is-active" : ""}${hasTrimMask ? " is-trimmed" : ""}${hasOverlapFade ? " is-overlap-fade" : ""}${hasPending ? " has-pending-proposals" : ""}${allRealized ? " has-all-proposals-realized" : ""}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${effectiveClipZIndex};--trim-mask-left:${trimMaskLeftPct.toFixed(3)}%;--trim-mask-right:${trimMaskRightPct.toFixed(3)}%;--clip-fade-in:${fadeInPx}px;--clip-fade-out:${fadeOutPx}px">
+                <article class="podcast-video-timeline-clip${videoSrc ? " has-video" : ""}${isActive ? " is-active" : ""}${hasTrimMask ? " is-trimmed" : ""}${hasOverlapFade ? " is-overlap-fade" : ""}${hasPending ? " has-pending-proposals" : ""}${allRealized ? " has-all-proposals-realized" : ""}${hasStopMotionSequence ? " has-stop-motion" : ""}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${effectiveClipZIndex};--trim-mask-left:${trimMaskLeftPct.toFixed(3)}%;--trim-mask-right:${trimMaskRightPct.toFixed(3)}%;--clip-fade-in:${fadeInPx}px;--clip-fade-out:${fadeOutPx}px">
                   <button class="podcast-video-clip-handle start" type="button" data-action="timeline-trim-start" data-row-id="${escapeHtml(rowId)}" aria-label="Recortar inicio"></button>
                   <button class="podcast-video-clip-handle end" type="button" data-action="timeline-trim-end" data-row-id="${escapeHtml(rowId)}" aria-label="Recortar final"></button>
                   <div class="podcast-video-clip-body${isGenerating ? " is-generating" : ""}${hasPending ? " has-pending-proposals" : ""}${allRealized ? " has-all-proposals-realized" : ""}" data-action="timeline-drag-clip" data-row-id="${escapeHtml(rowId)}">
@@ -1368,35 +1473,26 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
                       </button>
                       <div class="podcast-video-clip-menu" role="menu" aria-label="Acciones de escena" data-row-id="${escapeHtml(rowId)}">
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena" aria-label="Reproducir escena">
+                          <i class="fas fa-play" aria-hidden="true"></i>
+                        </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-configure-scene-duration" data-row-id="${escapeHtml(rowId)}" title="Configurar duración (solo recortar)" aria-label="Configurar duración">
                           <i class="fas fa-sliders-h" aria-hidden="true"></i>
-                        </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-open-frame-hold-modal" data-row-id="${escapeHtml(rowId)}" title="Congelar frame" aria-label="Congelar frame">
-                          <i class="fas fa-camera" aria-hidden="true"></i>
-                        </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-open-speed-range-modal" data-row-id="${escapeHtml(rowId)}" title="Velocidad por rango" aria-label="Velocidad por rango">
-                          <i class="fas fa-tachometer-alt" aria-hidden="true"></i>
-                        </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="duplicate-row" data-row-id="${escapeHtml(rowId)}" title="Duplicar escena" aria-label="Duplicar escena">
-                          <i class="fas fa-copy" aria-hidden="true"></i>
                         </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="replace-scene-video-from-storage" data-row-id="${escapeHtml(rowId)}" title="Reemplazar video de la escena" aria-label="Reemplazar video de la escena">
                           <i class="fas fa-exchange-alt" aria-hidden="true"></i>
                         </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena" aria-label="Reproducir escena">
-                          <i class="fas fa-play" aria-hidden="true"></i>
-                        </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="publish-scene-to-library" data-row-id="${escapeHtml(rowId)}" title="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}" aria-label="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}">
-                          <i class="fas fa-globe" aria-hidden="true"></i>
-                        </button>
-                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-share-scene-video-link" data-row-id="${escapeHtml(rowId)}" title="Compartir enlace del video de la escena" aria-label="Compartir enlace del video de la escena"${videoSrc ? "" : " disabled"}>
-                          <i class="fas fa-link" aria-hidden="true"></i>
+                        ${isLikelyImageMediaRecord(primarySegment || generatedClip) ? `<button class="row-icon-btn${hasImageWarp ? " is-active" : ""}" type="button" role="menuitem" data-action="timeline-open-image-effects" data-row-id="${escapeHtml(rowId)}" title="Efectos de imagen" aria-label="Efectos de imagen"><i class="fas fa-magic" aria-hidden="true"></i></button>` : ""}
+                        <button class="row-icon-btn${hasImageLayers ? " is-active" : ""}" type="button" role="menuitem" data-action="timeline-open-scene-image-layers" data-row-id="${escapeHtml(rowId)}" title="Añadir imágenes extra a la escena" aria-label="Añadir imágenes extra a la escena"><i class="fas fa-layer-group" aria-hidden="true"></i></button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-open-image-generation" data-row-id="${escapeHtml(rowId)}" title="Crear capas o secuencia desde la referencia" aria-label="Crear capas o secuencia desde la referencia"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-use-reference-image" data-row-id="${escapeHtml(rowId)}" title="${hasReferenceImage ? "Usar imagen de referencia como escena" : "Adjunta una imagen de referencia para usarla como escena"}" aria-label="Usar imagen de referencia como escena"${hasReferenceImage && !isGenerating ? "" : " disabled"}>
+                          <i class="fas fa-image" aria-hidden="true"></i>
                         </button>
                         <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video" aria-label="${videoSrc ? "Regenerar video" : "Generar video"}"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
                           <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}" aria-hidden="true"></i>
                         </button>
-                        <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-regenerate-scene-video-hq" data-row-id="${escapeHtml(rowId)}" title="Regenerar mejorando calidad desde el clip actual" aria-label="Regenerar mejorando calidad"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
-                          <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : "fa-wand-magic-sparkles"}" aria-hidden="true"></i>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="duplicate-row" data-row-id="${escapeHtml(rowId)}" title="Duplicar escena" aria-label="Duplicar escena">
+                          <i class="fas fa-copy" aria-hidden="true"></i>
                         </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-edit-in-scene-text" data-row-id="${escapeHtml(rowId)}" title="${escapeHtml(inSceneText ? `Editar texto dentro del video: ${inSceneText}` : "Agregar texto natural dentro del video")}" aria-label="Editar texto dentro del video">
                           <i class="fas fa-quote-right" aria-hidden="true"></i>
@@ -1409,6 +1505,12 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-edit-stylized-text" data-row-id="${escapeHtml(rowId)}" title="Editar Texto Estilizado" aria-label="Editar Texto Estilizado">
                           <i class="fas fa-font" aria-hidden="true"></i>
+                        </button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="publish-scene-to-library" data-row-id="${escapeHtml(rowId)}" title="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}" aria-label="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}">
+                          <i class="fas fa-globe" aria-hidden="true"></i>
+                        </button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-share-scene-video-link" data-row-id="${escapeHtml(rowId)}" title="Compartir enlace del video de la escena" aria-label="Compartir enlace del video de la escena"${videoSrc ? "" : " disabled"}>
+                          <i class="fas fa-link" aria-hidden="true"></i>
                         </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video" aria-label="Eliminar video"${videoSrc ? "" : " disabled"}>
                           <i class="fas fa-trash" aria-hidden="true"></i>
@@ -1436,8 +1538,16 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                             <span class="podcast-video-generation-cancel"><i class="fas fa-times" aria-hidden="true"></i><span>Cancelar</span></span>
                           </span>`
                         : ""}
-                      ${hasStylizedText ? `<span class="podcast-scene-stylized-text-badge" aria-label="Contiene texto estilizado" title="Contiene texto estilizado">T</span>` : ""}
                     </button>
+                  </div>
+                  <div class="podcast-video-clip-badges" aria-label="Efectos de la escena">
+                    ${hasStylizedText ? `<button type="button" class="podcast-scene-stylized-text-badge" data-action="timeline-edit-stylized-text" data-row-id="${escapeHtml(rowId)}" aria-label="Editar texto estilizado" title="Editar texto estilizado">T</button>` : ""}
+                    ${hasOverlayCard ? `<button type="button" class="podcast-scene-card-badge" data-action="timeline-edit-overlay-card" data-row-id="${escapeHtml(rowId)}" data-card-id="${escapeHtml(cardIdBySceneRowId.get(rowId) || "")}" aria-label="Editar card animada" title="Editar card animada"><i class="fas fa-id-card" aria-hidden="true"></i></button>` : ""}
+                    ${hasImageWarp ? `<button type="button" class="podcast-scene-image-effect-badge" data-action="timeline-edit-image-effects" data-row-id="${escapeHtml(rowId)}" aria-label="Editar efecto de imagen" title="Editar efecto de imagen"><i class="fas fa-magic" aria-hidden="true"></i></button>` : ""}
+                    ${hasImageLayers ? `<button type="button" class="podcast-scene-image-layer-badge" data-action="timeline-open-scene-image-layers" data-row-id="${escapeHtml(rowId)}" aria-label="Editar capas de imagen" title="Editar capas de imagen"><i class="fas fa-layer-group" aria-hidden="true"></i></button>` : ""}
+                    ${hasStopMotionSequence ? `<span class="podcast-scene-stop-motion-badge" aria-label="Stop motion con ${stopMotionSequence.frames.length} fotos" title="Stop motion: arrastra las fotos para reordenar; tira de las divisiones para cambiar su duración">${stopMotionSequence.frames.length} fotos</span>` : ""}
+                  </div>
+                  ${stopMotionStripHtml}
                     ${isGenerating
                       ? `<button class="podcast-video-clip-loading" type="button" data-action="timeline-cancel-scene-video" data-row-id="${escapeHtml(rowId)}" aria-label="Cancelar generación de esta escena" title="Cancelar generación">
                           <span class="podcast-video-scene-loading-ring"></span>
@@ -1445,7 +1555,6 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                           <span class="podcast-video-generation-cancel"><i class="fas fa-times" aria-hidden="true"></i><span>Cancelar</span></span>
                         </button>`
                       : ""}
-                  </div>
                 </article>
               `;
             }).join("")}
@@ -1457,6 +1566,60 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     });
     if (!audioOnlyPodcastMode) {
       timelineTrackBlocks.push(`<div class="podcast-video-track-drop-zone" data-drop-track-index="${trackRows.length}" aria-hidden="true"></div>`);
+    }
+
+    const freeVideoTrack = normalizeFreeVideoTrack(videoCfg?.freeVideoTrack);
+    if (freeVideoTrack.added) {
+      const freeVideoChips = freeVideoTrack.clips.map((clip) => {
+        const durationMs = clip.trimOutMs - clip.trimInMs;
+        const leftPx = Math.max(0, timelineMsToPx(clip.startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const widthPx = Math.max(minClipPx, timelineMsToPx(durationMs, activeSession) - 4);
+        const videoSrc = resolveStorageVideoUrl(clip.downloadUrl || "", clip.storagePath || "", { mimeType: clip.mimeType });
+        const isLoading = clip.isLoading === true;
+        return `<article class="podcast-video-timeline-clip has-video podcast-free-video-chip${isLoading ? " is-loading" : ""}" data-free-video-id="${escapeHtml(clip.id)}" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(clip.name)}${isLoading ? " · Cargando video…" : " · Arrastra para mover o recorta desde los bordes"}">
+          <button class="podcast-video-clip-handle start" type="button" data-free-video-trim="start" aria-label="Recortar inicio de ${escapeHtml(clip.name)}"></button>
+          <div class="podcast-video-clip-body"><div class="podcast-video-clip-actions">${isLoading ? '<span class="podcast-free-chip-spinner" title="Cargando video"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i></span>' : `<button class="row-icon-btn podcast-video-clip-menu-btn" type="button" data-action="free-video-menu" aria-label="Opciones de ${escapeHtml(clip.name)}" aria-haspopup="menu"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></button><div class="podcast-video-clip-menu podcast-free-video-menu" role="menu" hidden><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-play" title="Reproducir"><i class="fas fa-play" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-replace" title="Reemplazar video"><i class="fas fa-exchange-alt" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-duplicate" title="Duplicar clip"><i class="fas fa-copy" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-layout" title="Cambiar encuadre"><i class="fas fa-expand" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-effect" title="Efecto de movimiento: ${escapeHtml(clip.mediaMotionPreset)}"><i class="fas fa-magic" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-share" title="Copiar enlace"><i class="fas fa-link" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" role="menuitem" data-action="free-video-remove" title="Eliminar clip"><i class="fas fa-trash" aria-hidden="true"></i></button></div>`}</div><div class="podcast-video-clip-meta"><strong>${escapeHtml(clip.name)}</strong><span>${isLoading ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Cargando…' : `${(durationMs / 1000).toFixed(1)} s`}</span></div><div class="podcast-video-clip-preview">${isLoading ? '<div class="podcast-free-video-loading-placeholder"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i></div>' : `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous"></video>`}</div></div>
+          <button class="podcast-video-clip-handle end" type="button" data-free-video-trim="end" aria-label="Recortar final de ${escapeHtml(clip.name)}"></button>
+        </article>`;
+      }).join("");
+      timelineTrackBlocks.push(`<section class="podcast-video-track-row" data-track-id="free-video"><div class="podcast-video-track-label"><div class="podcast-track-label-main"><span class="podcast-track-label-text">Video libre</span><button class="row-icon-btn" type="button" data-action="free-video-add" title="Añadir video" aria-label="Añadir video"><i class="fas fa-plus" aria-hidden="true"></i></button></div></div><div class="podcast-video-track-lane podcast-free-video-lane" data-track-id="free-video" title="Suelta aquí archivos de video"${resolveLaneHeightAttr("free-video")}>${freeVideoChips || '<span class="podcast-free-voice-drop-hint podcast-free-video-drop-hint">Suelta video aquí o pulsa +</span>'}</div><button class="podcast-track-lane-resize-handle is-row-resize-handle" type="button" data-action="timeline-resize-track-lane" data-track-id="free-video" aria-label="Redimensionar altura del track de video libre" title="Arrastra para cambiar altura (doble click para restablecer)"></button></section>`);
+    }
+
+    const freeVoiceTrack = normalizeFreeVoiceTrack(videoCfg?.freeVoiceTrack);
+    const isFreeVoiceTrackEnabled = freeVoiceTrack.enabled !== false;
+    const freeVoiceAnalysisBySource = new Map(freeVoiceTrack.clips
+      .filter((clip) => clip.waveform.length || clip.phraseRanges.length || clip.waveformAnalyzed)
+      .map((clip) => [clip.storagePath || clip.downloadUrl, clip]));
+    const freeVoiceSplitButton = document.querySelector("#podcastInspectorSceneToolbar [data-action='free-voice-split-all-silences']");
+    if (freeVoiceSplitButton) freeVoiceSplitButton.hidden = !freeVoiceTrack.clips.length;
+    if (freeVoiceTrack.added) {
+      const freeVoiceChips = freeVoiceTrack.clips.map((clip) => {
+        const durationMs = clip.trimOutMs - clip.trimInMs;
+        const leftPx = Math.max(0, timelineMsToPx(clip.startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const widthPx = Math.max(18, timelineMsToPx(durationMs, activeSession) - 4);
+        const isLoading = clip.isLoading === true;
+        const waveformClip = freeVoiceAnalysisBySource.get(clip.storagePath || clip.downloadUrl) || clip;
+        const waveformPath = buildFreeVoiceWaveformPath(waveformClip.waveform, 0, waveformClip.sourceDurationMs, waveformClip.sourceDurationMs);
+        const waveformLeftPx = -timelineMsToPx(clip.trimInMs, activeSession);
+        const waveformWidthPx = timelineMsToPx(clip.sourceDurationMs, activeSession);
+        const waveform = waveformPath
+          ? `<svg class="podcast-free-voice-waveform" style="left:${waveformLeftPx.toFixed(3)}px;width:${waveformWidthPx.toFixed(3)}px" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="${waveformPath}"></path></svg>`
+          : `<span class="podcast-free-voice-waveform is-empty" aria-hidden="true"></span>`;
+        return `<div class="podcast-montage-audio-chip is-stored podcast-free-voice-chip${!isFreeVoiceTrackEnabled ? " is-track-disabled" : ""}${waveformPath ? " has-waveform" : ""}${widthPx < 78 ? " is-narrow" : ""}${isLoading ? " is-loading" : ""}" data-free-voice-id="${escapeHtml(clip.id)}" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(clip.name)}${!isFreeVoiceTrackEnabled ? " · Track desactivado" : isLoading ? " · Cargando audio…" : " · La forma de onda muestra pausas; pulsa C para cortar o divide el track por silencios >2 s"}">
+        <button class="podcast-video-clip-handle start" type="button" data-free-voice-trim="start" aria-label="Recortar inicio de ${escapeHtml(clip.name)}"></button>
+        ${waveform}<i class="fas ${isLoading ? "fa-spinner fa-spin" : "fa-volume-up"}" aria-hidden="true"></i><span>${escapeHtml(clip.name)}</span>
+        ${isLoading ? '<span class="podcast-free-chip-spinner-label"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Procesando…</span>' : ""}
+        <button class="podcast-montage-audio-chip-speed-btn" type="button" data-action="free-voice-remove" aria-label="Quitar ${escapeHtml(clip.name)} del timeline" title="Quitar clip"><i class="fas fa-times" aria-hidden="true"></i></button>
+        <button class="podcast-video-clip-handle end" type="button" data-free-voice-trim="end" aria-label="Recortar final de ${escapeHtml(clip.name)}"></button>
+      </div>`;
+      }).join("");
+      timelineTrackBlocks.push(`<section class="podcast-video-track-row podcast-montage-audio-subtrack-row${!isFreeVoiceTrackEnabled ? " is-track-disabled" : ""}" data-track-id="free-voice">
+      <div class="podcast-video-track-label is-subtrack"><div class="podcast-track-label-main"><span class="podcast-track-label-text">Voz libre</span>
+        <button class="row-icon-btn" type="button" data-action="free-voice-add" title="Añadir archivo de voz" aria-label="Añadir archivo de voz"><i class="fas fa-plus" aria-hidden="true"></i></button></div>
+        <div class="podcast-track-label-actions"><button class="row-icon-btn" type="button" data-action="free-voice-toggle-track-enabled" title="${isFreeVoiceTrackEnabled ? "Desactivar track" : "Activar track"}" aria-label="${isFreeVoiceTrackEnabled ? "Desactivar track de voz libre" : "Activar track de voz libre"}" aria-pressed="${isFreeVoiceTrackEnabled ? "true" : "false"}"><i class="fas ${isFreeVoiceTrackEnabled ? "fa-eye" : "fa-eye-slash"}" aria-hidden="true"></i></button><button class="row-icon-btn" type="button" data-action="free-voice-delete-track" title="Eliminar track de audio libre" aria-label="Eliminar track de audio libre"><i class="fas fa-trash" aria-hidden="true"></i></button></div></div>
+      <div class="podcast-video-track-lane podcast-montage-audio-lane podcast-free-voice-lane" data-track-id="free-voice" title="Suelta aquí archivos de audio para añadir clips"${resolveLaneHeightAttr("free-voice")}>${freeVoiceChips || '<span class="podcast-free-voice-drop-hint">Suelta audio aquí o pulsa +</span>'}</div>
+      <button class="podcast-track-lane-resize-handle is-row-resize-handle" type="button" data-action="timeline-resize-track-lane" data-track-id="free-voice" aria-label="Redimensionar altura del subtrack de voz libre" title="Arrastra para cambiar altura (doble click para restablecer)"></button>
+    </section>`);
     }
 
     const panelTrack = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
@@ -1558,7 +1721,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const isSelected = podcastVideoState.timelineAudioSelection.uploadedKeys.has(selectionKey);
         const displayName = String(safeTrack?.name || safeTrack?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`;
         return `
-          <div class="podcast-audio-timeline-chip has-audio${fadeInMs > 0 ? " has-fadein" : ""}${fadeOutMs > 0 ? " has-fadeout" : ""}${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}${isSelected ? " is-selected" : ""}" data-action="timeline-select-audio-loop" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;--audio-fadein-width:${fadeInWidthPx.toFixed(3)}px;--audio-fadein-node-left:${fadeInNodeLeftPx.toFixed(3)}px;--audio-fadeout-width:${fadeOutWidthPx.toFixed(3)}px;--audio-fadeout-node-left:${fadeOutNodeLeftPx.toFixed(3)}px" title="${escapeHtml(title)}">
+          <div class="podcast-audio-timeline-chip has-audio${!isTrackEnabled ? " is-track-disabled" : ""}${fadeInMs > 0 ? " has-fadein" : ""}${fadeOutMs > 0 ? " has-fadeout" : ""}${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}${isSelected ? " is-selected" : ""}" data-action="timeline-select-audio-loop" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;--audio-fadein-width:${fadeInWidthPx.toFixed(3)}px;--audio-fadein-node-left:${fadeInNodeLeftPx.toFixed(3)}px;--audio-fadeout-width:${fadeOutWidthPx.toFixed(3)}px;--audio-fadeout-node-left:${fadeOutNodeLeftPx.toFixed(3)}px" title="${escapeHtml(title)}${!isTrackEnabled ? " · Track desactivado" : ""}">
             <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" data-track-kind="uploaded" aria-label="Recortar inicio de audio"></button>
             <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" data-track-kind="uploaded" aria-label="Recortar final de audio"></button>
             <button class="podcast-audio-fade-handle podcast-audio-fadein-handle" type="button" data-action="timeline-audio-fadein-handle" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" data-track-kind="uploaded" aria-label="Arrastra para ajustar el fade in" title="Arrastra para ajustar el fade in">
@@ -1572,7 +1735,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         `;
       }).join("");
       return `
-        <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
+        <section class="podcast-video-track-row podcast-audio-track-row is-locked${!isTrackEnabled ? " is-track-disabled" : ""}" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
           <div class="podcast-video-track-label is-locked is-audio-track">
             <div class="podcast-track-label-main">
               <i class="fas fa-music" aria-hidden="true"></i>
@@ -1770,7 +1933,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const mode = getTimelineViewMode(activeSession);
     const totalMs = options?.totalMs || Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
     const cursorMs = Math.max(0, Math.min(totalMs, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0)));
-    const entries = buildTimelineRuntimeEntries(activeSession);
+    const entries = Array.isArray(options?.entries)
+      ? options.entries
+      : buildTimelineRuntimeEntries(activeSession);
     const directEntry = resolveTimelineEntryAtMs(entries, cursorMs, {
       toleranceMs: TIMELINE_LOOKUP_TOLERANCE_MS
     });
@@ -1959,6 +2124,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     loadTimelinePreviewImage,
     attachPodcastTimelinePreviewLoading,
     syncPodcastTimelineLaneOffsetFromDom,
+    syncTimelineCanvasWidth,
     getPodcastTimelineClipMenuPortal,
     closePodcastTimelineClipMenu,
     renderPodcastVideoTimeline,
@@ -1976,4 +2142,4 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     cancelActiveDrag
   };
 }
-import { getStoredTimelineRowHeights } from "./podcaster-timeline-row-heights.js";
+import { getStoredTimelineRowHeights, setStoredTimelineRowHeight } from "./podcaster-timeline-row-heights.js";

@@ -17,6 +17,59 @@ export function getVisibleUserPrompt(message = {}) {
   return localizedMatch?.[1]?.trim() || prompt;
 }
 
+export function formatContentWithTables(text = "") {
+  if (!text) return "";
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  let currentTableLines = [];
+
+  const flushTable = () => {
+    if (currentTableLines.length >= 2) {
+      const matrix = currentTableLines.map((l) =>
+        l.split("|").slice(1, -1).map((c) => c.trim())
+      );
+      if (matrix.length >= 2) {
+        const header = matrix[0];
+        const dataRows = matrix.slice(2);
+        const tableHtml = `
+          <div class="ic-table-responsive">
+            <table class="ic-markdown-table">
+              <thead>
+                <tr>${header.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr>
+              </thead>
+              <tbody>
+                ${dataRows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+        blocks.push(tableHtml);
+        currentTableLines = [];
+        return;
+      }
+    }
+    if (currentTableLines.length > 0) {
+      blocks.push(`<p>${currentTableLines.map(escapeHtml).join("<br>")}</p>`);
+      currentTableLines = [];
+    }
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      currentTableLines.push(trimmed);
+    } else {
+      flushTable();
+      if (trimmed.length > 0) {
+        blocks.push(`<p>${escapeHtml(trimmed)}</p>`);
+      }
+    }
+  });
+  flushTable();
+
+  return blocks.length ? blocks.join("") : `<p>${escapeHtml(text)}</p>`;
+}
+
 function renderUserMessage(message = {}) {
   const allAttachments = Array.isArray(message.attachments) ? message.attachments : [];
   const isLocalizedEdit = Boolean(message?.requestPrompt)
@@ -33,7 +86,7 @@ function renderUserMessage(message = {}) {
         <time>${escapeHtml(formatRelativeDate(message.createdAt))}</time>
       </div>
       <div class="ic-message__body">
-        <p>${escapeHtml(visiblePrompt)}</p>
+        ${formatContentWithTables(visiblePrompt)}
         ${attachments.length ? `<div class="ic-chip-row">${attachments.map(renderAttachmentChip).join("")}</div>` : ""}
       </div>
     </article>
@@ -93,17 +146,26 @@ function renderAssistantMessage(message = {}) {
   return `
     <article class="ic-message ic-message--assistant ${isPending ? "ic-message--pending" : ""}" data-message-id="${escapeHtml(message.id)}">
       <div class="ic-message__meta">
-        <span>Gemini</span>
+        <span>Lucy Studio</span>
         <time>${escapeHtml(formatRelativeDate(message.createdAt))}</time>
       </div>
       <div class="ic-message__body">
         ${isPending ? `
-          <div class="ic-pending-row" aria-live="polite" aria-busy="true">
-            <span class="ic-spinner" aria-hidden="true"></span>
-            <span>Generando imagen...</span>
+          <div class="ic-pending-preview-card" aria-live="polite" aria-busy="true">
+            <div class="ic-pending-shimmer-sweep" aria-hidden="true"></div>
+            <div class="ic-pending-stage">
+              <div class="ic-pending-thumb-wrap">
+                <img src="imagecreator/lucyStudio1.png" alt="Generando..." class="ic-pending-logo">
+                <div class="ic-pending-orbital-ring" aria-hidden="true"></div>
+              </div>
+              <div class="ic-pending-meta">
+                <strong class="ic-pending-title">Creando imagen con Lucy Studio...</strong>
+                <span class="ic-pending-prompt">${escapeHtml(message.prompt || "Generando arte visual en alta resolución...")}</span>
+              </div>
+            </div>
           </div>
         ` : ""}
-        ${note ? `<p class="ic-message__note">${escapeHtml(note)}</p>` : ""}
+        ${message.html ? message.html : (note ? `<p class="ic-message__note">${escapeHtml(note)}</p>` : "")}
         ${error ? `<p class="ic-message__error">${escapeHtml(error)}</p>` : ""}
       </div>
     </article>
@@ -118,7 +180,17 @@ export function renderChatFeed(container, session = null) {
       <section class="ic-empty-state">
         <div class="ic-empty-state__icon"><i class="fas fa-images"></i></div>
         <h3>${escapeHtml(session?.title || IMAGE_CREATOR_SESSION_TITLE)}</h3>
-        <p>Describe una imagen, sube referencias y usa Gemini desde un chat con sesiones persistidas.</p>
+        <p>Describe una imagen o crea guiones educativos con imágenes de referencia para Podcaster.</p>
+        <div class="ic-empty-state__suggestions">
+          <button type="button" class="ic-empty-suggestion" data-empty-prompt="Crea un guion educativo para Podcaster sobre el ciclo del agua">
+            <i class="fa-solid fa-clapperboard"></i>
+            <span>Guion de Video para Podcaster</span>
+          </button>
+          <button type="button" class="ic-empty-suggestion" data-empty-prompt="Ilustración 3D de un laboratorio de ciencias futurista">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>Ilustración 3D</span>
+          </button>
+        </div>
       </section>
     `;
     return;

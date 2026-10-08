@@ -78,6 +78,9 @@ export function buildGeminiImagePayload({ mode = "generate", prompt = "", option
   if (supportsImageSize(options?.model)) {
     imageConfig.imageSize = String(options?.imageSize || "1K").trim() || "1K";
   }
+  if (options?.personGeneration) {
+    imageConfig.personGeneration = String(options.personGeneration).trim();
+  }
 
   return {
     contents: [
